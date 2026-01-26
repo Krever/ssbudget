@@ -9,25 +9,25 @@ Development is split into phases. Each phase should result in a usable increment
 ## Phase 1: Foundation & Skeleton
 **Goal**: Working cross-build with backend serving static frontend, Vite dev setup.
 
-- [ ] **1.1 Multi-Module SBT Build**
+- [x] **1.1 Multi-Module SBT Build**
   - Three projects: `shared`, `backend`, `frontend`
   - Cross-compilation setup for shared code
   - ES Module output for Scala.js (required for Vite)
   - Dependencies: cats-effect, http4s, tapir, circe, Laminar
 
-- [ ] **1.2 Vite + Scala.js Integration**
+- [x] **1.2 Vite + Scala.js Integration**
   - `frontend/vite.config.mjs` with vite-plugin-scalajs
   - `frontend/package.json` with Bulma, Vite deps
   - `frontend/index.html` entry point
   - Proxy `/api` to backend in dev mode
 
-- [ ] **1.3 Basic Backend**
+- [x] **1.3 Basic Backend**
   - http4s server with tapir
   - Health check endpoint (`GET /api/health`)
   - Static file serving for production (bundled frontend)
   - Configuration via environment variables
 
-- [ ] **1.4 Basic Frontend**
+- [x] **1.4 Basic Frontend**
   - Laminar app shell with `@JSExportTopLevel`
   - Bulma CSS integration
   - Simple page showing "Hello" + health check result
@@ -290,4 +290,5 @@ Development is split into phases. Each phase should result in a usable increment
 | Session | Date       | Phase | Items Completed  | Notes                                  |
 |---------|------------|-------|------------------|----------------------------------------|
 | 0       | 2026-01-26 | -     | Initial planning | Created CLAUDE.md, ROADMAP.md, spec.md |
+| 1       | 2026-01-26 | 1     | 1.1, 1.2, 1.3, 1.4 | Foundation complete, Scala 3.5.2 due to JS bug |
 

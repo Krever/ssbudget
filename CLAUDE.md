@@ -37,7 +37,7 @@ Where `Predicted Expenses = Sum(unpaid planned estimates) + Scaled(estimated exp
 
 | Layer       | Technology                               |
 |-------------|------------------------------------------|
-| Language    | Scala 3.8.1                              |
+| Language    | Scala 3.5.2                              |
 | Backend     | cats-effect, tapir, http4s               |
 | Frontend    | Laminar (Scala.js SPA)                   |
 | API         | tapir (shared endpoint definitions)      |
@@ -224,6 +224,12 @@ This project uses incremental development across multiple Claude sessions:
 5. Implement
 6. Update session log and roadmap status
 
+## Code Style
+
+**MANDATORY: Always use curly braces syntax. Never use indentation-based syntax (Scala 3 braceless style).**
+
+**MANDATORY: Always run `sbt scalafmtAll` before finishing work to format all Scala code.**
+
 ## Key Decisions Log
 
 | Decision           | Choice                    | Rationale                                        |
@@ -235,3 +241,4 @@ This project uses incremental development across multiple Claude sessions:
 | Historical data    | Per-update                | Track each balance update with timestamp         |
 | Expense recurrence | Monthly only              | Keep simple                                      |
 | HTTP client        | tapir-sttp-client         | Type-safe, shares endpoint defs with backend     |
+| Scala version      | 3.5.2                     | Scala 3.8.1 has Scala.js compiler bug (js.async) |
