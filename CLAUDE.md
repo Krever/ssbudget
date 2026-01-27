@@ -230,6 +230,11 @@ This project uses incremental development across multiple Claude sessions:
 
 **MANDATORY: Always run `sbt scalafmtAll` before finishing work to format all Scala code.**
 
+**circe codecs**: Use `derives Codec.AsObject` for case classes. Only use manual `Encoder`/`Decoder` for:
+- AnyVal wrapper types (encode as the underlying type)
+- Enums with custom string representations
+- Types like `LocalDate`, `Instant` that need custom serialization
+
 ## Key Decisions Log
 
 | Decision           | Choice                    | Rationale                                        |

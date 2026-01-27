@@ -45,3 +45,6 @@ build/
 
 ### Node.js ###
 node_modules/
+
+### SSBudget ###
+data/

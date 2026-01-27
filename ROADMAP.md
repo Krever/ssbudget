@@ -38,23 +38,19 @@ Development is split into phases. Each phase should result in a usable increment
 ## Phase 2: Data Layer
 **Goal**: SQLite database with migrations, core domain models.
 
-- [ ] **2.1 Database Setup**
+- [x] **2.1 Database Setup**
   - SQLite integration (doobie or skunk)
   - Flyway migrations plugin
   - Connection management with cats-effect Resource
 
-- [ ] **2.2 Core Schema (Migrations)**
-  - `V1__accounts.sql` - accounts table
-  - `V2__expense_definitions.sql` - expense definitions
-  - `V3__periods.sql` - periods table
-  - `V4__expense_records.sql` - expense records
-  - `V5__balance_snapshots.sql` - balance snapshots
-  - `V6__exchange_rates.sql` - exchange rates
+- [x] **2.2 Core Schema (Migrations)**
+  - `V1__initial_schema.sql` - all tables in single migration
+  - accounts, expense_definitions, periods, expense_records, balance_snapshots, exchange_rates
 
-- [ ] **2.3 Repository Layer**
+- [x] **2.3 Repository Layer**
   - Type-safe queries with doobie
-  - Repository traits in shared, implementations in backend
-  - CRUD for all entities
+  - Repository traits and implementations in backend
+  - CRUD for all entities + specialized queries
 
 ---
 
@@ -291,4 +287,5 @@ Development is split into phases. Each phase should result in a usable increment
 |---------|------------|-------|------------------|----------------------------------------|
 | 0       | 2026-01-26 | -     | Initial planning | Created CLAUDE.md, ROADMAP.md, spec.md |
 | 1       | 2026-01-26 | 1     | 1.1, 1.2, 1.3, 1.4 | Foundation complete, Scala 3.5.2 due to JS bug |
+| 2       | 2026-01-27 | 2     | 2.1, 2.2, 2.3    | Data layer complete with doobie, flyway, scalatest, 34 tests |
 
