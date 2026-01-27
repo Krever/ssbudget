@@ -258,3 +258,35 @@ This project uses incremental development across multiple Claude sessions:
 | HTTP client        | tapir-sttp-client         | Type-safe, shares endpoint defs with backend     |
 | Scala version      | 3.5.2                     | Scala 3.8.1 has Scala.js compiler bug (js.async) |
 | UI philosophy      | Spreadsheet-like          | Concise, direct edit, minimal clicks             |
+
+## Laminar/Airstream Gotchas
+
+**Signal combination**: When combining 3+ signals, use chained `combineWith` instead of `Signal.combine`:
+
+```scala
+// DON'T - Signal.combine with 3+ signals fails silently (pattern match doesn't work)
+Signal.combine(sig1, sig2, sig3, sig4).map { case (a, b, c, d) => ... }
+
+// DO - Use chained combineWith (tuplez library flattens to flat tuple)
+sig1.combineWith(sig2).combineWith(sig3).combineWith(sig4).map { case (a, b, c, d) => ... }
+```
+
+Note: `Signal.combine` with exactly 2 signals works fine.
+
+**ZoneId.systemDefault() in Scala.js**: `ZoneId.systemDefault()` fails silently without the `scala-java-time-tzdb` dependency. If an object has `ZoneId.systemDefault()` in its static initialization, any call to that object (even unrelated methods) will fail silently.
+
+```scala
+// DON'T - causes entire object to fail in Scala.js
+object Formatting {
+  private val zone = ZoneId.systemDefault()  // This breaks everything!
+  def formatMoney(cents: Long, currency: Currency): String = ...
+}
+
+// DO - use fixed timezone
+object Formatting {
+  private val zone = ZoneId.of("UTC")  // This works
+  def formatMoney(cents: Long, currency: Currency): String = ...
+}
+```
+
+If you need system timezone support, add `scala-java-time-tzdb` to your dependencies.

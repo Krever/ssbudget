@@ -11,11 +11,22 @@ val circeVersion   = "0.14.10"
 val doobieVersion  = "1.0.0-RC6"
 
 lazy val root = (project in file("."))
-  .aggregate(shared.jvm, shared.js, backend, frontend)
+  .aggregate(shared.jvm, shared.js, backend, frontend, e2e)
   .settings(
     name         := "ssbudget",
     publish      := {},
     publishLocal := {}
+  )
+
+lazy val e2e = (project in file("e2e"))
+  .settings(
+    name := "e2e",
+    libraryDependencies ++= Seq(
+      "org.scalatest"          %% "scalatest"       % "3.2.19" % Test,
+      "org.seleniumhq.selenium" % "selenium-java"   % "4.27.0" % Test,
+      "io.github.bonigarcia"    % "webdrivermanager" % "5.9.2" % Test
+    ),
+    Test / fork := true
   )
 
 lazy val shared = crossProject(JSPlatform, JVMPlatform)
@@ -67,6 +78,7 @@ lazy val frontend = (project in file("frontend"))
     scalaJSUseMainModuleInitializer := true,
     libraryDependencies ++= Seq(
       "com.raquo"                     %%% "laminar"           % "17.2.0",
+      "com.raquo"                     %%% "waypoint"          % "10.0.0-M1",
       "com.softwaremill.sttp.tapir"   %%% "tapir-sttp-client" % tapirVersion,
       "com.softwaremill.sttp.client3" %%% "core"              % "3.10.2",
       "io.circe"                      %%% "circe-generic"     % circeVersion,

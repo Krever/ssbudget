@@ -6,20 +6,25 @@ import ssbudget.shared.json.{EnumCodec, StringId}
 final case class ExpenseDefId(value: String) extends AnyVal
 object ExpenseDefId                          extends StringId[ExpenseDefId]
 
-enum ExpenseType {
-  case Planned, Estimated
+enum BudgetItemType {
+  case PlannedExpense, EstimatedExpense, PlannedIncome
 }
 
-object ExpenseType {
-  given Codec[ExpenseType] = EnumCodec(
-    ExpenseType.values,
+object BudgetItemType {
+  given Codec[BudgetItemType] = EnumCodec(
+    BudgetItemType.values,
     {
-      case Planned   => "planned"
-      case Estimated => "estimated"
+      case PlannedExpense   => "planned_expense"
+      case EstimatedExpense => "estimated_expense"
+      case PlannedIncome    => "planned_income"
     },
-    "expense type",
+    "budget item type",
   )
 }
+
+// Keep ExpenseType as alias for compatibility during transition
+type ExpenseType = BudgetItemType
+val ExpenseType = BudgetItemType
 
 enum EstimateMode {
   case Fixed, LastMonth, Average
@@ -37,11 +42,14 @@ object EstimateMode {
   )
 }
 
-final case class ExpenseDefinition(
+final case class BudgetItemDefinition(
     id: ExpenseDefId,
     name: String,
-    expenseType: ExpenseType,
+    itemType: BudgetItemType,
     estimateMode: EstimateMode,
     fixedEstimate: Option[Long], // in cents, only for Fixed mode
-    includeInBalance: Boolean,
 ) derives Codec.AsObject
+
+// Keep ExpenseDefinition as alias for compatibility
+type ExpenseDefinition = BudgetItemDefinition
+val ExpenseDefinition = BudgetItemDefinition
