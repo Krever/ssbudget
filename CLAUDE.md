@@ -4,6 +4,16 @@
 
 Personal budget tracker for tracking monthly expenses, bank balances, and calculating available spending money. Internet-facing with passkey authentication (no user management).
 
+## UI Design Principles
+
+**Spreadsheet-like efficiency** - The UI should feel like a well-designed spreadsheet:
+- **Concise**: Maximum information density, minimal chrome
+- **Direct manipulation**: Edit in place, no unnecessary modals or multi-step wizards. But explicit submission is ok when needed
+- **Minimal clicks**: Common actions (update balance, mark paid) should be 1-2 clicks
+- **Scannable**: Numbers aligned, status visible at a glance
+
+Think "Google Sheets for personal budget" not "enterprise dashboard with cards everywhere".
+
 ## Core Concepts
 
 ### Period
@@ -247,3 +257,4 @@ This project uses incremental development across multiple Claude sessions:
 | Expense recurrence | Monthly only              | Keep simple                                      |
 | HTTP client        | tapir-sttp-client         | Type-safe, shares endpoint defs with backend     |
 | Scala version      | 3.5.2                     | Scala 3.8.1 has Scala.js compiler bug (js.async) |
+| UI philosophy      | Spreadsheet-like          | Concise, direct edit, minimal clicks             |
