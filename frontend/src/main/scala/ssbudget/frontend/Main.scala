@@ -27,14 +27,17 @@ object Main {
       div(
         cls := "container mt-5",
         div(
-          cls := "box",
-          h1(cls := "title", "SSBudget"),
-          p(
-            cls  := "subtitle",
-            "Health Status: ",
-            span(
-              cls := "tag is-info",
-              child.text <-- healthStatus.signal,
+          cls := "card",
+          div(
+            cls := "card-body",
+            h1("SSBudget"),
+            p(
+              cls := "lead",
+              "Health Status: ",
+              span(
+                cls := "badge text-bg-info",
+                child.text <-- healthStatus.signal,
+              ),
             ),
           ),
         ),

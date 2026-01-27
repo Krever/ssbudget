@@ -43,7 +43,7 @@ Where `Predicted Expenses = Sum(unpaid planned estimates) + Scaled(estimated exp
 | API         | tapir (shared endpoint definitions)      |
 | Database    | SQLite + Flyway migrations               |
 | JSON        | circe                                    |
-| CSS         | Bulma (CSS-only)                         |
+| CSS         | Bootstrap 5 (CSS-only)                   |
 | Bundler     | Vite + vite-plugin-scalajs               |
 | Auth        | Passkeys (WebAuthn) via java-webauthn-server |
 | Deployment  | Docker + fly.io                          |
@@ -240,7 +240,7 @@ This project uses incremental development across multiple Claude sessions:
 | Decision           | Choice                    | Rationale                                        |
 |--------------------|---------------------------|--------------------------------------------------|
 | Database           | SQLite + Flyway           | Simple, file-based, migrations built-in          |
-| CSS Framework      | Bulma                     | Cleaner classes, lighter, no JS needed           |
+| CSS Framework      | Bootstrap 5               | Industry standard, extensive components, good docs |
 | Auth               | Passkeys (WebAuthn)       | Modern, passwordless, secure, no passwords to manage |
 | Bundler            | Vite + vite-plugin-scalajs| Fast dev, HMR, proven in workflow4s              |
 | Historical data    | Per-update                | Track each balance update with timestamp         |
