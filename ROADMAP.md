@@ -4,6 +4,8 @@
 
 Development is split into phases. Each phase should result in a usable increment. Sessions pick items from the current phase and implement them fully.
 
+**UI-Driven Approach**: Since this is a single-purpose personal app, the UI drives API design. We build screens first with mock data, then implement exactly the API endpoints and business logic each screen needs. This avoids over-engineering and ensures the backend serves the frontend's actual requirements.
+
 ---
 
 ## Phase 1: Foundation & Skeleton
@@ -17,7 +19,7 @@ Development is split into phases. Each phase should result in a usable increment
 
 - [x] **1.2 Vite + Scala.js Integration**
   - `frontend/vite.config.mjs` with vite-plugin-scalajs
-  - `frontend/package.json` with Bulma, Vite deps
+  - `frontend/package.json` with Bootstrap, Vite deps
   - `frontend/index.html` entry point
   - Proxy `/api` to backend in dev mode
 
@@ -29,7 +31,7 @@ Development is split into phases. Each phase should result in a usable increment
 
 - [x] **1.4 Basic Frontend**
   - Laminar app shell with `@JSExportTopLevel`
-  - Bulma CSS integration
+  - Bootstrap CSS integration
   - Simple page showing "Hello" + health check result
   - Verify hot reload works
 
@@ -54,212 +56,202 @@ Development is split into phases. Each phase should result in a usable increment
 
 ---
 
-## Phase 3: Core Business Logic
-**Goal**: Budget calculation engine, tested independently.
+## Phase 3: Frontend - Core UI
+**Goal**: Build UI screens with mock data. Let the UI drive API requirements.
 
-- [ ] **3.1 Period Management**
-  - Start new period (closes previous)
-  - Get current period
-  - List period history
+*Strategy*: Each screen starts with hardcoded/mock data. As screens mature, we identify exactly what API calls and business logic they need. This ensures we only build backend functionality that the UI actually requires.
 
-- [ ] **3.2 Balance Calculation**
-  - Sum balances across accounts
-  - EUR conversion with exchange rates
-  - Total balance in PLN
+- [ ] **3.1 Layout & Navigation**
+  - App shell with Bootstrap navbar
+  - Dashboard page (placeholder)
+  - Expenses page (placeholder)
+  - Accounts page (placeholder)
+  - Client-side routing (Waypoint or manual)
 
-- [ ] **3.3 Expense Prediction**
-  - Planned expenses: sum unpaid estimates
-  - Estimated expenses: scale by remaining days
-  - Estimate modes: fixed, lastMonth, average
-  - Toggle inclusion for estimated expenses
+- [ ] **3.2 Dashboard**
+  - Current balance display (big number)
+  - Free money / daily budget
+  - Days remaining in period
+  - Quick actions (update balance, start period)
+  - *Mock*: hardcoded summary data
 
-- [ ] **3.4 Budget Summary**
-  - Free money = balance - predicted
-  - Daily budget = free money / days remaining
-  - Summary data structure for API/notifications
+- [ ] **3.3 Expense Management**
+  - List expense definitions (planned + estimated)
+  - Add/edit expense definition modal
+  - Mark expense as paid (for current period)
+  - Toggle estimated expense inclusion
+  - *Mock*: hardcoded expense list
+
+- [ ] **3.4 Account Management**
+  - List accounts with latest balance
+  - Add/edit account
+  - Record new balance snapshot
+  - *Mock*: hardcoded account list
+
+- [ ] **3.5 Period Management**
+  - Current period info
+  - "Start new period" button
+  - Period history list
+  - *Mock*: hardcoded period data
 
 ---
 
-## Phase 4: Authentication (Passkeys)
+## Phase 4: API & Business Logic
+**Goal**: Implement API endpoints and calculations driven by UI needs.
+
+*Strategy*: For each UI screen, define the tapir endpoints it needs, implement backend handlers, and wire up the frontend. Business logic (calculations, period management) is implemented as needed to support the API.
+
+- [ ] **4.1 Frontend HTTP Client Setup**
+  - tapir-sttp-client integration
+  - API service layer pattern
+  - Error handling utilities
+
+- [ ] **4.2 Account & Balance API**
+  - Account CRUD endpoints
+  - Balance snapshot recording
+  - Sum balances across accounts (with EUR conversion)
+  - Wire to Account Management UI
+
+- [ ] **4.3 Expense API**
+  - Expense definition CRUD endpoints
+  - Expense payment recording
+  - Expense prediction calculations (unpaid planned + scaled estimated)
+  - Wire to Expense Management UI
+
+- [ ] **4.4 Period API**
+  - Period management endpoints (start, current, list)
+  - Period state transitions
+  - Wire to Period Management UI
+
+- [ ] **4.5 Dashboard Summary API**
+  - Budget summary endpoint
+  - Free money calculation
+  - Daily budget calculation
+  - Wire to Dashboard UI
+
+---
+
+## Phase 5: Authentication (Passkeys)
 **Goal**: WebAuthn passkey authentication protecting all routes.
 
-- [ ] **4.1 Backend WebAuthn Setup**
+- [ ] **5.1 Backend WebAuthn Setup**
   - Add java-webauthn-server dependency
-  - Credential storage schema (`V7__passkey_credentials.sql`)
+  - Credential storage schema
   - RelyingParty configuration
 
-- [ ] **4.2 Registration Flow**
+- [ ] **5.2 Registration Flow**
   - `/api/auth/register/start` - generate challenge
   - `/api/auth/register/finish` - verify and store credential
   - First-time setup flow (no existing credentials)
 
-- [ ] **4.3 Authentication Flow**
+- [ ] **5.3 Authentication Flow**
   - `/api/auth/login/start` - generate challenge
   - `/api/auth/login/finish` - verify credential
   - Session token generation (JWT or simple token)
 
-- [ ] **4.4 Frontend Auth Integration**
+- [ ] **5.4 Frontend Auth Integration**
   - WebAuthn browser API calls
   - Login page component
   - Registration page component
   - Auth state management
   - Protected route wrapper
 
-- [ ] **4.5 Middleware & Session**
+- [ ] **5.5 Middleware & Session**
   - Auth middleware for protected endpoints
   - Session cookie or Authorization header
   - Logout endpoint
 
 ---
 
-## Phase 5: API Layer
-**Goal**: Full REST API with tapir, shared between frontend and backend.
-
-- [ ] **5.1 Shared Endpoint Definitions**
-  - Expense definition CRUD endpoints
-  - Account CRUD endpoints
-  - Period management endpoints
-  - Balance recording endpoint
-  - Expense payment recording endpoint
-  - Summary endpoint
-
-- [ ] **5.2 Backend Implementation**
-  - Wire endpoints to services
-  - Error handling with proper HTTP codes
-  - Input validation
-
-- [ ] **5.3 Frontend HTTP Client**
-  - tapir-sttp-client setup
-  - API service layer
-  - Error handling
-
----
-
-## Phase 6: Frontend - Core UI
-**Goal**: Basic functional UI for all operations.
-
-- [ ] **6.1 Layout & Navigation**
-  - App shell with Bulma navbar
-  - Dashboard page
-  - Expenses page
-  - Accounts page
-  - Settings page
-  - Client-side routing (Waypoint or manual)
-
-- [ ] **6.2 Dashboard**
-  - Current balance display (big number)
-  - Free money / daily budget
-  - Days remaining in period
-  - Quick actions (update balance, start period)
-
-- [ ] **6.3 Expense Management**
-  - List expense definitions (planned + estimated)
-  - Add/edit expense definition modal
-  - Mark expense as paid (for current period)
-  - Toggle estimated expense inclusion
-
-- [ ] **6.4 Account Management**
-  - List accounts with latest balance
-  - Add/edit account
-  - Record new balance snapshot
-  - Balance history view
-
-- [ ] **6.5 Period Management**
-  - Current period info
-  - "Start new period" button
-  - Period history list
-
----
-
-## Phase 7: Notifications & Summary
+## Phase 6: Notifications & Summary
 **Goal**: Summary sharing functionality.
 
-- [ ] **7.1 Summary Formatting**
+- [ ] **6.1 Summary Formatting**
   - Text format for clipboard/messaging
   - Configurable template (optional)
 
-- [ ] **7.2 Copy to Clipboard**
+- [ ] **6.2 Copy to Clipboard**
   - Button on dashboard
   - Visual feedback (toast/notification)
 
-- [ ] **7.3 WhatsApp Integration**
+- [ ] **6.3 WhatsApp Integration**
   - Research: WhatsApp Business API vs Twilio vs wa.me links
   - Implement chosen approach
   - Recipient configuration in settings
 
 ---
 
-## Phase 8: forms4s-laminar Integration
+## Phase 7: forms4s-laminar Integration
 **Goal**: Build Laminar renderer for forms4s, refactor app to use it.
 
-- [ ] **8.1 Laminar Module Setup**
+- [ ] **7.1 Laminar Module Setup**
   - `forms4s-laminar` submodule
   - Dependency on forms4s-core
 
-- [ ] **8.2 Form Renderer**
+- [ ] **7.2 Form Renderer**
   - FormRenderer trait for Laminar
   - Basic elements: text, number, select, checkbox
-  - Bulma styling
+  - Bootstrap styling
   - Validation display
 
-- [ ] **8.3 Table Renderer**
+- [ ] **7.3 Table Renderer**
   - TableRenderer trait for Laminar
   - Column rendering
   - Filtering UI
   - Sorting UI
   - Pagination
 
-- [ ] **8.4 Refactor App**
+- [ ] **7.4 Refactor App**
   - Replace manual forms with forms4s
   - Replace manual tables with forms4s datatables
   - Extract reusable patterns
 
 ---
 
-## Phase 9: Polish & Extras
+## Phase 8: Polish & Extras
 **Goal**: Quality of life improvements.
 
-- [ ] **9.1 Exchange Rate API**
+- [ ] **8.1 Exchange Rate API**
   - Integrate external API (exchangerate-api.com or similar)
   - Manual refresh button
   - Display last updated time
 
-- [ ] **9.2 Historical Data**
+- [ ] **8.2 Historical Data**
   - View expense history per definition
   - Average calculations display
   - Import from CSV/JSON (low priority)
 
-- [ ] **9.3 Mobile Optimization**
+- [ ] **8.3 Mobile Optimization**
   - Responsive design review
   - Touch-friendly controls
   - PWA manifest (optional)
 
-- [ ] **9.4 Data Export**
+- [ ] **8.4 Data Export**
   - Export to CSV
   - Backup/restore functionality
 
 ---
 
-## Phase 10: Production Hardening
+## Phase 9: Production Hardening
 **Goal**: Ready for daily use.
 
-- [ ] **10.1 Docker & Deployment**
+- [ ] **9.1 Docker & Deployment**
   - Multi-stage Dockerfile
   - fly.io configuration (fly.toml)
   - Environment variable handling
   - SQLite volume persistence
 
-- [ ] **10.2 Error Handling**
+- [ ] **9.2 Error Handling**
   - Graceful error display in UI
   - Retry logic for network errors
   - Offline indicator
 
-- [ ] **10.3 Logging & Monitoring**
+- [ ] **9.3 Logging & Monitoring**
   - Structured logging (log4cats)
   - Health checks for fly.io
   - Basic metrics (optional)
 
-- [ ] **10.4 Security Review**
+- [ ] **9.4 Security Review**
   - HTTPS enforcement
   - CORS configuration
   - Input validation audit
