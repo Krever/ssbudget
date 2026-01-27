@@ -61,34 +61,34 @@ Development is split into phases. Each phase should result in a usable increment
 
 *Strategy*: Each screen starts with hardcoded/mock data. As screens mature, we identify exactly what API calls and business logic they need. This ensures we only build backend functionality that the UI actually requires.
 
-- [ ] **3.1 Layout & Navigation**
+- [x] **3.1 Layout & Navigation**
   - App shell with Bootstrap navbar
   - Dashboard page (placeholder)
   - Expenses page (placeholder)
   - Accounts page (placeholder)
   - Client-side routing (Waypoint or manual)
 
-- [ ] **3.2 Dashboard**
+- [x] **3.2 Dashboard**
   - Current balance display (big number)
   - Free money / daily budget
   - Days remaining in period
   - Quick actions (update balance, start period)
   - *Mock*: hardcoded summary data
 
-- [ ] **3.3 Expense Management**
+- [x] **3.3 Expense Management**
   - List expense definitions (planned + estimated)
   - Add/edit expense definition modal
   - Mark expense as paid (for current period)
   - Toggle estimated expense inclusion
   - *Mock*: hardcoded expense list
 
-- [ ] **3.4 Account Management**
+- [x] **3.4 Account Management**
   - List accounts with latest balance
   - Add/edit account
   - Record new balance snapshot
   - *Mock*: hardcoded account list
 
-- [ ] **3.5 Period Management**
+- [x] **3.5 Period Management**
   - Current period info
   - "Start new period" button
   - Period history list
@@ -166,11 +166,11 @@ Development is split into phases. Each phase should result in a usable increment
 ## Phase 6: Notifications & Summary
 **Goal**: Summary sharing functionality.
 
-- [ ] **6.1 Summary Formatting**
+- [x] **6.1 Summary Formatting**
   - Text format for clipboard/messaging
   - Configurable template (optional)
 
-- [ ] **6.2 Copy to Clipboard**
+- [x] **6.2 Copy to Clipboard**
   - Button on dashboard
   - Visual feedback (toast/notification)
 
@@ -280,4 +280,5 @@ Development is split into phases. Each phase should result in a usable increment
 | 0       | 2026-01-26 | -     | Initial planning | Created CLAUDE.md, ROADMAP.md, spec.md |
 | 1       | 2026-01-26 | 1     | 1.1, 1.2, 1.3, 1.4 | Foundation complete, Scala 3.5.2 due to JS bug |
 | 2       | 2026-01-27 | 2     | 2.1, 2.2, 2.3    | Data layer complete with doobie, flyway, scalatest, 34 tests |
+| 3       | 2026-01-27 | 3     | 3.1-3.5, 6.1-6.2 | Frontend UI complete with mock data, e2e tests, copy summary |
 
