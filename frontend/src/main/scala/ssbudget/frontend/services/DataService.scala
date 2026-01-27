@@ -23,19 +23,19 @@ trait DataService {
   def exchangeRate: Signal[ExchangeRate]
 
   def currentPeriod: Signal[Option[Period]]
-  def totalBalancePLN: Signal[Long]
   def plannedExpenses: Signal[List[BudgetItemDefinition]]
   def estimatedExpenses: Signal[List[BudgetItemDefinition]]
   def plannedIncomes: Signal[List[BudgetItemDefinition]]
   def currentPeriodRecords: Signal[List[ExpenseRecord]]
 
-  def unpaidPlannedExpensesCents: Signal[Long]
-  def scaledEstimatedExpensesCents: Signal[Long]
-  def pendingIncomeCents: Signal[Long]
-  def predictedExpensesCents: Signal[Long]
-  def freeMoneyCents: Signal[Long]    // balance - predicted expenses + pending income
-  def availableNowCents: Signal[Long] // balance - unpaid planned only (conservative estimate)
-  def dailyBudgetCents: Signal[Long]
+  def unpaidPlannedExpenses: Signal[Money]
+  def scaledEstimatedExpenses: Signal[Money]
+  def pendingIncome: Signal[Money]
+  def predictedExpenses: Signal[Money]
+  def freeMoney: Signal[Money]    // balance - predicted expenses + pending income
+  def availableNow: Signal[Money] // balance - unpaid planned only (conservative estimate)
+  def dailyBudget: Signal[Money]
+  def totalBalance: Signal[Money]
   def daysRemainingInPeriod: Signal[Int]
 }
 

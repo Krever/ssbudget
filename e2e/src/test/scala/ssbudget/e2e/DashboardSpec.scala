@@ -1,6 +1,6 @@
 package ssbudget.e2e
 
-import org.openqa.selenium.By
+import org.openqa.selenium.{By, JavascriptExecutor}
 import scala.jdk.CollectionConverters.*
 
 class DashboardSpec extends E2ESpec {
@@ -45,11 +45,29 @@ class DashboardSpec extends E2ESpec {
     card.findElement(By.cssSelector(".card-footer .font-monospace")).getText shouldBe initialTotal
   }
 
-  it should "have a copy summary button" in {
+  it should "copy summary to clipboard" in {
     driver.get(baseUrl)
     waitForPage("Dashboard")
 
     val btn = driver.findElement(By.xpath("//button[contains(text(),'Copy Summary')]"))
-    btn.isDisplayed shouldBe true
+    btn.click()
+    Thread.sleep(500)
+
+    // Button should show "Copied!" feedback
+    btn.getText shouldBe "Copied!"
+
+    // Read clipboard via JavaScript
+    val js        = driver.asInstanceOf[JavascriptExecutor]
+    val clipboard = js
+      .executeAsyncScript(
+        """var callback = arguments[arguments.length - 1];
+          |navigator.clipboard.readText().then(callback);""".stripMargin,
+      )
+      .asInstanceOf[String]
+
+    clipboard should include("Budget Update")
+    clipboard should include("Balance:")
+    clipboard should include("Free:")
+    clipboard should include("Daily:")
   }
 }

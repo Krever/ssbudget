@@ -2,15 +2,14 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import ssbudget.frontend.services.DataService
-import ssbudget.frontend.util.Formatting
-import ssbudget.shared.model.{BudgetItemDefinition, BudgetItemType, Currency, ExpenseRecord}
+import ssbudget.shared.model.{BudgetItemDefinition, BudgetItemType, ExpenseDefId, ExpenseRecord, Money}
 
 object BudgetPage {
 
   private val dataService = DataService.instance
 
-  private val editingItemId   = Var[Option[String]](None)
-  private val payingItemId    = Var[Option[String]](None)
+  private val editingItemId   = Var[Option[ExpenseDefId]](None)
+  private val payingItemId    = Var[Option[ExpenseDefId]](None)
   private val addingPlanned   = Var(false)
   private val addingEstimated = Var(false)
   private val addingIncome    = Var(false)
@@ -78,12 +77,12 @@ object BudgetPage {
         div(
           cls := "d-flex justify-content-between mb-1",
           span(cls := "text-muted small", "Unpaid Expenses"),
-          span(cls := "font-monospace small", child.text <-- dataService.unpaidPlannedExpensesCents.map(Formatting.formatMoney(_, Currency.PLN))),
+          span(cls := "font-monospace small", child.text <-- dataService.unpaidPlannedExpenses.map(_.formatted)),
         ),
         div(
           cls := "d-flex justify-content-between",
           span(cls := "text-muted small", "Pending Income"),
-          span(cls := "font-monospace small", child.text <-- dataService.pendingIncomeCents.map(Formatting.formatMoney(_, Currency.PLN))),
+          span(cls := "font-monospace small", child.text <-- dataService.pendingIncome.map(_.formatted)),
         ),
       ),
     )
@@ -120,7 +119,7 @@ object BudgetPage {
       div(
         cls := "card-footer py-2 d-flex justify-content-between",
         span("Scaled Total"),
-        span(cls := "font-monospace", child.text <-- dataService.scaledEstimatedExpensesCents.map(Formatting.formatMoney(_, Currency.PLN))),
+        span(cls := "font-monospace", child.text <-- dataService.scaledEstimatedExpenses.map(_.formatted)),
       ),
     )
   }
@@ -128,16 +127,16 @@ object BudgetPage {
   private def plannedItemRow(
       item: BudgetItemDefinition,
       records: List[ExpenseRecord],
-      payingId: Option[String],
-      editingId: Option[String],
+      payingId: Option[ExpenseDefId],
+      editingId: Option[ExpenseDefId],
       isIncome: Boolean,
   ): HtmlElement = {
     val record     = records.find(_.expenseDefId == item.id)
     val paidAmount = record.flatMap(_.paidAmount)
     val isPaid     = paidAmount.isDefined
 
-    if payingId.contains(item.id.value) then payItemRow(item)
-    else if editingId.contains(item.id.value) then editItemRow(item, columns = 5)
+    if payingId.contains(item.id) then payItemRow(item)
+    else if editingId.contains(item.id) then editItemRow(item, columns = 5)
     else {
       val statusLabel = if isPaid then (if isIncome then "Received" else "Paid") else "Pending"
       val actionLabel = if isIncome then "Receive" else "Pay"
@@ -146,20 +145,20 @@ object BudgetPage {
 
       tr(
         td(item.name),
-        td(cls := "text-end font-monospace", item.fixedEstimate.fold("-")(Formatting.formatMoney(_, Currency.PLN))),
-        td(cls := "text-end font-monospace", paidAmount.fold("-")(Formatting.formatMoney(_, Currency.PLN))),
+        td(cls := "text-end font-monospace", item.fixedEstimate.fold("-")(Money.pln(_).formatted)),
+        td(cls := "text-end font-monospace", paidAmount.fold("-")(Money.pln(_).formatted)),
         td(cls := "text-center", span(cls := s"badge $statusBadge", statusLabel)),
         td(
           div(
             cls := "btn-group btn-group-sm",
             if isPaid then List(
-              button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingItemId.set(Some(item.id.value)) }),
+              button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingItemId.set(Some(item.id)) }),
               button(cls := "btn btn-outline-warning btn-sm", undoLabel, onClick --> { _ => dataService.unmarkBudgetItemAsPaid(item.id) }),
             )
             else
               List(
-                button(cls := "btn btn-outline-success btn-sm", actionLabel, onClick --> { _ => payingItemId.set(Some(item.id.value)) }),
-                button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingItemId.set(Some(item.id.value)) }),
+                button(cls := "btn btn-outline-success btn-sm", actionLabel, onClick --> { _ => payingItemId.set(Some(item.id)) }),
+                button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingItemId.set(Some(item.id)) }),
               ),
           ),
         ),
@@ -173,7 +172,7 @@ object BudgetPage {
     tr(
       cls := "table-info",
       td(item.name),
-      td(cls := "text-end font-monospace", item.fixedEstimate.fold("-")(Formatting.formatMoney(_, Currency.PLN))),
+      td(cls := "text-end font-monospace", item.fixedEstimate.fold("-")(Money.pln(_).formatted)),
       td(moneyInput(item.fixedEstimate, ref => inputRef = ref, autoFocus = true)),
       td(),
       td(
@@ -188,17 +187,17 @@ object BudgetPage {
     )
   }
 
-  private def estimatedItemRow(item: BudgetItemDefinition, scaleFactor: Double, editingId: Option[String]): HtmlElement = {
+  private def estimatedItemRow(item: BudgetItemDefinition, scaleFactor: Double, editingId: Option[ExpenseDefId]): HtmlElement = {
     val monthlyEstimate = item.fixedEstimate.getOrElse(0L)
     val scaledEstimate  = (monthlyEstimate * scaleFactor).toLong
 
-    if editingId.contains(item.id.value) then editItemRow(item, columns = 4)
+    if editingId.contains(item.id) then editItemRow(item, columns = 4)
     else
       tr(
         td(item.name),
-        td(cls := "text-end font-monospace", Formatting.formatMoney(monthlyEstimate, Currency.PLN)),
-        td(cls := "text-end font-monospace", Formatting.formatMoney(scaledEstimate, Currency.PLN)),
-        td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingItemId.set(Some(item.id.value)) })),
+        td(cls := "text-end font-monospace", Money.pln(monthlyEstimate).formatted),
+        td(cls := "text-end font-monospace", Money.pln(scaledEstimate).formatted),
+        td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingItemId.set(Some(item.id)) })),
       )
   }
 

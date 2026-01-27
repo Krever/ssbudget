@@ -3,14 +3,13 @@ package ssbudget.frontend.pages
 import com.raquo.laminar.api.L.*
 import ssbudget.frontend.services.DataService
 import ssbudget.frontend.util.Formatting
-import ssbudget.shared.model.{Account, BalanceSnapshot, Currency}
+import ssbudget.shared.model.{Account, AccountId, BalanceSnapshot, Currency, Money}
 
 object AccountsPage {
 
   private val dataService = DataService.instance
 
-  // TODO AccountId type
-  private val editingAccountId = Var[Option[String]](None)
+  private val editingAccountId = Var[Option[AccountId]](None)
   private val addingAccount    = Var(false)
 
   def apply(): HtmlElement = {
@@ -57,7 +56,7 @@ object AccountsPage {
               span(cls := "fw-bold", "Total Balance (PLN): "),
               span(
                 cls    := "font-monospace fw-bold text-primary",
-                child.text <-- dataService.totalBalancePLN.map(Formatting.formatMoney(_, Currency.PLN)),
+                child.text <-- dataService.totalBalance.map(_.formatted),
               ),
             ),
             div(cls := "text-muted", child.text <-- dataService.exchangeRate.map(r => s"EUR/PLN: ${r.rateAsDouble}")),
@@ -67,13 +66,13 @@ object AccountsPage {
     )
   }
 
-  private def accountRow(account: Account, snapshotOpt: Option[BalanceSnapshot], eurToPlnRate: Double, editingId: Option[String]): HtmlElement = {
-    if editingId.contains(account.id.value) then editAccountRow(account)
+  private def accountRow(account: Account, snapshotOpt: Option[BalanceSnapshot], eurToPlnRate: Double, editingId: Option[AccountId]): HtmlElement = {
+    if editingId.contains(account.id) then editAccountRow(account)
     else {
-      val balanceStr = snapshotOpt.fold("-")(s => Formatting.formatMoney(s.amount, s.currency))
+      val balanceStr = snapshotOpt.fold("-")(s => Money(s.amount, s.currency).formatted)
       val plnStr     = snapshotOpt.fold("-") { s =>
         if s.currency == Currency.PLN then "-"
-        else Formatting.formatMoney((s.amount * eurToPlnRate).toLong, Currency.PLN)
+        else Money.pln((s.amount * eurToPlnRate).toLong).formatted
       }
       val dateStr    = snapshotOpt.fold("-")(s => Formatting.formatDate(s.recordedAt))
 
@@ -83,7 +82,7 @@ object AccountsPage {
         td(cls := "text-end font-monospace", balanceStr),
         td(cls := "text-end font-monospace text-muted", plnStr),
         td(cls := "text-muted small", dateStr),
-        td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingAccountId.set(Some(account.id.value)) })),
+        td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingAccountId.set(Some(account.id)) })),
       )
     }
   }

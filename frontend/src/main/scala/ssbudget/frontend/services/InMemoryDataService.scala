@@ -78,7 +78,7 @@ object InMemoryDataService extends DataService {
   override def currentPeriod: Signal[Option[Period]] =
     periodsVar.signal.map(_.find(_.endDate.isEmpty))
 
-  override def totalBalancePLN: Signal[Long] =
+  private def totalBalanceCents: Signal[Long] =
     Signal
       .combine(balanceSnapshotsVar.signal, exchangeRateVar.signal)
       .map { case (snapshots, rate) =>
@@ -90,6 +90,8 @@ object InMemoryDataService extends DataService {
           acc + amountInPLN
         }
       }
+
+  override def totalBalance: Signal[Money] = totalBalanceCents.map(Money.pln)
 
   override def plannedExpenses: Signal[List[BudgetItemDefinition]] =
     budgetItemsVar.signal.map(_.filter(_.itemType == BudgetItemType.PlannedExpense))
@@ -107,7 +109,7 @@ object InMemoryDataService extends DataService {
         periodOpt.fold(List.empty[ExpenseRecord])(period => records.filter(_.periodId == period.id))
       }
 
-  override def unpaidPlannedExpensesCents: Signal[Long] =
+  private def unpaidPlannedCents: Signal[Long] =
     Signal
       .combine(plannedExpenses, currentPeriodRecords)
       .map { case (planned, records) =>
@@ -118,6 +120,8 @@ object InMemoryDataService extends DataService {
         }
       }
 
+  override def unpaidPlannedExpenses: Signal[Money] = unpaidPlannedCents.map(Money.pln)
+
   override def daysRemainingInPeriod: Signal[Int] =
     currentPeriod.map {
       case Some(period) =>
@@ -126,7 +130,7 @@ object InMemoryDataService extends DataService {
       case None         => 0
     }
 
-  override def scaledEstimatedExpensesCents: Signal[Long] =
+  private def scaledEstimatedCents: Signal[Long] =
     Signal
       .combine(estimatedExpenses, daysRemainingInPeriod)
       .map { case (estimated, daysRemaining) =>
@@ -134,7 +138,9 @@ object InMemoryDataService extends DataService {
         estimated.foldLeft(0L)((acc, exp) => acc + (exp.fixedEstimate.getOrElse(0L) * scaleFactor).toLong)
       }
 
-  override def pendingIncomeCents: Signal[Long] =
+  override def scaledEstimatedExpenses: Signal[Money] = scaledEstimatedCents.map(Money.pln)
+
+  private def pendingIncomeCents: Signal[Long] =
     Signal
       .combine(plannedIncomes, currentPeriodRecords)
       .map { case (incomes, records) =>
@@ -145,25 +151,27 @@ object InMemoryDataService extends DataService {
         }
       }
 
-  override def predictedExpensesCents: Signal[Long] =
-    Signal
-      .combine(unpaidPlannedExpensesCents, scaledEstimatedExpensesCents)
-      .map { case (unpaid, scaled) => unpaid + scaled }
+  override def pendingIncome: Signal[Money] = pendingIncomeCents.map(Money.pln)
 
-  override def freeMoneyCents: Signal[Long] =
+  override def predictedExpenses: Signal[Money] =
     Signal
-      .combine(totalBalancePLN, predictedExpensesCents, pendingIncomeCents)
-      .map { case (total, predicted, pendingIncome) => total - predicted + pendingIncome }
+      .combine(unpaidPlannedCents, scaledEstimatedCents)
+      .map { case (unpaid, scaled) => Money.pln(unpaid + scaled) }
 
-  override def availableNowCents: Signal[Long] =
+  override def freeMoney: Signal[Money] =
     Signal
-      .combine(totalBalancePLN, unpaidPlannedExpensesCents)
-      .map { case (total, unpaid) => total - unpaid }
+      .combine(totalBalanceCents, unpaidPlannedCents, scaledEstimatedCents, pendingIncomeCents)
+      .map { case (total, unpaid, scaled, income) => Money.pln(total - unpaid - scaled + income) }
 
-  override def dailyBudgetCents: Signal[Long] =
+  override def availableNow: Signal[Money] =
     Signal
-      .combine(freeMoneyCents, daysRemainingInPeriod)
-      .map { case (free, days) => if days > 0 then free / days else 0 }
+      .combine(totalBalanceCents, unpaidPlannedCents)
+      .map { case (total, unpaid) => Money.pln(total - unpaid) }
+
+  override def dailyBudget: Signal[Money] =
+    Signal
+      .combine(freeMoney, daysRemainingInPeriod)
+      .map { case (free, days) => if days > 0 then free / days else Money.pln(0) }
 
   override def addAccount(name: String, currency: Currency): Unit = {
     val newId = AccountId(s"acc-${System.currentTimeMillis()}")
