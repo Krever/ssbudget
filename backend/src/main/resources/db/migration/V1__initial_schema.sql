@@ -8,14 +8,13 @@ CREATE TABLE accounts (
     currency TEXT NOT NULL CHECK (currency IN ('PLN', 'EUR'))
 );
 
--- Expense definitions (recurring expense types)
+-- Budget item definitions (planned expenses, estimated expenses, planned incomes)
 CREATE TABLE expense_definitions (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    expense_type TEXT NOT NULL CHECK (expense_type IN ('planned', 'estimated')),
+    item_type TEXT NOT NULL CHECK (item_type IN ('planned_expense', 'estimated_expense', 'planned_income')),
     estimate_mode TEXT NOT NULL CHECK (estimate_mode IN ('fixed', 'last_month', 'average')),
-    fixed_estimate INTEGER, -- in cents, nullable (only for fixed mode)
-    include_in_balance INTEGER NOT NULL DEFAULT 1 CHECK (include_in_balance IN (0, 1))
+    fixed_estimate INTEGER -- in cents, nullable (only for fixed mode)
 );
 
 -- Periods (budget periods, typically monthly)
@@ -52,6 +51,25 @@ CREATE TABLE exchange_rates (
     fetched_at TEXT NOT NULL -- ISO 8601 timestamp
 );
 
+-- Savings accounts (separate from bank accounts - editable balance, optional targets)
+CREATE TABLE savings_accounts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    currency TEXT NOT NULL CHECK (currency IN ('PLN', 'EUR')),
+    current_balance INTEGER NOT NULL DEFAULT 0, -- in cents, editable directly
+    planned_monthly INTEGER -- optional monthly target in cents
+);
+
+-- Savings transactions (inflows/outflows to savings accounts)
+CREATE TABLE savings_transactions (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES savings_accounts(id),
+    period_id TEXT NOT NULL REFERENCES periods(id),
+    amount INTEGER NOT NULL, -- positive = inflow, negative = outflow
+    note TEXT, -- optional context
+    created_at TEXT NOT NULL -- ISO 8601 timestamp
+);
+
 -- Indexes for common queries
 CREATE INDEX idx_expense_records_period ON expense_records(period_id);
 CREATE INDEX idx_expense_records_def ON expense_records(expense_def_id);
@@ -59,3 +77,5 @@ CREATE INDEX idx_balance_snapshots_account ON balance_snapshots(account_id);
 CREATE INDEX idx_balance_snapshots_recorded ON balance_snapshots(recorded_at);
 CREATE INDEX idx_exchange_rates_currencies ON exchange_rates(from_currency, to_currency);
 CREATE INDEX idx_exchange_rates_fetched ON exchange_rates(fetched_at);
+CREATE INDEX idx_savings_transactions_account ON savings_transactions(account_id);
+CREATE INDEX idx_savings_transactions_period ON savings_transactions(period_id);

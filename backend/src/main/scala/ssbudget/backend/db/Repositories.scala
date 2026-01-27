@@ -11,6 +11,8 @@ final case class Repositories(
     expenseRecords: ExpenseRecordRepository,
     balanceSnapshots: BalanceSnapshotRepository,
     exchangeRates: ExchangeRateRepository,
+    savingsAccounts: SavingsAccountRepository,
+    savingsTransactions: SavingsTransactionRepository,
 )
 
 object Repositories {
@@ -22,6 +24,8 @@ object Repositories {
       expenseRecords = new ExpenseRecordRepositoryImpl(xa),
       balanceSnapshots = new BalanceSnapshotRepositoryImpl(xa),
       exchangeRates = new ExchangeRateRepositoryImpl(xa),
+      savingsAccounts = new SavingsAccountRepositoryImpl(xa),
+      savingsTransactions = new SavingsTransactionRepositoryImpl(xa),
     )
   }
 }

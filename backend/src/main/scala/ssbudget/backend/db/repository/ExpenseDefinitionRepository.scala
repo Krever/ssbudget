@@ -7,69 +7,49 @@ import ssbudget.backend.db.DoobieMeta.given
 import ssbudget.shared.model.*
 
 trait ExpenseDefinitionRepository {
-  def create(expense: ExpenseDefinition): IO[Unit]
-  def findById(id: ExpenseDefId): IO[Option[ExpenseDefinition]]
-  def findAll: IO[List[ExpenseDefinition]]
-  def findByType(expenseType: ExpenseType): IO[List[ExpenseDefinition]]
-  def update(expense: ExpenseDefinition): IO[Unit]
+  def create(expense: BudgetItemDefinition): IO[Unit]
+  def findById(id: ExpenseDefId): IO[Option[BudgetItemDefinition]]
+  def findAll: IO[List[BudgetItemDefinition]]
+  def findByType(itemType: BudgetItemType): IO[List[BudgetItemDefinition]]
+  def update(expense: BudgetItemDefinition): IO[Unit]
   def delete(id: ExpenseDefId): IO[Unit]
 }
 
 class ExpenseDefinitionRepositoryImpl(xa: Transactor[IO]) extends ExpenseDefinitionRepository {
 
-  override def create(expense: ExpenseDefinition): IO[Unit] = {
+  override def create(expense: BudgetItemDefinition): IO[Unit] = {
     sql"""
-      INSERT INTO expense_definitions (id, name, expense_type, estimate_mode, fixed_estimate, include_in_balance)
-      VALUES (${expense.id}, ${expense.name}, ${expense.expenseType}, ${expense.estimateMode},
-              ${expense.fixedEstimate}, ${if expense.includeInBalance then 1 else 0})
+      INSERT INTO expense_definitions (id, name, item_type, estimate_mode, fixed_estimate)
+      VALUES (${expense.id}, ${expense.name}, ${expense.itemType}, ${expense.estimateMode}, ${expense.fixedEstimate})
     """.update.run.transact(xa).void
   }
 
-  override def findById(id: ExpenseDefId): IO[Option[ExpenseDefinition]] = {
+  override def findById(id: ExpenseDefId): IO[Option[BudgetItemDefinition]] = {
     sql"""
-      SELECT id, name, expense_type, estimate_mode, fixed_estimate, include_in_balance
+      SELECT id, name, item_type, estimate_mode, fixed_estimate
       FROM expense_definitions WHERE id = $id
-    """
-      .query[(ExpenseDefId, String, ExpenseType, EstimateMode, Option[Long], Int)]
-      .map { case (id, name, et, em, fe, iib) =>
-        ExpenseDefinition(id, name, et, em, fe, iib == 1)
-      }
-      .option
-      .transact(xa)
+    """.query[BudgetItemDefinition].option.transact(xa)
   }
 
-  override def findAll: IO[List[ExpenseDefinition]] = {
+  override def findAll: IO[List[BudgetItemDefinition]] = {
     sql"""
-      SELECT id, name, expense_type, estimate_mode, fixed_estimate, include_in_balance
+      SELECT id, name, item_type, estimate_mode, fixed_estimate
       FROM expense_definitions ORDER BY name
-    """
-      .query[(ExpenseDefId, String, ExpenseType, EstimateMode, Option[Long], Int)]
-      .map { case (id, name, et, em, fe, iib) =>
-        ExpenseDefinition(id, name, et, em, fe, iib == 1)
-      }
-      .to[List]
-      .transact(xa)
+    """.query[BudgetItemDefinition].to[List].transact(xa)
   }
 
-  override def findByType(expenseType: ExpenseType): IO[List[ExpenseDefinition]] = {
+  override def findByType(itemType: BudgetItemType): IO[List[BudgetItemDefinition]] = {
     sql"""
-      SELECT id, name, expense_type, estimate_mode, fixed_estimate, include_in_balance
-      FROM expense_definitions WHERE expense_type = $expenseType ORDER BY name
-    """
-      .query[(ExpenseDefId, String, ExpenseType, EstimateMode, Option[Long], Int)]
-      .map { case (id, name, et, em, fe, iib) =>
-        ExpenseDefinition(id, name, et, em, fe, iib == 1)
-      }
-      .to[List]
-      .transact(xa)
+      SELECT id, name, item_type, estimate_mode, fixed_estimate
+      FROM expense_definitions WHERE item_type = $itemType ORDER BY name
+    """.query[BudgetItemDefinition].to[List].transact(xa)
   }
 
-  override def update(expense: ExpenseDefinition): IO[Unit] = {
+  override def update(expense: BudgetItemDefinition): IO[Unit] = {
     sql"""
       UPDATE expense_definitions
-      SET name = ${expense.name}, expense_type = ${expense.expenseType},
-          estimate_mode = ${expense.estimateMode}, fixed_estimate = ${expense.fixedEstimate},
-          include_in_balance = ${if expense.includeInBalance then 1 else 0}
+      SET name = ${expense.name}, item_type = ${expense.itemType},
+          estimate_mode = ${expense.estimateMode}, fixed_estimate = ${expense.fixedEstimate}
       WHERE id = ${expense.id}
     """.update.run.transact(xa).void
   }

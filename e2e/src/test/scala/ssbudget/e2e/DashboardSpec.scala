@@ -5,14 +5,14 @@ import scala.jdk.CollectionConverters.*
 
 class DashboardSpec extends E2ESpec {
 
-  "Dashboard" should "load and show summary cards" in {
+  "Dashboard" should "load and show summary panel" in {
     driver.get(baseUrl)
     waitForPage("Dashboard")
 
     val cardTexts = driver.findElements(By.cssSelector(".card")).asScala.map(_.getText).toList
-    cardTexts.exists(_.contains("Total Balance")) shouldBe true
-    cardTexts.exists(_.contains("Free Money")) shouldBe true
-    cardTexts.exists(_.contains("Daily Budget")) shouldBe true
+    cardTexts.exists(_.contains("BALANCE")) shouldBe true
+    cardTexts.exists(_.contains("FREE")) shouldBe true
+    cardTexts.exists(_.contains("DAYS")) shouldBe true
   }
 
   it should "update account balance via bulk edit" in {
@@ -49,6 +49,18 @@ class DashboardSpec extends E2ESpec {
     driver.get(baseUrl)
     waitForPage("Dashboard")
 
+    // Grant clipboard permissions via CDP
+    val cdpDriver = driver.asInstanceOf[org.openqa.selenium.chromium.HasCdp]
+    cdpDriver.executeCdpCommand(
+      "Browser.grantPermissions",
+      java.util.Map.of(
+        "permissions",
+        java.util.List.of("clipboardReadWrite", "clipboardSanitizedWrite"),
+        "origin",
+        baseUrl,
+      ),
+    )
+
     val btn = driver.findElement(By.xpath("//button[contains(text(),'Copy Summary')]"))
     btn.click()
     Thread.sleep(500)
@@ -61,7 +73,7 @@ class DashboardSpec extends E2ESpec {
     val clipboard = js
       .executeAsyncScript(
         """var callback = arguments[arguments.length - 1];
-          |navigator.clipboard.readText().then(callback);""".stripMargin,
+          |navigator.clipboard.readText().then(callback).catch(function(e) { callback('ERROR: ' + e.message); });""".stripMargin,
       )
       .asInstanceOf[String]
 

@@ -22,6 +22,18 @@ trait DataService {
 
   def exchangeRate: Signal[ExchangeRate]
 
+  // Savings accounts
+  def savingsAccounts: Signal[List[SavingsAccount]]
+  def savingsTransactions: Signal[List[SavingsTransaction]]
+  def currentPeriodSavingsTransactions: Signal[List[SavingsTransaction]]
+  def addSavingsAccount(name: String, currency: Currency, plannedMonthly: Option[Long]): Unit
+  def updateSavingsAccount(id: SavingsAccountId, name: String, currency: Currency, plannedMonthly: Option[Long]): Unit
+  def updateSavingsAccountBalance(id: SavingsAccountId, newBalance: Long): Unit
+  def deleteSavingsAccount(id: SavingsAccountId): Unit
+  def addSavingsTransaction(accountId: SavingsAccountId, amount: Long, note: Option[String]): Unit
+  def deleteSavingsTransaction(id: SavingsTransactionId): Unit
+  def remainingSavingsTarget: Signal[Money] // planned - actual contributions for current period
+
   def currentPeriod: Signal[Option[Period]]
   def plannedExpenses: Signal[List[BudgetItemDefinition]]
   def estimatedExpenses: Signal[List[BudgetItemDefinition]]
@@ -32,7 +44,7 @@ trait DataService {
   def scaledEstimatedExpenses: Signal[Money]
   def pendingIncome: Signal[Money]
   def predictedExpenses: Signal[Money]
-  def freeMoney: Signal[Money]    // balance - predicted expenses + pending income
+  def freeMoney: Signal[Money]    // balance - predicted expenses - remaining savings + pending income
   def availableNow: Signal[Money] // balance - unpaid planned only (conservative estimate)
   def dailyBudget: Signal[Money]
   def totalBalance: Signal[Money]

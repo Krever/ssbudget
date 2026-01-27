@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 import ssbudget.frontend.services.DataService
 import ssbudget.frontend.util.Formatting
-import ssbudget.shared.model.{Account, AccountId, BalanceSnapshot, Money}
+import ssbudget.shared.model.*
 
 import java.time.format.DateTimeFormatter
 import java.time.{Instant, ZoneOffset}
@@ -13,9 +13,10 @@ object DashboardPage {
 
   private val dataService = DataService.instance
 
-  private val isEditingBalances = Var(false)
-  private val editedBalances    = Var(Map.empty[AccountId, Long])
-  private val copyButtonText    = Var("Copy Summary")
+  private val isEditingBalances     = Var(false)
+  private val editedBalances        = Var(Map.empty[AccountId, Long])
+  private val editedSavingsBalances = Var(Map.empty[SavingsAccountId, Long])
+  private val copyButtonText        = Var("Copy Summary")
 
   def apply(): HtmlElement = {
     div(
@@ -114,42 +115,31 @@ object DashboardPage {
       div(
         cls := "card-header py-2 d-flex justify-content-between align-items-center",
         span("Accounts"),
-        child <-- dataService.accounts
-          .combineWith(dataService.balanceSnapshots)
-          .combineWith(isEditingBalances.signal)
-          .combineWith(editedBalances.signal)
-          .map { case (accounts, snapshots, isEditing, edited) =>
-            if isEditing then div(
-              cls   := "btn-group btn-group-sm",
-              button(
-                cls := "btn btn-success btn-sm py-0",
-                "Save All",
-                onClick --> { _ =>
-                  accounts.foreach(acc => edited.get(acc.id).foreach(amount => dataService.updateAccountBalance(acc.id, amount)))
-                  isEditingBalances.set(false)
-                  editedBalances.set(Map.empty)
-                },
-              ),
-              button(
-                cls := "btn btn-secondary btn-sm py-0",
-                "Cancel",
-                onClick --> { _ =>
-                  isEditingBalances.set(false)
-                  editedBalances.set(Map.empty)
-                },
-              ),
+        child <-- isEditingBalances.signal.map { isEditing =>
+          if isEditing then div(
+            cls   := "btn-group btn-group-sm",
+            button(
+              cls := "btn btn-success btn-sm py-0",
+              "Save All",
+              onClick --> { _ => saveAllBalances() },
+            ),
+            button(
+              cls := "btn btn-secondary btn-sm py-0",
+              "Cancel",
+              onClick --> { _ =>
+                isEditingBalances.set(false)
+                editedBalances.set(Map.empty)
+                editedSavingsBalances.set(Map.empty)
+              },
+            ),
+          )
+          else
+            button(
+              cls := "btn btn-sm btn-outline-primary py-0",
+              "Edit Balances",
+              onClick --> { _ => startEditingBalances() },
             )
-            else
-              button(
-                cls := "btn btn-sm btn-outline-primary py-0",
-                "Edit Balances",
-                onClick --> { _ =>
-                  val initial = accounts.map(acc => acc.id -> snapshots.find(_.accountId == acc.id).map(_.amount).getOrElse(0L)).toMap
-                  editedBalances.set(initial)
-                  isEditingBalances.set(true)
-                },
-              )
-          },
+        },
       ),
       div(
         cls := "card-body p-0",
@@ -157,11 +147,20 @@ object DashboardPage {
           cls := "table table-sm table-hover mb-0",
           thead(tr(th("Account"), th(cls := "text-end", "Balance"))),
           tbody(
+            // Bank accounts
             children <-- dataService.accounts
               .combineWith(dataService.balanceSnapshots)
               .combineWith(isEditingBalances.signal)
               .map { case (accounts, snapshots, isEditing) =>
-                accounts.map(account => accountQuickRow(account, snapshots.find(_.accountId == account.id), isEditing))
+                accounts.map(account => bankAccountQuickRow(account, snapshots.find(_.accountId == account.id), isEditing))
+              },
+            // Separator
+            tr(cls := "table-secondary", td(colSpan := 2, cls := "py-1 small text-muted", "— Savings —")),
+            // Savings accounts
+            children <-- dataService.savingsAccounts
+              .combineWith(isEditingBalances.signal)
+              .map { case (accounts, isEditing) =>
+                accounts.map(account => savingsAccountQuickRow(account, isEditing))
               },
           ),
         ),
@@ -174,7 +173,7 @@ object DashboardPage {
     )
   }
 
-  private def accountQuickRow(account: Account, balanceOpt: Option[BalanceSnapshot], isEditing: Boolean): HtmlElement = {
+  private def bankAccountQuickRow(account: Account, balanceOpt: Option[BalanceSnapshot], isEditing: Boolean): HtmlElement = {
     val currentAmount = balanceOpt.map(_.amount).getOrElse(0L)
 
     if isEditing then tr(
@@ -195,6 +194,60 @@ object DashboardPage {
       ),
     )
     else tr(td(account.name), td(cls := "text-end font-monospace", balanceOpt.fold("-")(b => Money(b.amount, b.currency).formatted)))
+  }
+
+  private def savingsAccountQuickRow(account: SavingsAccount, isEditing: Boolean): HtmlElement = {
+    if isEditing then tr(
+      cls := "table-info",
+      td(account.name),
+      td(
+        div(
+          cls := "input-group input-group-sm",
+          input(
+            cls          := "form-control form-control-sm text-end",
+            tpe          := "number",
+            stepAttr     := "0.01",
+            defaultValue := (account.currentBalance / 100.0).toString,
+            onInput.mapToValue --> { v => v.toDoubleOption.foreach(d => editedSavingsBalances.update(_.updated(account.id, (d * 100).toLong))) },
+          ),
+          span(cls       := "input-group-text py-0", account.currency.toString),
+        ),
+      ),
+    )
+    else tr(td(account.name), td(cls := "text-end font-monospace", Money(account.currentBalance, account.currency).formatted))
+  }
+
+  private def startEditingBalances(): Unit = {
+    import com.raquo.airstream.ownership.OneTimeOwner
+    given owner: OneTimeOwner = new OneTimeOwner(() => ())
+
+    val accounts        = dataService.accounts.observe.now()
+    val snapshots       = dataService.balanceSnapshots.observe.now()
+    val savingsAccounts = dataService.savingsAccounts.observe.now()
+
+    val initialBankBalances    = accounts.map(acc => acc.id -> snapshots.find(_.accountId == acc.id).map(_.amount).getOrElse(0L)).toMap
+    val initialSavingsBalances = savingsAccounts.map(acc => acc.id -> acc.currentBalance).toMap
+
+    editedBalances.set(initialBankBalances)
+    editedSavingsBalances.set(initialSavingsBalances)
+    isEditingBalances.set(true)
+  }
+
+  private def saveAllBalances(): Unit = {
+    import com.raquo.airstream.ownership.OneTimeOwner
+    given owner: OneTimeOwner = new OneTimeOwner(() => ())
+
+    val accounts = dataService.accounts.observe.now()
+    val edited   = editedBalances.now()
+    accounts.foreach(acc => edited.get(acc.id).foreach(amount => dataService.updateAccountBalance(acc.id, amount)))
+
+    val savingsAccounts = dataService.savingsAccounts.observe.now()
+    val editedSavings   = editedSavingsBalances.now()
+    savingsAccounts.foreach(acc => editedSavings.get(acc.id).foreach(amount => dataService.updateSavingsAccountBalance(acc.id, amount)))
+
+    isEditingBalances.set(false)
+    editedBalances.set(Map.empty)
+    editedSavingsBalances.set(Map.empty)
   }
 
   private def copySummaryToClipboard(): Unit = {

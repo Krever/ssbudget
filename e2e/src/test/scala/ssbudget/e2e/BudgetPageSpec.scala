@@ -95,4 +95,119 @@ class BudgetPageSpec extends E2ESpec {
 
     rows(card).exists(_.getText.contains("To Delete")) shouldBe false
   }
+
+  // ============ Planned Savings ============
+
+  it should "show planned savings card" in {
+    driver.get(s"$baseUrl/budget")
+    waitForPage("Budget")
+
+    val cardTexts = driver.findElements(By.cssSelector(".card")).asScala.map(_.getText).toList
+    cardTexts.exists(_.contains("Planned Savings")) shouldBe true
+  }
+
+  it should "show savings accounts with targets" in {
+    driver.get(s"$baseUrl/budget")
+    waitForPage("Budget")
+
+    val card = findCard("Planned Savings")
+    card.getText should include("Emergency Fund")
+    card.getText should include("Target")
+    card.getText should include("Saved")
+    card.getText should include("Remaining")
+  }
+
+  it should "expand savings account to show transactions" in {
+    driver.get(s"$baseUrl/budget")
+    waitForPage("Budget")
+
+    val card       = findCard("Planned Savings")
+    // Find a savings account row and click to expand
+    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]"))
+    savingsRow.click()
+    Thread.sleep(300)
+
+    // Should see "+ Add" button in expanded view
+    card.findElement(By.xpath(".//button[contains(text(),'+ Add')]")).isDisplayed shouldBe true
+  }
+
+  it should "add a savings transaction" in {
+    driver.get(s"$baseUrl/budget")
+    waitForPage("Budget")
+
+    val card       = findCard("Planned Savings")
+    // Expand the savings account
+    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]"))
+    savingsRow.click()
+    Thread.sleep(300)
+
+    // Click + Add to show transaction form
+    click(card, "+ Add")
+
+    // Fill in transaction
+    val addRow      = card.findElement(By.cssSelector("tr.table-info"))
+    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("Test deposit")
+    val amountInput = addRow.findElement(By.cssSelector("input[type='number']"))
+    amountInput.clear()
+    amountInput.sendKeys("50")
+    click(addRow, "Add")
+
+    // Transaction should appear
+    card.getText should include("Test deposit")
+  }
+
+  it should "delete a savings transaction" in {
+    driver.get(s"$baseUrl/budget")
+    waitForPage("Budget")
+
+    val card       = findCard("Planned Savings")
+    // Expand the savings account
+    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]"))
+    savingsRow.click()
+    Thread.sleep(300)
+
+    // Add a transaction to delete
+    click(card, "+ Add")
+    val addRow      = card.findElement(By.cssSelector("tr.table-info"))
+    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("To delete txn")
+    val amountInput = addRow.findElement(By.cssSelector("input[type='number']"))
+    amountInput.clear()
+    amountInput.sendKeys("10")
+    click(addRow, "Add")
+
+    card.getText should include("To delete txn")
+
+    // Find and delete the transaction
+    val txnRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'To delete txn')]]"))
+    click(txnRow, "×")
+
+    card.getText should not include "To delete txn"
+  }
+
+  it should "collapse expanded savings account" in {
+    driver.get(s"$baseUrl/budget")
+    waitForPage("Budget")
+
+    val card = findCard("Planned Savings")
+    // Expand
+    card.findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]")).click()
+    Thread.sleep(300)
+
+    card.findElements(By.xpath(".//button[contains(text(),'+ Add')]")).size() shouldBe 1
+
+    // Collapse - need to re-find element as DOM was updated
+    card.findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]")).click()
+    Thread.sleep(300)
+
+    card.findElements(By.xpath(".//button[contains(text(),'+ Add')]")).size() shouldBe 0
+  }
+
+  it should "show remaining to save in footer" in {
+    driver.get(s"$baseUrl/budget")
+    waitForPage("Budget")
+
+    val card       = findCard("Planned Savings")
+    val footerText = card.findElement(By.cssSelector(".card-footer")).getText
+    footerText should include("Remaining to Save")
+  }
 }

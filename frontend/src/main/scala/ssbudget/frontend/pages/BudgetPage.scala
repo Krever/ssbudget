@@ -2,7 +2,7 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import ssbudget.frontend.services.DataService
-import ssbudget.shared.model.{BudgetItemDefinition, BudgetItemType, ExpenseDefId, ExpenseRecord, Money}
+import ssbudget.shared.model.*
 
 object BudgetPage {
 
@@ -14,15 +14,20 @@ object BudgetPage {
   private val addingEstimated = Var(false)
   private val addingIncome    = Var(false)
 
+  // Savings state
+  private val savingToAccountId  = Var[Option[SavingsAccountId]](None)
+  private val expandedSavingsIds = Var[Set[SavingsAccountId]](Set.empty)
+
   def apply(): HtmlElement = {
     div(
       cls := "container-fluid mt-3",
       h4("Budget"),
       div(
-        cls := "row g-3 mb-3",
+        cls   := "row g-3 mb-3",
         div(cls := "col-lg-6", plannedItemsCard()),
         div(cls := "col-lg-6", estimatedExpensesCard()),
       ),
+      div(cls := "row g-3", div(cls := "col-12", plannedSavingsCard())),
     )
   }
 
@@ -120,6 +125,182 @@ object BudgetPage {
         cls := "card-footer py-2 d-flex justify-content-between",
         span("Scaled Total"),
         span(cls := "font-monospace", child.text <-- dataService.scaledEstimatedExpenses.map(_.formatted)),
+      ),
+    )
+  }
+
+  private def plannedSavingsCard(): HtmlElement = {
+    div(
+      cls := "card",
+      div(
+        cls := "card-header py-2",
+        span("Planned Savings"),
+      ),
+      div(
+        cls := "card-body p-0",
+        table(
+          cls := "table table-sm table-hover mb-0",
+          thead(
+            tr(
+              th("Account"),
+              th(cls := "text-end", "Target"),
+              th(cls := "text-end", "Saved"),
+              th(cls := "text-end", "Remaining"),
+              th(),
+            ),
+          ),
+          tbody(
+            children <-- dataService.savingsAccounts
+              .combineWith(dataService.currentPeriodSavingsTransactions)
+              .combineWith(savingToAccountId.signal)
+              .combineWith(expandedSavingsIds.signal)
+              .map { case (accounts, txns, savingToId, expandedIds) =>
+                accounts
+                  .filter(_.plannedMonthly.isDefined) // Only show accounts with targets
+                  .flatMap { account =>
+                    val periodTxns  = txns.filter(_.accountId == account.id)
+                    val periodTotal = periodTxns.map(_.amount).sum
+                    val isExpanded  = expandedIds.contains(account.id)
+                    val mainRow     = savingsTargetRow(account, periodTotal, periodTxns, savingToId, isExpanded)
+                    val txnRows     = if isExpanded then {
+                      periodTxns.map(txn => savingsTransactionRow(txn, account.currency)) :+
+                        (if savingToId.contains(account.id) then addSavingsTransactionRow(account, account.plannedMonthly.getOrElse(0L) - periodTotal)
+                         else addTransactionButton(account))
+                    } else Nil
+                    mainRow :: txnRows
+                  }
+              },
+          ),
+        ),
+      ),
+      div(
+        cls := "card-footer py-2 d-flex justify-content-between",
+        span("Remaining to Save"),
+        span(cls := "font-monospace text-warning", child.text <-- dataService.remainingSavingsTarget.map(_.formatted)),
+      ),
+    )
+  }
+
+  private def savingsTargetRow(
+      account: SavingsAccount,
+      periodContribution: Long,
+      periodTxns: List[SavingsTransaction],
+      savingToId: Option[SavingsAccountId],
+      isExpanded: Boolean,
+  ): HtmlElement = {
+    val target        = account.plannedMonthly.getOrElse(0L)
+    val remaining     = math.max(0L, target - periodContribution)
+    val currency      = account.currency
+    val targetStr     = Money(target, currency).formatted
+    val savedStr      = Money(periodContribution, currency).formatted
+    val remainingStr  = Money(remaining, currency).formatted
+    val progressClass = if periodContribution >= target then "text-success" else "text-warning"
+
+    tr(
+      styleAttr := "cursor: pointer",
+      onClick --> { _ =>
+        if isExpanded then {
+          expandedSavingsIds.update(_ - account.id)
+          savingToAccountId.update(id => if id.contains(account.id) then None else id)
+        } else expandedSavingsIds.update(_ + account.id)
+      },
+      td(
+        span(cls := "me-1", if isExpanded then "▼" else "▶"),
+        account.name,
+        span(cls := "ms-2 badge text-bg-success", currency.toString),
+      ),
+      td(cls := "text-end font-monospace", targetStr),
+      td(cls := s"text-end font-monospace $progressClass", savedStr),
+      td(cls := s"text-end font-monospace $progressClass", remainingStr),
+      td(),
+    )
+  }
+
+  private def savingsTransactionRow(txn: SavingsTransaction, currency: Currency): HtmlElement = {
+    import ssbudget.frontend.util.Formatting
+    val amountStr = Money(txn.amount, currency).formatted
+    val sign      = if txn.amount >= 0 then "+" else ""
+    val colorCls  = if txn.amount >= 0 then "text-success" else "text-danger"
+    val dateStr   = Formatting.formatDate(txn.createdAt)
+
+    tr(
+      cls := "table-light",
+      td(cls     := "ps-4 text-muted small", dateStr),
+      td(colSpan := 2, cls := "small", txn.note.getOrElse[String]("-")),
+      td(cls     := s"text-end font-monospace small $colorCls", s"$sign$amountStr"),
+      td(
+        button(
+          cls       := "btn btn-outline-danger btn-sm py-0",
+          styleAttr := "font-size: 0.7rem",
+          "×",
+          onClick --> { _ => dataService.deleteSavingsTransaction(txn.id) },
+        ),
+      ),
+    )
+  }
+
+  private def addTransactionButton(account: SavingsAccount): HtmlElement = {
+    tr(
+      cls := "table-light",
+      td(colSpan := 4, cls := "ps-4"),
+      td(
+        button(
+          cls := "btn btn-outline-primary btn-sm py-0",
+          "+ Add",
+          onClick --> { _ => savingToAccountId.set(Some(account.id)) },
+        ),
+      ),
+    )
+  }
+
+  private def addSavingsTransactionRow(account: SavingsAccount, suggestedAmount: Long): HtmlElement = {
+    var amountRef: org.scalajs.dom.html.Input = null
+    var noteRef: org.scalajs.dom.html.Input   = null
+
+    tr(
+      cls := "table-info",
+      td(cls    := "ps-4 text-muted small", "New"),
+      td(
+        colSpan := 2,
+        input(
+          cls         := "form-control form-control-sm",
+          tpe         := "text",
+          placeholder := "Note (optional)",
+          onMountCallback(ctx => noteRef = ctx.thisNode.ref),
+        ),
+      ),
+      td(
+        input(
+          cls          := "form-control form-control-sm text-end",
+          tpe          := "number",
+          stepAttr     := "0.01",
+          placeholder  := "Amount",
+          defaultValue := (math.max(0L, suggestedAmount) / 100.0).toString,
+          onMountCallback(ctx => amountRef = ctx.thisNode.ref),
+          onMountFocus,
+        ),
+      ),
+      td(
+        div(
+          cls := "btn-group btn-group-sm",
+          button(
+            tpe      := "button",
+            cls      := "btn btn-success btn-sm py-0",
+            "Add",
+            onClick --> { _ =>
+              val amountTxt = Option(amountRef).map(_.value.trim).getOrElse("")
+              val note      = Option(noteRef).map(_.value.trim).filter(_.nonEmpty)
+              amountTxt.toDoubleOption.foreach { amount =>
+                val amountCents = (amount * 100).toLong
+                if amountCents != 0 then {
+                  dataService.addSavingsTransaction(account.id, amountCents, note)
+                  savingToAccountId.set(None)
+                }
+              }
+            },
+          ),
+          button(tpe := "button", cls := "btn btn-secondary btn-sm py-0", "×", onClick --> { _ => savingToAccountId.set(None) }),
+        ),
       ),
     )
   }

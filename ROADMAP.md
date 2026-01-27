@@ -96,6 +96,27 @@ Development is split into phases. Each phase should result in a usable increment
 
 ---
 
+## Phase 3.5: Savings Support
+**Goal**: Add savings accounts with targets and transaction tracking.
+
+*Savings accounts* are separate from regular bank accounts - they represent buckets for accumulating money (emergency fund, vacation, etc.). They have editable balances and optional monthly targets. Transactions track inflows/outflows.
+
+- [x] **3.5.1 Savings Data Layer**
+  - Schema migration: savings_accounts, savings_transactions tables
+  - Scala models: SavingsAccount, SavingsTransaction
+  - Repository: SavingsAccountRepository, SavingsTransactionRepository
+  - Tests for repositories
+
+- [x] **3.5.2 Savings UI (Mock Data)**
+  - Savings section on Accounts page
+  - List savings accounts with balance, target, period progress
+  - Add/edit savings account (name, currency, target)
+  - Edit balance directly (for corrections)
+  - Add transaction (+/-) with optional note
+  - Show transactions for current period
+
+---
+
 ## Phase 4: API & Business Logic
 **Goal**: Implement API endpoints and calculations driven by UI needs.
 
@@ -125,7 +146,7 @@ Development is split into phases. Each phase should result in a usable increment
 
 - [ ] **4.5 Dashboard Summary API**
   - Budget summary endpoint
-  - Free money calculation
+  - Free money calculation (including remaining savings)
   - Daily budget calculation
   - Wire to Dashboard UI
 
@@ -261,12 +282,10 @@ Development is split into phases. Each phase should result in a usable increment
 
 ## Future Ideas (Not Planned)
 
-- Multiple currencies beyond EUR
-- Budget goals/targets
+- Multiple currencies beyond EUR/PLN
 - Expense forecasting
 - Mobile native app (or PWA)
 - Multi-user with proper accounts
-- Recurring income tracking
 - Bill due date reminders
 - Receipt photo storage
 - Bank API integration (open banking)
@@ -281,4 +300,5 @@ Development is split into phases. Each phase should result in a usable increment
 | 1       | 2026-01-26 | 1     | 1.1, 1.2, 1.3, 1.4 | Foundation complete, Scala 3.5.2 due to JS bug |
 | 2       | 2026-01-27 | 2     | 2.1, 2.2, 2.3    | Data layer complete with doobie, flyway, scalatest, 34 tests |
 | 3       | 2026-01-27 | 3     | 3.1-3.5, 6.1-6.2 | Frontend UI complete with mock data, e2e tests, copy summary |
+| 4       | 2026-01-27 | 3.5   | 3.5.1, 3.5.2     | Savings support: data layer + UI, 50 backend tests, 33 e2e tests |
 

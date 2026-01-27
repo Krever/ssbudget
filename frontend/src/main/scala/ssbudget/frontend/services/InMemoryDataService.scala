@@ -68,12 +68,51 @@ object InMemoryDataService extends DataService {
     ExchangeRate.fromDouble(Currency.EUR, Currency.PLN, 4.32, now),
   )
 
-  override def accounts: Signal[List[Account]]                 = accountsVar.signal
-  override def balanceSnapshots: Signal[List[BalanceSnapshot]] = balanceSnapshotsVar.signal
-  override def budgetItems: Signal[List[BudgetItemDefinition]] = budgetItemsVar.signal
-  override def budgetRecords: Signal[List[ExpenseRecord]]      = budgetRecordsVar.signal
-  override def periods: Signal[List[Period]]                   = periodsVar.signal
-  override def exchangeRate: Signal[ExchangeRate]              = exchangeRateVar.signal
+  private val savingsAccountsVar: Var[List[SavingsAccount]] = Var(
+    List(
+      SavingsAccount(SavingsAccountId("sav-1"), "Emergency Fund", Currency.PLN, 500000, Some(50000)),
+      SavingsAccount(SavingsAccountId("sav-2"), "Vacation", Currency.EUR, 30000, Some(20000)),
+      SavingsAccount(SavingsAccountId("sav-3"), "New Laptop", Currency.PLN, 200000, None),
+    ),
+  )
+
+  private val savingsTransactionsVar: Var[List[SavingsTransaction]] = Var(
+    List(
+      SavingsTransaction(
+        SavingsTransactionId("stxn-1"),
+        SavingsAccountId("sav-1"),
+        PeriodId("period-1"),
+        50000,
+        Some("Monthly contribution"),
+        tenDaysAgo.plus(2, ChronoUnit.DAYS),
+      ),
+      SavingsTransaction(
+        SavingsTransactionId("stxn-2"),
+        SavingsAccountId("sav-1"),
+        PeriodId("period-1"),
+        -10000,
+        Some("Small emergency"),
+        tenDaysAgo.plus(5, ChronoUnit.DAYS),
+      ),
+      SavingsTransaction(
+        SavingsTransactionId("stxn-3"),
+        SavingsAccountId("sav-2"),
+        PeriodId("period-1"),
+        15000,
+        None,
+        tenDaysAgo.plus(3, ChronoUnit.DAYS),
+      ),
+    ),
+  )
+
+  override def accounts: Signal[List[Account]]                       = accountsVar.signal
+  override def balanceSnapshots: Signal[List[BalanceSnapshot]]       = balanceSnapshotsVar.signal
+  override def budgetItems: Signal[List[BudgetItemDefinition]]       = budgetItemsVar.signal
+  override def budgetRecords: Signal[List[ExpenseRecord]]            = budgetRecordsVar.signal
+  override def periods: Signal[List[Period]]                         = periodsVar.signal
+  override def exchangeRate: Signal[ExchangeRate]                    = exchangeRateVar.signal
+  override def savingsAccounts: Signal[List[SavingsAccount]]         = savingsAccountsVar.signal
+  override def savingsTransactions: Signal[List[SavingsTransaction]] = savingsTransactionsVar.signal
 
   override def currentPeriod: Signal[Option[Period]] =
     periodsVar.signal.map(_.find(_.endDate.isEmpty))
@@ -140,6 +179,30 @@ object InMemoryDataService extends DataService {
 
   override def scaledEstimatedExpenses: Signal[Money] = scaledEstimatedCents.map(Money.pln)
 
+  override def currentPeriodSavingsTransactions: Signal[List[SavingsTransaction]] =
+    Signal
+      .combine(savingsTransactionsVar.signal, currentPeriod)
+      .map { case (txns, periodOpt) =>
+        periodOpt.fold(List.empty[SavingsTransaction])(period => txns.filter(_.periodId == period.id))
+      }
+
+  private def remainingSavingsCents: Signal[Long] =
+    Signal
+      .combine(savingsAccountsVar.signal, currentPeriodSavingsTransactions)
+      .map { case (accounts, txns) =>
+        accounts.foldLeft(0L) { (acc, account) =>
+          account.plannedMonthly match {
+            case Some(target) =>
+              val contributions = txns.filter(_.accountId == account.id).map(_.amount).sum
+              val remaining     = math.max(0L, target - contributions)
+              acc + remaining
+            case None         => acc
+          }
+        }
+      }
+
+  override def remainingSavingsTarget: Signal[Money] = remainingSavingsCents.map(Money.pln)
+
   private def pendingIncomeCents: Signal[Long] =
     Signal
       .combine(plannedIncomes, currentPeriodRecords)
@@ -154,14 +217,18 @@ object InMemoryDataService extends DataService {
   override def pendingIncome: Signal[Money] = pendingIncomeCents.map(Money.pln)
 
   override def predictedExpenses: Signal[Money] =
-    Signal
-      .combine(unpaidPlannedCents, scaledEstimatedCents)
-      .map { case (unpaid, scaled) => Money.pln(unpaid + scaled) }
+    unpaidPlannedCents
+      .combineWith(scaledEstimatedCents)
+      .combineWith(remainingSavingsCents)
+      .map { case (unpaid, scaled, savings) => Money.pln(unpaid + scaled + savings) }
 
   override def freeMoney: Signal[Money] =
-    Signal
-      .combine(totalBalanceCents, unpaidPlannedCents, scaledEstimatedCents, pendingIncomeCents)
-      .map { case (total, unpaid, scaled, income) => Money.pln(total - unpaid - scaled + income) }
+    totalBalanceCents
+      .combineWith(unpaidPlannedCents)
+      .combineWith(scaledEstimatedCents)
+      .combineWith(remainingSavingsCents)
+      .combineWith(pendingIncomeCents)
+      .map { case (total, unpaid, scaled, savings, income) => Money.pln(total - unpaid - scaled - savings + income) }
 
   override def availableNow: Signal[Money] =
     Signal
@@ -289,4 +356,61 @@ object InMemoryDataService extends DataService {
 
   private def getCurrentPeriod: Option[Period] =
     periodsVar.now().find(_.endDate.isEmpty)
+
+  override def addSavingsAccount(name: String, currency: Currency, plannedMonthly: Option[Long]): Unit = {
+    val newId = SavingsAccountId(s"sav-${System.currentTimeMillis()}")
+    savingsAccountsVar.update(_ :+ SavingsAccount(newId, name, currency, 0L, plannedMonthly))
+  }
+
+  override def updateSavingsAccount(id: SavingsAccountId, name: String, currency: Currency, plannedMonthly: Option[Long]): Unit = {
+    savingsAccountsVar.update { accounts =>
+      accounts.map { acc =>
+        if acc.id == id then acc.copy(name = name, currency = currency, plannedMonthly = plannedMonthly)
+        else acc
+      }
+    }
+  }
+
+  override def updateSavingsAccountBalance(id: SavingsAccountId, newBalance: Long): Unit = {
+    savingsAccountsVar.update { accounts =>
+      accounts.map { acc =>
+        if acc.id == id then acc.copy(currentBalance = newBalance)
+        else acc
+      }
+    }
+  }
+
+  override def deleteSavingsAccount(id: SavingsAccountId): Unit = {
+    savingsAccountsVar.update(_.filterNot(_.id == id))
+    savingsTransactionsVar.update(_.filterNot(_.accountId == id))
+  }
+
+  override def addSavingsTransaction(accountId: SavingsAccountId, amount: Long, note: Option[String]): Unit = {
+    getCurrentPeriod.foreach { period =>
+      val txnId = SavingsTransactionId(s"stxn-${System.currentTimeMillis()}")
+      val txn   = SavingsTransaction(txnId, accountId, period.id, amount, note, Instant.now())
+      savingsTransactionsVar.update(_ :+ txn)
+      // Update the account balance
+      savingsAccountsVar.update { accounts =>
+        accounts.map { acc =>
+          if acc.id == accountId then acc.copy(currentBalance = acc.currentBalance + amount)
+          else acc
+        }
+      }
+    }
+  }
+
+  override def deleteSavingsTransaction(id: SavingsTransactionId): Unit = {
+    val txnOpt = savingsTransactionsVar.now().find(_.id == id)
+    txnOpt.foreach { txn =>
+      // Reverse the balance change
+      savingsAccountsVar.update { accounts =>
+        accounts.map { acc =>
+          if acc.id == txn.accountId then acc.copy(currentBalance = acc.currentBalance - txn.amount)
+          else acc
+        }
+      }
+      savingsTransactionsVar.update(_.filterNot(_.id == id))
+    }
+  }
 }

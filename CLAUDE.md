@@ -35,13 +35,30 @@ Think "Google Sheets for personal budget" not "enterprise dashboard with cards e
    - Scale with remaining period (10 days left = 1/3 of monthly estimate)
    - Can toggle whether included in remaining balance calculation
 
+### Savings
+
+**Savings Accounts** - Buckets for accumulating money (emergency fund, vacation, etc.)
+- Have a currency and current balance
+- Balance is editable directly (for corrections/initial setup)
+- Can have an optional monthly target (planned savings amount)
+- Transactions (inflows/outflows) modify the balance
+
+**Savings Transactions** - Individual money movements
+- Positive = inflow (contributing to savings)
+- Negative = outflow (withdrawing from savings)
+- Can have multiple per period (e.g., +500, -100, -200)
+- Optional note for context
+
 ### Key Calculation
 ```
-Free Money = Total Balance - Predicted Expenses
+Free Money = Total Balance - Predicted Expenses - Remaining Savings
 Daily Budget = Free Money / Days Until Period End
 ```
 
-Where `Predicted Expenses = Sum(unpaid planned estimates) + Scaled(estimated expenses)`
+Where:
+- `Predicted Expenses = Sum(unpaid planned estimates) + Scaled(estimated expenses)`
+- `Remaining Savings = Sum(plannedMonthly - period contributions) for accounts with targets`
+- Period contributions = sum of transactions for current period per savings account
 
 ## Tech Stack
 
@@ -90,6 +107,17 @@ BalanceSnapshot:
 
 Account:
   - id, name, currency (PLN|EUR)
+
+SavingsAccount:
+  - id, name, currency (PLN|EUR)
+  - currentBalance (cents, editable directly)
+  - plannedMonthly (optional target per period)
+
+SavingsTransaction:
+  - id, accountId, periodId
+  - amount (positive = inflow/saving, negative = outflow/withdrawal)
+  - note (optional)
+  - createdAt
 
 ExchangeRate:
   - fromCurrency, toCurrency, rate, fetchedAt
@@ -258,6 +286,7 @@ This project uses incremental development across multiple Claude sessions:
 | HTTP client        | tapir-sttp-client         | Type-safe, shares endpoint defs with backend     |
 | Scala version      | 3.5.2                     | Scala 3.8.1 has Scala.js compiler bug (js.async) |
 | UI philosophy      | Spreadsheet-like          | Concise, direct edit, minimal clicks             |
+| Savings accounts   | Separate entity           | Different behavior from bank accounts (editable balance, targets) |
 
 ## Laminar/Airstream Gotchas
 
