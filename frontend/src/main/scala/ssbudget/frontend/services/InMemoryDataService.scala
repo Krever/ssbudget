@@ -3,10 +3,13 @@ package ssbudget.frontend.services
 import com.raquo.laminar.api.L.*
 import ssbudget.shared.model.*
 
-import java.time.Instant
+import java.time.{Instant, LocalDate, ZoneId}
 import java.time.temporal.ChronoUnit
+import scala.concurrent.Future
 
 object InMemoryDataService extends DataService {
+
+  override def initialize(): Future[Unit] = Future.successful(())
 
   private val now           = Instant.now()
   private val tenDaysAgo    = now.minus(10, ChronoUnit.DAYS)
@@ -163,10 +166,13 @@ object InMemoryDataService extends DataService {
 
   override def daysRemainingInPeriod: Signal[Int] =
     currentPeriod.map {
-      case Some(period) =>
-        val daysSinceStart = ChronoUnit.DAYS.between(period.startDate, Instant.now()).toInt
-        math.max(1, 30 - daysSinceStart)
-      case None         => 0
+      case Some(_) =>
+        val today     = LocalDate.now(ZoneId.of("UTC"))
+        val day25     = today.withDayOfMonth(25)
+        val periodEnd = if today.getDayOfMonth < 25 then day25 else day25.plusMonths(1)
+        val daysLeft  = ChronoUnit.DAYS.between(today, periodEnd).toInt
+        math.max(1, daysLeft)
+      case None    => 0
     }
 
   private def scaledEstimatedCents: Signal[Long] =
@@ -240,7 +246,7 @@ object InMemoryDataService extends DataService {
       .combine(freeMoney, daysRemainingInPeriod)
       .map { case (free, days) => if days > 0 then free / days else Money.pln(0) }
 
-  override def addAccount(name: String, currency: Currency): Unit = {
+  override def addAccount(name: String, currency: Currency): Future[Unit] = {
     val newId = AccountId(s"acc-${System.currentTimeMillis()}")
     accountsVar.update(_ :+ Account(newId, name, currency))
     balanceSnapshotsVar.update { snaps =>
@@ -252,9 +258,10 @@ object InMemoryDataService extends DataService {
         Instant.now(),
       )
     }
+    Future.successful(())
   }
 
-  override def updateAccountBalance(accountId: AccountId, amountCents: Long): Unit = {
+  override def updateAccountBalance(accountId: AccountId, amountCents: Long): Future[Unit] = {
     val account = accountsVar.now().find(_.id == accountId)
     account.foreach { acc =>
       balanceSnapshotsVar.update { snapshots =>
@@ -268,9 +275,10 @@ object InMemoryDataService extends DataService {
         snapshots.filterNot(_.accountId == accountId) :+ newSnapshot
       }
     }
+    Future.successful(())
   }
 
-  override def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long): Unit = {
+  override def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long): Future[Unit] = {
     val newId  = ExpenseDefId(s"item-${System.currentTimeMillis()}")
     val newDef = BudgetItemDefinition(newId, name, itemType, EstimateMode.Fixed, Some(estimateCents))
     budgetItemsVar.update(_ :+ newDef)
@@ -288,23 +296,26 @@ object InMemoryDataService extends DataService {
         }
       }
     }
+    Future.successful(())
   }
 
-  override def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long): Unit = {
+  override def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long): Future[Unit] = {
     budgetItemsVar.update { defs =>
       defs.map { item =>
         if item.id == itemId then item.copy(fixedEstimate = Some(newEstimateCents))
         else item
       }
     }
+    Future.successful(())
   }
 
-  override def deleteBudgetItem(itemId: ExpenseDefId): Unit = {
+  override def deleteBudgetItem(itemId: ExpenseDefId): Future[Unit] = {
     budgetItemsVar.update(_.filterNot(_.id == itemId))
     budgetRecordsVar.update(_.filterNot(_.expenseDefId == itemId))
+    Future.successful(())
   }
 
-  override def markBudgetItemAsPaid(itemId: ExpenseDefId, amountCents: Long): Unit = {
+  override def markBudgetItemAsPaid(itemId: ExpenseDefId, amountCents: Long): Future[Unit] = {
     getCurrentPeriod.foreach { period =>
       budgetRecordsVar.update { records =>
         records.map { rec =>
@@ -313,9 +324,10 @@ object InMemoryDataService extends DataService {
         }
       }
     }
+    Future.successful(())
   }
 
-  override def unmarkBudgetItemAsPaid(itemId: ExpenseDefId): Unit = {
+  override def unmarkBudgetItemAsPaid(itemId: ExpenseDefId): Future[Unit] = {
     getCurrentPeriod.foreach { period =>
       budgetRecordsVar.update { records =>
         records.map { rec =>
@@ -324,9 +336,10 @@ object InMemoryDataService extends DataService {
         }
       }
     }
+    Future.successful(())
   }
 
-  override def startNewPeriod(): Unit = {
+  override def startNewPeriod(): Future[Unit] = {
     val now = Instant.now()
 
     periodsVar.update { ps =>
@@ -352,40 +365,45 @@ object InMemoryDataService extends DataService {
         )
       }
     }
+    Future.successful(())
   }
 
   private def getCurrentPeriod: Option[Period] =
     periodsVar.now().find(_.endDate.isEmpty)
 
-  override def addSavingsAccount(name: String, currency: Currency, plannedMonthly: Option[Long]): Unit = {
+  override def addSavingsAccount(name: String, currency: Currency, plannedMonthly: Option[Long]): Future[Unit] = {
     val newId = SavingsAccountId(s"sav-${System.currentTimeMillis()}")
     savingsAccountsVar.update(_ :+ SavingsAccount(newId, name, currency, 0L, plannedMonthly))
+    Future.successful(())
   }
 
-  override def updateSavingsAccount(id: SavingsAccountId, name: String, currency: Currency, plannedMonthly: Option[Long]): Unit = {
+  override def updateSavingsAccount(id: SavingsAccountId, name: String, currency: Currency, plannedMonthly: Option[Long]): Future[Unit] = {
     savingsAccountsVar.update { accounts =>
       accounts.map { acc =>
         if acc.id == id then acc.copy(name = name, currency = currency, plannedMonthly = plannedMonthly)
         else acc
       }
     }
+    Future.successful(())
   }
 
-  override def updateSavingsAccountBalance(id: SavingsAccountId, newBalance: Long): Unit = {
+  override def updateSavingsAccountBalance(id: SavingsAccountId, newBalance: Long): Future[Unit] = {
     savingsAccountsVar.update { accounts =>
       accounts.map { acc =>
         if acc.id == id then acc.copy(currentBalance = newBalance)
         else acc
       }
     }
+    Future.successful(())
   }
 
-  override def deleteSavingsAccount(id: SavingsAccountId): Unit = {
+  override def deleteSavingsAccount(id: SavingsAccountId): Future[Unit] = {
     savingsAccountsVar.update(_.filterNot(_.id == id))
     savingsTransactionsVar.update(_.filterNot(_.accountId == id))
+    Future.successful(())
   }
 
-  override def addSavingsTransaction(accountId: SavingsAccountId, amount: Long, note: Option[String]): Unit = {
+  override def addSavingsTransaction(accountId: SavingsAccountId, amount: Long, note: Option[String]): Future[Unit] = {
     getCurrentPeriod.foreach { period =>
       val txnId = SavingsTransactionId(s"stxn-${System.currentTimeMillis()}")
       val txn   = SavingsTransaction(txnId, accountId, period.id, amount, note, Instant.now())
@@ -398,9 +416,10 @@ object InMemoryDataService extends DataService {
         }
       }
     }
+    Future.successful(())
   }
 
-  override def deleteSavingsTransaction(id: SavingsTransactionId): Unit = {
+  override def deleteSavingsTransaction(id: SavingsTransactionId): Future[Unit] = {
     val txnOpt = savingsTransactionsVar.now().find(_.id == id)
     txnOpt.foreach { txn =>
       // Reverse the balance change
@@ -412,5 +431,6 @@ object InMemoryDataService extends DataService {
       }
       savingsTransactionsVar.update(_.filterNot(_.id == id))
     }
+    Future.successful(())
   }
 }

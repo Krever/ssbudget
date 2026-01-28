@@ -1,6 +1,7 @@
 package ssbudget.backend
 
 import cats.effect.{IO, IOApp, Resource}
+import cats.implicits.*
 import com.comcast.ip4s.{host, port}
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.server.Server
@@ -13,8 +14,9 @@ import java.nio.file.{Files, Paths}
 
 object Main extends IOApp.Simple {
 
-  private val dbPath  = sys.env.getOrElse("SSBUDGET_DB_PATH", "data/ssbudget.db")
-  private val jdbcUrl = s"jdbc:sqlite:$dbPath"
+  private val dbPath   = sys.env.getOrElse("SSBUDGET_DB_PATH", "data/ssbudget.db")
+  private val jdbcUrl  = s"jdbc:sqlite:$dbPath"
+  private val testMode = sys.env.contains("SSBUDGET_TEST_MODE")
 
   private def ensureDbDirectoryExists: IO[Unit] = IO.blocking {
     val path = Paths.get(dbPath).getParent
@@ -27,13 +29,16 @@ object Main extends IOApp.Simple {
     HealthEndpoint.health.serverLogicSuccess(_ => IO.pure("ok")),
   )
 
-  private def server(repos: Repositories): Resource[IO, Server] =
+  private def server(repos: Repositories): Resource[IO, Server] = {
+    val allRoutes = healthRoute <+> Routes.make(repos, testMode)
+
     EmberServerBuilder
       .default[IO]
       .withHost(host"0.0.0.0")
       .withPort(port"8080")
-      .withHttpApp(healthRoute.orNotFound)
+      .withHttpApp(allRoutes.orNotFound)
       .build
+  }
 
   override def run: IO[Unit] = {
     val resources = for {

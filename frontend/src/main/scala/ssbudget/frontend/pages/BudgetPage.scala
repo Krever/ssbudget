@@ -1,8 +1,12 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
+import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.DataService
 import ssbudget.shared.model.*
+
+import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
 
 object BudgetPage {
 
@@ -229,11 +233,10 @@ object BudgetPage {
       td(colSpan := 2, cls := "small", txn.note.getOrElse[String]("-")),
       td(cls     := s"text-end font-monospace small $colorCls", s"$sign$amountStr"),
       td(
-        button(
-          cls       := "btn btn-outline-danger btn-sm py-0",
-          styleAttr := "font-size: 0.7rem",
+        Loading.actionButton(
           "×",
-          onClick --> { _ => dataService.deleteSavingsTransaction(txn.id) },
+          () => dataService.deleteSavingsTransaction(txn.id),
+          "btn btn-outline-danger btn-sm py-0",
         ),
       ),
     )
@@ -283,21 +286,21 @@ object BudgetPage {
       td(
         div(
           cls := "btn-group btn-group-sm",
-          button(
-            tpe      := "button",
-            cls      := "btn btn-success btn-sm py-0",
+          Loading.actionButton(
             "Add",
-            onClick --> { _ =>
+            () => {
               val amountTxt = Option(amountRef).map(_.value.trim).getOrElse("")
               val note      = Option(noteRef).map(_.value.trim).filter(_.nonEmpty)
-              amountTxt.toDoubleOption.foreach { amount =>
-                val amountCents = (amount * 100).toLong
-                if amountCents != 0 then {
-                  dataService.addSavingsTransaction(account.id, amountCents, note)
-                  savingToAccountId.set(None)
-                }
+              amountTxt.toDoubleOption match {
+                case Some(amount) =>
+                  val amountCents = (amount * 100).toLong
+                  if amountCents != 0 then {
+                    dataService.addSavingsTransaction(account.id, amountCents, note).map(_ => savingToAccountId.set(None))
+                  } else Future.successful(())
+                case None         => Future.successful(())
               }
             },
+            "btn btn-success btn-sm py-0",
           ),
           button(tpe := "button", cls := "btn btn-secondary btn-sm py-0", "×", onClick --> { _ => savingToAccountId.set(None) }),
         ),
@@ -334,7 +337,7 @@ object BudgetPage {
             cls := "btn-group btn-group-sm",
             if isPaid then List(
               button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingItemId.set(Some(item.id)) }),
-              button(cls := "btn btn-outline-warning btn-sm", undoLabel, onClick --> { _ => dataService.unmarkBudgetItemAsPaid(item.id) }),
+              Loading.actionButton(undoLabel, () => dataService.unmarkBudgetItemAsPaid(item.id), "btn btn-outline-warning btn-sm"),
             )
             else
               List(
@@ -359,8 +362,7 @@ object BudgetPage {
       td(
         saveCancel(
           onSave = () => {
-            dataService.markBudgetItemAsPaid(item.id, parseCents(inputRef))
-            payingItemId.set(None)
+            dataService.markBudgetItemAsPaid(item.id, parseCents(inputRef)).map(_ => payingItemId.set(None))
           },
           onCancel = () => payingItemId.set(None),
         ),
@@ -395,13 +397,11 @@ object BudgetPage {
       td(
         saveCancelDelete(
           onSave = () => {
-            dataService.updateBudgetItemEstimate(item.id, parseCents(estimateRef))
-            editingItemId.set(None)
+            dataService.updateBudgetItemEstimate(item.id, parseCents(estimateRef)).map(_ => editingItemId.set(None))
           },
           onCancel = () => editingItemId.set(None),
           onDelete = () => {
-            dataService.deleteBudgetItem(item.id)
-            editingItemId.set(None)
+            dataService.deleteBudgetItem(item.id).map(_ => editingItemId.set(None))
           },
         ),
       ),
@@ -426,8 +426,9 @@ object BudgetPage {
           onSave = () => {
             val name = Option(nameRef).map(_.value.trim).getOrElse("")
             if name.nonEmpty then {
-              dataService.addBudgetItem(name, itemType, parseCents(estimateRef))
-              addingVar.set(false)
+              dataService.addBudgetItem(name, itemType, parseCents(estimateRef)).map(_ => addingVar.set(false))
+            } else {
+              Future.successful(())
             }
           },
           onCancel = () => addingVar.set(false),
@@ -474,20 +475,20 @@ object BudgetPage {
     Option(input).flatMap(_.value.toDoubleOption).map(d => (d * 100).toLong).getOrElse(0L)
   }
 
-  private def saveCancel(onSave: () => Unit, onCancel: () => Unit, saveLabel: String = "Save"): HtmlElement = {
+  private def saveCancel(onSave: () => Future[Unit], onCancel: () => Unit, saveLabel: String = "Save"): HtmlElement = {
     div(
       cls := "btn-group btn-group-sm",
-      button(tpe := "button", cls := "btn btn-success btn-sm", saveLabel, onClick --> { _ => onSave() }),
+      Loading.actionButton(saveLabel, onSave, "btn btn-success btn-sm"),
       button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => onCancel() }),
     )
   }
 
-  private def saveCancelDelete(onSave: () => Unit, onCancel: () => Unit, onDelete: () => Unit): HtmlElement = {
+  private def saveCancelDelete(onSave: () => Future[Unit], onCancel: () => Unit, onDelete: () => Future[Unit]): HtmlElement = {
     div(
       cls := "btn-group btn-group-sm",
-      button(tpe := "button", cls := "btn btn-primary btn-sm", "Save", onClick --> { _ => onSave() }),
+      Loading.actionButton("Save", onSave, "btn btn-primary btn-sm"),
       button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => onCancel() }),
-      button(tpe := "button", cls := "btn btn-danger btn-sm", "Del", onClick --> { _ => onDelete() }),
+      Loading.actionButton("Del", onDelete, "btn btn-danger btn-sm"),
     )
   }
 }

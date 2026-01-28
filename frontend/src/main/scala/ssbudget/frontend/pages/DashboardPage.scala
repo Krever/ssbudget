@@ -2,12 +2,15 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
+import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.DataService
 import ssbudget.frontend.util.Formatting
 import ssbudget.shared.model.*
 
 import java.time.format.DateTimeFormatter
 import java.time.{Instant, ZoneOffset}
+import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
 
 object DashboardPage {
 
@@ -118,10 +121,10 @@ object DashboardPage {
         child <-- isEditingBalances.signal.map { isEditing =>
           if isEditing then div(
             cls   := "btn-group btn-group-sm",
-            button(
-              cls := "btn btn-success btn-sm py-0",
+            Loading.actionButton(
               "Save All",
-              onClick --> { _ => saveAllBalances() },
+              () => saveAllBalances(),
+              "btn btn-success btn-sm py-0",
             ),
             button(
               cls := "btn btn-secondary btn-sm py-0",
@@ -233,21 +236,24 @@ object DashboardPage {
     isEditingBalances.set(true)
   }
 
-  private def saveAllBalances(): Unit = {
+  private def saveAllBalances(): Future[Unit] = {
     import com.raquo.airstream.ownership.OneTimeOwner
     given owner: OneTimeOwner = new OneTimeOwner(() => ())
 
-    val accounts = dataService.accounts.observe.now()
-    val edited   = editedBalances.now()
-    accounts.foreach(acc => edited.get(acc.id).foreach(amount => dataService.updateAccountBalance(acc.id, amount)))
+    val accounts    = dataService.accounts.observe.now()
+    val edited      = editedBalances.now()
+    val bankFutures = accounts.flatMap(acc => edited.get(acc.id).map(amount => dataService.updateAccountBalance(acc.id, amount)))
 
     val savingsAccounts = dataService.savingsAccounts.observe.now()
     val editedSavings   = editedSavingsBalances.now()
-    savingsAccounts.foreach(acc => editedSavings.get(acc.id).foreach(amount => dataService.updateSavingsAccountBalance(acc.id, amount)))
+    val savingsFutures  =
+      savingsAccounts.flatMap(acc => editedSavings.get(acc.id).map(amount => dataService.updateSavingsAccountBalance(acc.id, amount)))
 
-    isEditingBalances.set(false)
-    editedBalances.set(Map.empty)
-    editedSavingsBalances.set(Map.empty)
+    Future.sequence(bankFutures ++ savingsFutures).map { _ =>
+      isEditingBalances.set(false)
+      editedBalances.set(Map.empty)
+      editedSavingsBalances.set(Map.empty)
+    }
   }
 
   private def copySummaryToClipboard(): Unit = {

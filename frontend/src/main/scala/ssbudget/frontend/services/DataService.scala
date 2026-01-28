@@ -1,39 +1,50 @@
 package ssbudget.frontend.services
 
 import com.raquo.laminar.api.L.*
+import org.scalajs.dom
 import ssbudget.shared.model.*
 
+import scala.concurrent.Future
+
 trait DataService {
+  // Initialization (for API-backed implementations)
+  def initialize(): Future[Unit]
+
+  // Accounts
   def accounts: Signal[List[Account]]
   def balanceSnapshots: Signal[List[BalanceSnapshot]]
-  def addAccount(name: String, currency: Currency): Unit
-  def updateAccountBalance(accountId: AccountId, amountCents: Long): Unit
+  def addAccount(name: String, currency: Currency): Future[Unit]
+  def updateAccountBalance(accountId: AccountId, amountCents: Long): Future[Unit]
 
+  // Budget items
   def budgetItems: Signal[List[BudgetItemDefinition]]
   def budgetRecords: Signal[List[ExpenseRecord]]
-  def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long): Unit
-  def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long): Unit
-  def deleteBudgetItem(itemId: ExpenseDefId): Unit
-  def markBudgetItemAsPaid(itemId: ExpenseDefId, amountCents: Long): Unit
-  def unmarkBudgetItemAsPaid(itemId: ExpenseDefId): Unit
+  def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long): Future[Unit]
+  def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long): Future[Unit]
+  def deleteBudgetItem(itemId: ExpenseDefId): Future[Unit]
+  def markBudgetItemAsPaid(itemId: ExpenseDefId, amountCents: Long): Future[Unit]
+  def unmarkBudgetItemAsPaid(itemId: ExpenseDefId): Future[Unit]
 
+  // Periods
   def periods: Signal[List[Period]]
-  def startNewPeriod(): Unit
+  def startNewPeriod(): Future[Unit]
 
+  // Exchange rate
   def exchangeRate: Signal[ExchangeRate]
 
   // Savings accounts
   def savingsAccounts: Signal[List[SavingsAccount]]
   def savingsTransactions: Signal[List[SavingsTransaction]]
   def currentPeriodSavingsTransactions: Signal[List[SavingsTransaction]]
-  def addSavingsAccount(name: String, currency: Currency, plannedMonthly: Option[Long]): Unit
-  def updateSavingsAccount(id: SavingsAccountId, name: String, currency: Currency, plannedMonthly: Option[Long]): Unit
-  def updateSavingsAccountBalance(id: SavingsAccountId, newBalance: Long): Unit
-  def deleteSavingsAccount(id: SavingsAccountId): Unit
-  def addSavingsTransaction(accountId: SavingsAccountId, amount: Long, note: Option[String]): Unit
-  def deleteSavingsTransaction(id: SavingsTransactionId): Unit
+  def addSavingsAccount(name: String, currency: Currency, plannedMonthly: Option[Long]): Future[Unit]
+  def updateSavingsAccount(id: SavingsAccountId, name: String, currency: Currency, plannedMonthly: Option[Long]): Future[Unit]
+  def updateSavingsAccountBalance(id: SavingsAccountId, newBalance: Long): Future[Unit]
+  def deleteSavingsAccount(id: SavingsAccountId): Future[Unit]
+  def addSavingsTransaction(accountId: SavingsAccountId, amount: Long, note: Option[String]): Future[Unit]
+  def deleteSavingsTransaction(id: SavingsTransactionId): Future[Unit]
   def remainingSavingsTarget: Signal[Money] // planned - actual contributions for current period
 
+  // Derived signals
   def currentPeriod: Signal[Option[Period]]
   def plannedExpenses: Signal[List[BudgetItemDefinition]]
   def estimatedExpenses: Signal[List[BudgetItemDefinition]]
@@ -52,5 +63,12 @@ trait DataService {
 }
 
 object DataService {
-  val instance: DataService = InMemoryDataService
+  import scala.concurrent.ExecutionContext.Implicits.global
+
+  private lazy val apiService = new ApiDataService(new ApiClient())
+
+  lazy val instance: DataService = {
+    if dom.window.location.search.contains("mock=true") then InMemoryDataService
+    else apiService
+  }
 }

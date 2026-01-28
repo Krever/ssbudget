@@ -1,9 +1,12 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
+import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.DataService
 import ssbudget.frontend.util.Formatting
 import ssbudget.shared.model.*
+
+import scala.concurrent.ExecutionContext.Implicits.global
 
 object AccountsPage {
 
@@ -177,17 +180,17 @@ object AccountsPage {
       td(
         div(
           cls := "btn-group btn-group-sm",
-          button(
-            tpe      := "button",
-            cls      := "btn btn-success btn-sm",
+          Loading.actionButton(
             "Add",
-            onClick --> { _ =>
+            () => {
               val name = Option(nameRef).map(_.value.trim).getOrElse("")
               if name.nonEmpty then {
-                dataService.addAccount(name, currencyValue.now())
-                addingAccount.set(false)
+                dataService.addAccount(name, currencyValue.now()).map(_ => addingAccount.set(false))
+              } else {
+                scala.concurrent.Future.successful(())
               }
             },
+            "btn btn-success btn-sm",
           ),
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => addingAccount.set(false) }),
         ),
@@ -287,29 +290,25 @@ object AccountsPage {
       td(
         div(
           cls := "btn-group btn-group-sm",
-          button(
-            tpe      := "button",
-            cls      := "btn btn-primary btn-sm",
+          Loading.actionButton(
             "Save",
-            onClick --> { _ =>
+            () => {
               val name      = Option(nameRef).map(_.value.trim).getOrElse("")
               val targetTxt = Option(targetRef).map(_.value.trim).getOrElse("")
               if name.nonEmpty then {
                 val targetCents = if targetTxt.isEmpty then None else Some((targetTxt.toDoubleOption.getOrElse(0.0) * 100).toLong)
-                dataService.updateSavingsAccount(account.id, name, currencyValue.now(), targetCents)
-                editingSavingsId.set(None)
+                dataService.updateSavingsAccount(account.id, name, currencyValue.now(), targetCents).map(_ => editingSavingsId.set(None))
+              } else {
+                scala.concurrent.Future.successful(())
               }
             },
+            "btn btn-primary btn-sm",
           ),
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => editingSavingsId.set(None) }),
-          button(
-            tpe      := "button",
-            cls      := "btn btn-danger btn-sm",
+          Loading.actionButton(
             "Del",
-            onClick --> { _ =>
-              dataService.deleteSavingsAccount(account.id)
-              editingSavingsId.set(None)
-            },
+            () => dataService.deleteSavingsAccount(account.id).map(_ => editingSavingsId.set(None)),
+            "btn btn-danger btn-sm",
           ),
         ),
       ),
@@ -352,19 +351,19 @@ object AccountsPage {
       td(
         div(
           cls := "btn-group btn-group-sm",
-          button(
-            tpe      := "button",
-            cls      := "btn btn-success btn-sm",
+          Loading.actionButton(
             "Add",
-            onClick --> { _ =>
+            () => {
               val name      = Option(nameRef).map(_.value.trim).getOrElse("")
               val targetTxt = Option(targetRef).map(_.value.trim).getOrElse("")
               if name.nonEmpty then {
                 val targetCents = if targetTxt.isEmpty then None else Some((targetTxt.toDoubleOption.getOrElse(0.0) * 100).toLong)
-                dataService.addSavingsAccount(name, currencyValue.now(), targetCents)
-                addingSavings.set(false)
+                dataService.addSavingsAccount(name, currencyValue.now(), targetCents).map(_ => addingSavings.set(false))
+              } else {
+                scala.concurrent.Future.successful(())
               }
             },
+            "btn btn-success btn-sm",
           ),
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => addingSavings.set(false) }),
         ),

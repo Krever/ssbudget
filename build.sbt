@@ -35,8 +35,9 @@ lazy val shared = crossProject(JSPlatform, JVMPlatform)
   .settings(
     name := "shared",
     libraryDependencies ++= Seq(
-      "com.softwaremill.sttp.tapir" %%% "tapir-core" % tapirVersion,
-      "io.circe"                    %%% "circe-core" % circeVersion
+      "com.softwaremill.sttp.tapir" %%% "tapir-core"       % tapirVersion,
+      "com.softwaremill.sttp.tapir" %%% "tapir-json-circe" % tapirVersion,
+      "io.circe"                    %%% "circe-core"       % circeVersion
     )
   )
   .jsSettings(

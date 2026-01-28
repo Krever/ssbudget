@@ -1,9 +1,13 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
+import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.DataService
 import ssbudget.frontend.util.Formatting
 import ssbudget.shared.model.Period
+
+import java.time.{LocalDate, ZoneId}
+import scala.concurrent.ExecutionContext.Implicits.global
 
 object PeriodsPage {
 
@@ -42,13 +46,18 @@ object PeriodsPage {
               div(
                 cls := "row mb-3",
                 div(
-                  cls := "col-6",
+                  cls := "col-4",
                   div(cls := "text-muted small", "Started"),
                   div(cls := "fw-bold", Formatting.formatDate(period.startDate)),
                 ),
                 div(
-                  cls := "col-6",
-                  div(cls := "text-muted small", "Days Remaining"),
+                  cls := "col-4",
+                  div(cls := "text-muted small", "Expected End"),
+                  div(cls := "fw-bold", expectedEndDate()),
+                ),
+                div(
+                  cls := "col-4",
+                  div(cls := "text-muted small", "Days Left"),
                   div(
                     cls   := "fw-bold",
                     child.text <-- dataService.daysRemainingInPeriod.map(_.toString),
@@ -77,11 +86,10 @@ object PeriodsPage {
               ),
               div(
                 cls := "d-grid",
-                button(
-                  tpe := "button",
-                  cls := "btn btn-warning",
+                Loading.actionButton(
                   "End Period & Start New",
-                  onClick --> { _ => dataService.startNewPeriod() },
+                  () => dataService.startNewPeriod(),
+                  "btn btn-warning",
                 ),
               ),
             )
@@ -89,11 +97,10 @@ object PeriodsPage {
             div(
               cls := "text-center py-4",
               p(cls := "text-muted", "No active period"),
-              button(
-                tpe := "button",
-                cls := "btn btn-primary",
+              Loading.actionButton(
                 "Start New Period",
-                onClick --> { _ => dataService.startNewPeriod() },
+                () => dataService.startNewPeriod(),
+                "btn btn-primary",
               ),
             )
         },
@@ -128,6 +135,13 @@ object PeriodsPage {
         ),
       ),
     )
+  }
+
+  private def expectedEndDate(): String = {
+    val today     = LocalDate.now(ZoneId.of("UTC"))
+    val day25     = today.withDayOfMonth(25)
+    val periodEnd = if today.getDayOfMonth < 25 then day25 else day25.plusMonths(1)
+    Formatting.formatLocalDate(periodEnd)
   }
 
   private def periodRow(period: Period): HtmlElement = {

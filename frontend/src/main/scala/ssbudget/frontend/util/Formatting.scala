@@ -32,6 +32,10 @@ object Formatting {
     dateFormatter.format(localDate)
   }
 
+  def formatLocalDate(date: LocalDate): String = {
+    dateFormatter.format(date)
+  }
+
   def formatDateShort(instant: Instant): String = {
     val localDate = instant.atZone(zone).toLocalDate
     shortDateFormatter.format(localDate)
