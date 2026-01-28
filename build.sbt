@@ -19,14 +19,18 @@ lazy val root = (project in file("."))
   )
 
 lazy val e2e = (project in file("e2e"))
+  .dependsOn(backend % "test->test;test->compile")
   .settings(
     name := "e2e",
     libraryDependencies ++= Seq(
-      "org.scalatest"          %% "scalatest"       % "3.2.19" % Test,
-      "org.seleniumhq.selenium" % "selenium-java"   % "4.27.0" % Test,
-      "io.github.bonigarcia"    % "webdrivermanager" % "5.9.2" % Test
+      "org.scalatest"          %% "scalatest"        % "3.2.19" % Test,
+      "org.seleniumhq.selenium" % "selenium-java"    % "4.27.0" % Test,
+      "io.github.bonigarcia"    % "webdrivermanager" % "5.9.2"  % Test
     ),
-    Test / fork := true
+    Test / fork := true,
+    Test / javaOptions ++= Seq(
+      s"-Duser.dir=${baseDirectory.value.getAbsolutePath}"
+    )
   )
 
 lazy val shared = crossProject(JSPlatform, JVMPlatform)

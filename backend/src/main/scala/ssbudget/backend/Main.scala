@@ -2,7 +2,7 @@ package ssbudget.backend
 
 import cats.effect.{IO, IOApp, Resource}
 import cats.implicits.*
-import com.comcast.ip4s.{host, port}
+import com.comcast.ip4s.{Host, Port, host}
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.server.Server
 import sttp.tapir.server.http4s.Http4sServerInterpreter
@@ -14,9 +14,10 @@ import java.nio.file.{Files, Paths}
 
 object Main extends IOApp.Simple {
 
-  private val dbPath   = sys.env.getOrElse("SSBUDGET_DB_PATH", "data/ssbudget.db")
-  private val jdbcUrl  = s"jdbc:sqlite:$dbPath"
-  private val testMode = sys.env.contains("SSBUDGET_TEST_MODE")
+  private val dbPath     = sys.env.getOrElse("SSBUDGET_DB_PATH", "data/ssbudget.db")
+  private val jdbcUrl    = s"jdbc:sqlite:$dbPath"
+  private val testMode   = sys.env.contains("SSBUDGET_TEST_MODE")
+  private val serverPort = Port.fromString(sys.env.getOrElse("SSBUDGET_PORT", "8080")).getOrElse(Port.fromInt(8080).get)
 
   private def ensureDbDirectoryExists: IO[Unit] = IO.blocking {
     val path = Paths.get(dbPath).getParent
@@ -35,7 +36,7 @@ object Main extends IOApp.Simple {
     EmberServerBuilder
       .default[IO]
       .withHost(host"0.0.0.0")
-      .withPort(port"8080")
+      .withPort(serverPort)
       .withHttpApp(allRoutes.orNotFound)
       .build
   }

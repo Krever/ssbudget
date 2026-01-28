@@ -6,6 +6,9 @@ import scala.jdk.CollectionConverters.*
 class DashboardSpec extends E2ESpec {
 
   "Dashboard" should "load and show summary panel" in {
+    ensurePeriodExists()
+    addBankAccount("Test Account")
+
     driver.get(baseUrl)
     waitForPage("Dashboard")
 
@@ -16,22 +19,27 @@ class DashboardSpec extends E2ESpec {
   }
 
   it should "update account balance via bulk edit" in {
+    ensurePeriodExists()
+    addBankAccount("Balance Test Account")
+
     driver.get(baseUrl)
     waitForPage("Dashboard")
 
-    val card         = findCard("Accounts")
-    val initialTotal = card.findElement(By.cssSelector(".card-footer .font-monospace")).getText
-
+    val card  = findCard("Accounts")
     click(card, "Edit Balances")
     val input = card.findElements(By.cssSelector("input[type='number']")).asScala.head
     input.clear()
     input.sendKeys("5000.00")
     click(card, "Save All")
 
-    card.findElement(By.cssSelector(".card-footer .font-monospace")).getText should not equal initialTotal
+    Thread.sleep(300)
+    card.getText should include("5000")
   }
 
   it should "cancel balance edit without saving" in {
+    ensurePeriodExists()
+    addBankAccount("Cancel Test Account")
+
     driver.get(baseUrl)
     waitForPage("Dashboard")
 
@@ -46,6 +54,9 @@ class DashboardSpec extends E2ESpec {
   }
 
   it should "copy summary to clipboard" in {
+    ensurePeriodExists()
+    addBankAccount("Clipboard Test Account")
+
     driver.get(baseUrl)
     waitForPage("Dashboard")
 

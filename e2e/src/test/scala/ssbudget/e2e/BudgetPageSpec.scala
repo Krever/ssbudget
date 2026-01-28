@@ -5,7 +5,9 @@ import scala.jdk.CollectionConverters.*
 
 class BudgetPageSpec extends E2ESpec {
 
-  "Budget page" should "load planned items and estimated expenses" in {
+  "Budget page" should "load planned items and estimated expenses cards" in {
+    ensurePeriodExists()
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
@@ -15,6 +17,8 @@ class BudgetPageSpec extends E2ESpec {
   }
 
   it should "add a new planned expense" in {
+    ensurePeriodExists()
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
@@ -30,6 +34,8 @@ class BudgetPageSpec extends E2ESpec {
   }
 
   it should "add a new planned income" in {
+    ensurePeriodExists()
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
@@ -45,39 +51,44 @@ class BudgetPageSpec extends E2ESpec {
   }
 
   it should "pay expense with default amount" in {
+    ensurePeriodExists()
+    addPlannedExpense("Pay Test Expense", 100.00)
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
-    val card        = findCard("Planned Items")
-    val pendingRows = card.findElements(By.xpath(".//tr[.//span[contains(text(),'Pending')]]")).asScala.toList
+    val card       = findCard("Planned Items")
+    val pendingRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Pay Test Expense')]]"))
 
-    if pendingRows.nonEmpty then {
-      click(pendingRows.head, "Pay")
-      click(card.findElement(By.cssSelector("tr.table-info")), "Save")
-      rows(card).count(_.getText.contains("Paid")) should be >= 1
-    }
+    click(pendingRow, "Pay")
+    click(card.findElement(By.cssSelector("tr.table-info")), "Save")
+
+    card.getText should include("Paid")
   }
 
   it should "pay expense with overridden amount" in {
+    ensurePeriodExists()
+    addPlannedExpense("Override Pay Expense", 100.00)
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
-    val card        = findCard("Planned Items")
-    val pendingRows = card.findElements(By.xpath(".//tr[.//span[contains(text(),'Pending')]]")).asScala.toList
+    val card       = findCard("Planned Items")
+    val pendingRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Override Pay Expense')]]"))
 
-    if pendingRows.nonEmpty then {
-      click(pendingRows.head, "Pay")
-      val editRow = card.findElement(By.cssSelector("tr.table-info"))
-      val input   = editRow.findElement(By.cssSelector("input[type='number']"))
-      input.clear()
-      input.sendKeys("99.99")
-      click(editRow, "Save")
+    click(pendingRow, "Pay")
+    val editRow = card.findElement(By.cssSelector("tr.table-info"))
+    val input   = editRow.findElement(By.cssSelector("input[type='number']"))
+    input.clear()
+    input.sendKeys("99.99")
+    click(editRow, "Save")
 
-      rows(card).exists(_.getText.contains("99.99")) shouldBe true
-    }
+    card.getText should include("99.99")
   }
 
-  it should "edit and delete a budget item" in {
+  it should "add and delete an estimated expense" in {
+    ensurePeriodExists()
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
@@ -85,20 +96,24 @@ class BudgetPageSpec extends E2ESpec {
     click(card, "+ Add")
 
     val addRow = card.findElement(By.cssSelector("tr.table-primary"))
-    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("To Delete")
+    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("To Delete Expense")
     addRow.findElement(By.cssSelector("input[type='number']")).sendKeys("100")
     click(addRow, "Add")
 
-    val toDelete = card.findElement(By.xpath(".//tr[.//td[contains(text(),'To Delete')]]"))
+    rows(card).exists(_.getText.contains("To Delete Expense")) shouldBe true
+
+    val toDelete = card.findElement(By.xpath(".//tr[.//td[contains(text(),'To Delete Expense')]]"))
     click(toDelete, "Edit")
     click(card.findElement(By.cssSelector("tr.table-warning")), "Del")
 
-    rows(card).exists(_.getText.contains("To Delete")) shouldBe false
+    rows(card).exists(_.getText.contains("To Delete Expense")) shouldBe false
   }
 
   // ============ Planned Savings ============
 
   it should "show planned savings card" in {
+    ensurePeriodExists()
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
@@ -107,23 +122,29 @@ class BudgetPageSpec extends E2ESpec {
   }
 
   it should "show savings accounts with targets" in {
+    ensurePeriodExists()
+    addSavingsAccount("Budget Savings Test", Some(500))
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
     val card = findCard("Planned Savings")
-    card.getText should include("Emergency Fund")
+    card.getText should include("Budget Savings Test")
     card.getText should include("Target")
     card.getText should include("Saved")
     card.getText should include("Remaining")
   }
 
   it should "expand savings account to show transactions" in {
+    ensurePeriodExists()
+    addSavingsAccount("Expand Test Savings", Some(500))
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
     val card       = findCard("Planned Savings")
     // Find a savings account row and click to expand
-    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]"))
+    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Expand Test Savings')]]"))
     savingsRow.click()
     Thread.sleep(300)
 
@@ -132,12 +153,15 @@ class BudgetPageSpec extends E2ESpec {
   }
 
   it should "add a savings transaction" in {
+    ensurePeriodExists()
+    addSavingsAccount("Add Txn Savings", Some(500))
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
     val card       = findCard("Planned Savings")
     // Expand the savings account
-    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]"))
+    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Add Txn Savings')]]"))
     savingsRow.click()
     Thread.sleep(300)
 
@@ -157,12 +181,15 @@ class BudgetPageSpec extends E2ESpec {
   }
 
   it should "delete a savings transaction" in {
+    ensurePeriodExists()
+    addSavingsAccount("Delete Txn Savings", Some(500))
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
     val card       = findCard("Planned Savings")
     // Expand the savings account
-    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]"))
+    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Delete Txn Savings')]]"))
     savingsRow.click()
     Thread.sleep(300)
 
@@ -185,24 +212,30 @@ class BudgetPageSpec extends E2ESpec {
   }
 
   it should "collapse expanded savings account" in {
+    ensurePeriodExists()
+    addSavingsAccount("Collapse Test Savings", Some(500))
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
     val card = findCard("Planned Savings")
     // Expand
-    card.findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]")).click()
+    card.findElement(By.xpath(".//tr[.//td[contains(text(),'Collapse Test Savings')]]")).click()
     Thread.sleep(300)
 
     card.findElements(By.xpath(".//button[contains(text(),'+ Add')]")).size() shouldBe 1
 
     // Collapse - need to re-find element as DOM was updated
-    card.findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]")).click()
+    card.findElement(By.xpath(".//tr[.//td[contains(text(),'Collapse Test Savings')]]")).click()
     Thread.sleep(300)
 
     card.findElements(By.xpath(".//button[contains(text(),'+ Add')]")).size() shouldBe 0
   }
 
   it should "show remaining to save in footer" in {
+    ensurePeriodExists()
+    addSavingsAccount("Footer Savings Test", Some(500))
+
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 

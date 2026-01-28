@@ -5,7 +5,7 @@ import scala.jdk.CollectionConverters.*
 
 class PeriodsPageSpec extends E2ESpec {
 
-  "Periods page" should "load current period and history" in {
+  "Periods page" should "load and show period cards" in {
     driver.get(s"$baseUrl/periods")
     waitForPage("Periods")
 
@@ -14,7 +14,26 @@ class PeriodsPageSpec extends E2ESpec {
     cardTexts.exists(_.contains("Period History")) shouldBe true
   }
 
+  it should "start new period when none exists" in {
+    driver.get(s"$baseUrl/periods")
+    waitForPage("Periods")
+
+    val card = findCardByDiv("Current Period")
+
+    // If no period, start one
+    if card.getText.contains("No active period") then {
+      click(card, "Start New Period")
+      Thread.sleep(500)
+    }
+
+    // Now should have an active period with progress bar
+    val progressBar = card.findElement(By.cssSelector(".progress-bar"))
+    progressBar.getAttribute("style") should include("width:")
+  }
+
   it should "show progress bar for current period" in {
+    ensurePeriodExists()
+
     driver.get(s"$baseUrl/periods")
     waitForPage("Periods")
 
@@ -23,7 +42,9 @@ class PeriodsPageSpec extends E2ESpec {
     progressBar.getAttribute("style") should include("width:")
   }
 
-  it should "show at least one period in history" in {
+  it should "show at least one period in history when period exists" in {
+    ensurePeriodExists()
+
     driver.get(s"$baseUrl/periods")
     waitForPage("Periods")
 
@@ -35,6 +56,8 @@ class PeriodsPageSpec extends E2ESpec {
   }
 
   it should "close current period and start new one" in {
+    ensurePeriodExists()
+
     driver.get(s"$baseUrl/periods")
     waitForPage("Periods")
 
@@ -42,7 +65,7 @@ class PeriodsPageSpec extends E2ESpec {
     val initialCount = rows(historyCard).size
     val currentCard  = findCardByDiv("Current Period")
 
-    click(currentCard, "End Period")
+    click(currentCard, "End Period & Start New")
     Thread.sleep(500)
 
     rows(historyCard).size shouldBe (initialCount + 1)

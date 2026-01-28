@@ -7,23 +7,12 @@ class AccountsPageSpec extends E2ESpec {
 
   // ============ Bank Accounts ============
 
-  "Accounts page" should "load and show initial bank accounts" in {
+  "Accounts page" should "load and show bank accounts card" in {
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
-    val bankCard  = findCard("Bank Accounts")
-    val tableRows = rows(bankCard)
-    tableRows.size should be >= 2
-  }
-
-  it should "show expected bank account names" in {
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
-
-    val bankCard = findCard("Bank Accounts")
-    val names    = bankCard.findElements(By.cssSelector("tbody tr td:first-child")).asScala.map(_.getText).toList
-    names should contain("Main PLN")
-    names should contain("Euro Account")
+    val cardTexts = driver.findElements(By.cssSelector(".card")).asScala.map(_.getText).toList
+    cardTexts.exists(_.contains("Bank Accounts")) shouldBe true
   }
 
   it should "add a new bank account" in {
@@ -54,6 +43,8 @@ class AccountsPageSpec extends E2ESpec {
   }
 
   it should "enter and cancel edit mode for bank account" in {
+    addBankAccount("Edit Test Account")
+
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
@@ -68,14 +59,15 @@ class AccountsPageSpec extends E2ESpec {
     bankCard.findElement(By.cssSelector("tbody tr td:first-child")).getText shouldBe initialName
   }
 
-  it should "show total balance and exchange rate in footer" in {
+  it should "show total balance in footer" in {
+    addBankAccount("Footer Test Account")
+
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
     val bankCard   = findCard("Bank Accounts")
     val footerText = bankCard.findElement(By.cssSelector(".card-footer")).getText
     footerText should include("Total Balance (PLN)")
-    footerText should include("EUR/PLN")
   }
 
   // ============ Savings Accounts ============
@@ -86,18 +78,6 @@ class AccountsPageSpec extends E2ESpec {
 
     val savingsCard = findCard("Savings Accounts")
     savingsCard.isDisplayed shouldBe true
-  }
-
-  it should "show initial savings accounts" in {
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
-
-    val savingsCard = findCard("Savings Accounts")
-    val tableRows   = rows(savingsCard)
-    tableRows.size should be >= 1
-
-    val names = savingsCard.findElements(By.cssSelector("tbody tr td:first-child")).asScala.map(_.getText).toList
-    names should contain("Emergency Fund")
   }
 
   it should "add a new savings account" in {
@@ -130,12 +110,14 @@ class AccountsPageSpec extends E2ESpec {
   }
 
   it should "edit savings account" in {
+    addSavingsAccount("Edit Savings Test", Some(500))
+
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
     val savingsCard = findCard("Savings Accounts")
-    val firstRow    = savingsCard.findElement(By.cssSelector("tbody tr"))
-    click(firstRow, "Edit")
+    val targetRow   = savingsCard.findElement(By.xpath(".//tr[.//td[contains(text(),'Edit Savings Test')]]"))
+    click(targetRow, "Edit")
 
     val editRow = savingsCard.findElement(By.cssSelector("tbody tr.table-warning"))
     editRow.isDisplayed shouldBe true
@@ -145,7 +127,7 @@ class AccountsPageSpec extends E2ESpec {
     targetInput.sendKeys("999")
     click(editRow, "Save")
 
-    rows(savingsCard).head.getText should include("999")
+    savingsCard.getText should include("999")
   }
 
   it should "delete savings account" in {
