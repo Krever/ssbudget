@@ -3,13 +3,9 @@ package ssbudget.e2e
 import cats.effect.IO
 import cats.implicits.*
 import cats.effect.unsafe.implicits.global
-import com.comcast.ip4s.{Host, Port, host}
-import org.http4s.ember.server.EmberServerBuilder
-import org.http4s.server.Server
-import sttp.tapir.server.http4s.Http4sServerInterpreter
-import ssbudget.backend.Routes
+import com.comcast.ip4s.Port
+import ssbudget.backend.ServerBuilder
 import ssbudget.backend.db.{Database, Repositories}
-import ssbudget.shared.api.HealthEndpoint
 
 import java.io.File
 import java.net.{HttpURLConnection, ServerSocket, URL}
@@ -61,24 +57,11 @@ object TestServers {
     val tempDb  = Files.createTempFile("ssbudget-e2e-", ".db")
     dbPath = Some(tempDb)
     val jdbcUrl = s"jdbc:sqlite:${tempDb.toAbsolutePath}"
-
-    val port = Port.fromInt(_backendPort).get
-
-    val healthRoute = Http4sServerInterpreter[IO]().toRoutes(
-      HealthEndpoint.health.serverLogicSuccess(_ => IO.pure("ok")),
-    )
+    val port    = Port.fromInt(_backendPort).get
 
     val serverIO: IO[Nothing] = Database.migrateAndTransactor(jdbcUrl).use { xa =>
-      val repos     = Repositories.fromTransactor(xa)
-      val allRoutes = healthRoute <+> Routes.make(repos, testMode = true)
-
-      EmberServerBuilder
-        .default[IO]
-        .withHost(host"0.0.0.0")
-        .withPort(port)
-        .withHttpApp(allRoutes.orNotFound)
-        .build
-        .useForever
+      val repos = Repositories.fromTransactor(xa)
+      ServerBuilder.build(repos, port, testMode = true).useForever
     }
 
     backendFiber = Some(serverIO.start.unsafeRunSync())

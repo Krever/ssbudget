@@ -122,29 +122,29 @@ Development is split into phases. Each phase should result in a usable increment
 
 *Strategy*: For each UI screen, define the tapir endpoints it needs, implement backend handlers, and wire up the frontend. Business logic (calculations, period management) is implemented as needed to support the API.
 
-- [ ] **4.1 Frontend HTTP Client Setup**
+- [x] **4.1 Frontend HTTP Client Setup**
   - tapir-sttp-client integration
   - API service layer pattern
   - Error handling utilities
 
-- [ ] **4.2 Account & Balance API**
+- [x] **4.2 Account & Balance API**
   - Account CRUD endpoints
   - Balance snapshot recording
   - Sum balances across accounts (with EUR conversion)
   - Wire to Account Management UI
 
-- [ ] **4.3 Expense API**
+- [x] **4.3 Expense API**
   - Expense definition CRUD endpoints
   - Expense payment recording
   - Expense prediction calculations (unpaid planned + scaled estimated)
   - Wire to Expense Management UI
 
-- [ ] **4.4 Period API**
+- [x] **4.4 Period API**
   - Period management endpoints (start, current, list)
   - Period state transitions
   - Wire to Period Management UI
 
-- [ ] **4.5 Dashboard Summary API**
+- [x] **4.5 Dashboard Summary API**
   - Budget summary endpoint
   - Free money calculation (including remaining savings)
   - Daily budget calculation
@@ -301,4 +301,5 @@ Development is split into phases. Each phase should result in a usable increment
 | 2       | 2026-01-27 | 2     | 2.1, 2.2, 2.3    | Data layer complete with doobie, flyway, scalatest, 34 tests |
 | 3       | 2026-01-27 | 3     | 3.1-3.5, 6.1-6.2 | Frontend UI complete with mock data, e2e tests, copy summary |
 | 4       | 2026-01-27 | 3.5   | 3.5.1, 3.5.2     | Savings support: data layer + UI, 50 backend tests, 33 e2e tests |
+| 5       | 2026-01-28 | 4     | 4.1-4.5          | API integration, e2e infrastructure with auto-managed servers |
 

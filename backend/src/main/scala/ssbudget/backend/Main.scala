@@ -2,13 +2,9 @@ package ssbudget.backend
 
 import cats.effect.{IO, IOApp, Resource}
 import cats.implicits.*
-import com.comcast.ip4s.{Host, Port, host}
-import org.http4s.ember.server.EmberServerBuilder
-import org.http4s.server.Server
-import sttp.tapir.server.http4s.Http4sServerInterpreter
+import com.comcast.ip4s.Port
 
 import ssbudget.backend.db.{Database, Repositories}
-import ssbudget.shared.api.HealthEndpoint
 
 import java.nio.file.{Files, Paths}
 
@@ -26,21 +22,6 @@ object Main extends IOApp.Simple {
     }
   }
 
-  private val healthRoute = Http4sServerInterpreter[IO]().toRoutes(
-    HealthEndpoint.health.serverLogicSuccess(_ => IO.pure("ok")),
-  )
-
-  private def server(repos: Repositories): Resource[IO, Server] = {
-    val allRoutes = healthRoute <+> Routes.make(repos, testMode)
-
-    EmberServerBuilder
-      .default[IO]
-      .withHost(host"0.0.0.0")
-      .withPort(serverPort)
-      .withHttpApp(allRoutes.orNotFound)
-      .build
-  }
-
   override def run: IO[Unit] = {
     val resources = for {
       _    <- Resource.eval(IO.println(s"Using database: $jdbcUrl"))
@@ -48,7 +29,7 @@ object Main extends IOApp.Simple {
       xa   <- Database.migrateAndTransactor(jdbcUrl)
       repos = Repositories.fromTransactor(xa)
       _    <- Resource.eval(IO.println("Database migrated successfully"))
-      s    <- server(repos)
+      s    <- ServerBuilder.build(repos, serverPort, testMode)
     } yield s
 
     resources.use { s =>
