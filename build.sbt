@@ -58,18 +58,22 @@ lazy val backend = (project in file("backend"))
       "org.typelevel"               %% "cats-effect"         % "3.5.7",
       "org.http4s"                  %% "http4s-ember-server" % http4sVersion,
       "org.http4s"                  %% "http4s-dsl"          % http4sVersion,
+      "org.http4s"                  %% "http4s-circe"        % http4sVersion,
       "com.softwaremill.sttp.tapir" %% "tapir-http4s-server" % tapirVersion,
       "com.softwaremill.sttp.tapir" %% "tapir-json-circe"    % tapirVersion,
       "io.circe"                    %% "circe-generic"       % circeVersion,
       "ch.qos.logback"               % "logback-classic"     % "1.5.15",
       // Database
-      "org.tpolecat"  %% "doobie-core"  % doobieVersion,
+      "org.tpolecat"  %% "doobie-core"   % doobieVersion,
       "org.tpolecat"  %% "doobie-hikari" % doobieVersion,
-      "org.xerial"     % "sqlite-jdbc"  % "3.47.2.0",
-      "org.flywaydb"   % "flyway-core"  % "10.22.0",
+      "org.xerial"     % "sqlite-jdbc"   % "3.47.2.0",
+      "org.flywaydb"   % "flyway-core"   % "10.22.0",
+      // Authentication
+      "de.mkammerer" % "argon2-jvm"           % "2.11",
+      "com.yubico"   % "webauthn-server-core" % "2.5.3",
       // Testing
-      "org.scalatest" %% "scalatest"                     % "3.2.19"  % Test,
-      "org.typelevel" %% "cats-effect-testing-scalatest" % "1.6.0"   % Test
+      "org.scalatest" %% "scalatest"                     % "3.2.19" % Test,
+      "org.typelevel" %% "cats-effect-testing-scalatest" % "1.6.0"  % Test
     ),
     Compile / run / fork := true
   )

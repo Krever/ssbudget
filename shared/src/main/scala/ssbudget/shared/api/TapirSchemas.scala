@@ -43,4 +43,20 @@ object TapirSchemas {
   given Schema[IdResponse]                  = Schema.derived[IdResponse]
   given Schema[AccountResponse]             = Schema.derived[AccountResponse]
   given Schema[SavingsTransactionResponse]  = Schema.derived[SavingsTransactionResponse]
+
+  // Auth DTO types
+  given Schema[AuthStatus]                    = Schema.derived[AuthStatus]
+  given Schema[SetupRequest]                  = Schema.derived[SetupRequest]
+  given Schema[LoginRequest]                  = Schema.derived[LoginRequest]
+  given Schema[PasskeyInfo]                   = Schema.derived[PasskeyInfo]
+  given Schema[PasskeyRegisterStartRequest]   = Schema.derived[PasskeyRegisterStartRequest]
+  given Schema[PasskeyRegistrationOptions]    = Schema.derived[PasskeyRegistrationOptions]
+  given Schema[AuthenticatorSelection]        = Schema.derived[AuthenticatorSelection]
+  given Schema[PubKeyCredParam]               = Schema.derived[PubKeyCredParam]
+  given Schema[PasskeyRegistrationResponse]   = Schema.derived[PasskeyRegistrationResponse]
+  given Schema[AttestationResponse]           = Schema.derived[AttestationResponse]
+  given Schema[PasskeyAuthenticationOptions]  = Schema.derived[PasskeyAuthenticationOptions]
+  given Schema[AllowCredential]               = Schema.derived[AllowCredential]
+  given Schema[PasskeyAuthenticationResponse] = Schema.derived[PasskeyAuthenticationResponse]
+  given Schema[AssertionResponse]             = Schema.derived[AssertionResponse]
 }

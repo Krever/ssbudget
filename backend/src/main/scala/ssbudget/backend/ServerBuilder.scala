@@ -7,6 +7,7 @@ import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.server.Server
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 
+import ssbudget.backend.auth.{PasswordService, SessionService, WebAuthnService}
 import ssbudget.backend.db.Repositories
 import ssbudget.shared.api.HealthEndpoint
 
@@ -17,19 +18,44 @@ object ServerBuilder {
     HealthEndpoint.health.serverLogicSuccess(_ => IO.pure("ok")),
   )
 
+  // WebAuthn configuration from environment
+  private val rpId      = sys.env.getOrElse("SSBUDGET_RP_ID", "localhost")
+  private val rpName    = sys.env.getOrElse("SSBUDGET_RP_NAME", "SSBudget")
+  private val rpOrigins = sys.env
+    .get("SSBUDGET_RP_ORIGINS")
+    .map(_.split(",").toSet)
+    .getOrElse(Set("http://localhost:3000", "http://localhost:8080"))
+
   /** Build a server resource with the given configuration */
   def build(
       repos: Repositories,
       port: Port,
       testMode: Boolean = false,
   ): Resource[IO, Server] = {
-    val allRoutes = healthRoute <+> Routes.make(repos, testMode)
+    Resource.eval(WebAuthnService(repos.passkeyCredentials, rpId, rpName, rpOrigins)).flatMap { webAuthnService =>
+      val passwordService = PasswordService()
+      val sessionService  = SessionService(repos.sessions)
 
-    EmberServerBuilder
-      .default[IO]
-      .withHost(host"0.0.0.0")
-      .withPort(port)
-      .withHttpApp(allRoutes.orNotFound)
-      .build
+      val authRoutes = AuthRoutes.make(
+        repos.authConfig,
+        repos.passkeyCredentials,
+        passwordService,
+        sessionService,
+        webAuthnService,
+        testMode,
+      )
+
+      // Routes now handle their own auth via Tapir's serverSecurityLogic
+      val dataRoutes = Routes.make(repos, sessionService, testMode)
+
+      val allRoutes = healthRoute <+> authRoutes <+> dataRoutes
+
+      EmberServerBuilder
+        .default[IO]
+        .withHost(host"0.0.0.0")
+        .withPort(port)
+        .withHttpApp(allRoutes.orNotFound)
+        .build
+    }
   }
 }

@@ -13,6 +13,9 @@ final case class Repositories(
     exchangeRates: ExchangeRateRepository,
     savingsAccounts: SavingsAccountRepository,
     savingsTransactions: SavingsTransactionRepository,
+    authConfig: AuthConfigRepository,
+    sessions: SessionRepository,
+    passkeyCredentials: PasskeyCredentialRepository,
 )
 
 object Repositories {
@@ -26,6 +29,9 @@ object Repositories {
       exchangeRates = new ExchangeRateRepositoryImpl(xa),
       savingsAccounts = new SavingsAccountRepositoryImpl(xa),
       savingsTransactions = new SavingsTransactionRepositoryImpl(xa),
+      authConfig = new AuthConfigRepositoryImpl(xa),
+      sessions = new SessionRepositoryImpl(xa),
+      passkeyCredentials = new PasskeyCredentialRepositoryImpl(xa),
     )
   }
 }

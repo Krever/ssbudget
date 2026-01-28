@@ -3,7 +3,11 @@ package ssbudget.backend
 import cats.effect.IO
 import cats.implicits.*
 import org.http4s.HttpRoutes
+import sttp.capabilities.fs2.Fs2Streams
+import sttp.tapir.*
+import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
+import ssbudget.backend.auth.SessionService
 import ssbudget.backend.db.Repositories
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
@@ -13,145 +17,69 @@ import java.util.UUID
 
 object Routes {
 
-  def make(repos: Repositories, testMode: Boolean = false): HttpRoutes[IO] = {
+  /** Result type for route handlers - IO with Either for error handling. */
+  type Result[T] = IO[Either[String, T]]
+
+  def make(repos: Repositories, sessionService: SessionService, testMode: Boolean = false): HttpRoutes[IO] = {
     val interpreter = Http4sServerInterpreter[IO]()
 
-    val listAccountsRoute = interpreter.toRoutes(
-      Endpoints.accounts.list.serverLogic(_ => repos.accounts.findAll.map(Right(_))),
-    )
+    def validateSession(tokenOpt: Option[String]): IO[Either[String, Unit]] =
+      AuthRoutes.validateSession(sessionService, tokenOpt, testMode)
 
-    val createAccountRoute = interpreter.toRoutes(
-      Endpoints.accounts.create.serverLogic(createAccount(repos)),
-    )
+    def route[I, O](ep: Endpoint[Option[String], I, String, O, Any])(h: I => Result[O]): ServerEndpoint[Any, IO] =
+      ep.serverSecurityLogic(validateSession).serverLogic(_ => h)
 
-    val listLatestBalancesRoute = interpreter.toRoutes(
-      Endpoints.balances.listLatest.serverLogic(_ => repos.balanceSnapshots.findAllLatest.map(Right(_))),
-    )
+    val routes = List(
+      // Accounts
+      route(Endpoints.accounts.list)(_ => repos.accounts.findAll.map(Right(_))),
+      route(Endpoints.accounts.create)(createAccount(repos)),
+      // Balances
+      route(Endpoints.balances.listLatest)(_ => repos.balanceSnapshots.findAllLatest.map(Right(_))),
+      route(Endpoints.balances.create)(createBalanceSnapshot(repos)),
+      // Budget items
+      route(Endpoints.budgetItems.list)(_ => repos.expenseDefinitions.findAll.map(Right(_))),
+      route(Endpoints.budgetItems.create)(createBudgetItem(repos)),
+      route(Endpoints.budgetItems.update) { case (id, dto) => updateBudgetItem(repos)(id, dto) },
+      route(Endpoints.budgetItems.delete)(deleteBudgetItem(repos)),
+      // Expense records
+      route(Endpoints.expenseRecords.listCurrent)(_ => listCurrentPeriodRecords(repos)),
+      route(Endpoints.expenseRecords.pay) { case (id, dto) => payExpenseRecord(repos)(id, dto) },
+      route(Endpoints.expenseRecords.unpay)(unpayExpenseRecord(repos)),
+      // Periods
+      route(Endpoints.periods.list)(_ => repos.periods.findAll.map(Right(_))),
+      route(Endpoints.periods.startNew)(_ => startNewPeriod(repos)),
+      // Savings accounts
+      route(Endpoints.savingsAccounts.list)(_ => repos.savingsAccounts.findAll.map(Right(_))),
+      route(Endpoints.savingsAccounts.create)(createSavingsAccount(repos)),
+      route(Endpoints.savingsAccounts.update) { case (id, dto) => updateSavingsAccount(repos)(id, dto) },
+      route(Endpoints.savingsAccounts.updateBalance) { case (id, dto) => updateSavingsAccountBalance(repos)(id, dto) },
+      route(Endpoints.savingsAccounts.delete)(deleteSavingsAccount(repos)),
+      // Savings transactions
+      route(Endpoints.savingsTransactions.listCurrent)(_ => listCurrentPeriodSavingsTransactions(repos)),
+      route(Endpoints.savingsTransactions.create)(createSavingsTransaction(repos)),
+      route(Endpoints.savingsTransactions.delete)(deleteSavingsTransaction(repos)),
+      // Exchange rate
+      route(Endpoints.exchangeRate.get)(_ => repos.exchangeRates.findLatest(Currency.EUR, Currency.PLN).map(Right(_))),
+    ) ++ (if testMode then List(route(Endpoints.test.reset)(_ => resetDatabase(repos))) else Nil)
 
-    val createBalanceSnapshotRoute = interpreter.toRoutes(
-      Endpoints.balances.create.serverLogic(createBalanceSnapshot(repos)),
-    )
-
-    val listBudgetItemsRoute = interpreter.toRoutes(
-      Endpoints.budgetItems.list.serverLogic(_ => repos.expenseDefinitions.findAll.map(Right(_))),
-    )
-
-    val createBudgetItemRoute = interpreter.toRoutes(
-      Endpoints.budgetItems.create.serverLogic(createBudgetItem(repos)),
-    )
-
-    val updateBudgetItemRoute = interpreter.toRoutes(
-      Endpoints.budgetItems.update.serverLogic { case (id, dto) => updateBudgetItem(repos)(id, dto) },
-    )
-
-    val deleteBudgetItemRoute = interpreter.toRoutes(
-      Endpoints.budgetItems.delete.serverLogic(deleteBudgetItem(repos)),
-    )
-
-    val listCurrentPeriodRecordsRoute = interpreter.toRoutes(
-      Endpoints.expenseRecords.listCurrent.serverLogic(_ => listCurrentPeriodRecords(repos)),
-    )
-
-    val payExpenseRecordRoute = interpreter.toRoutes(
-      Endpoints.expenseRecords.pay.serverLogic { case (expenseDefId, dto) => payExpenseRecord(repos)(expenseDefId, dto) },
-    )
-
-    val unpayExpenseRecordRoute = interpreter.toRoutes(
-      Endpoints.expenseRecords.unpay.serverLogic(unpayExpenseRecord(repos)),
-    )
-
-    val listPeriodsRoute = interpreter.toRoutes(
-      Endpoints.periods.list.serverLogic(_ => repos.periods.findAll.map(Right(_))),
-    )
-
-    val startNewPeriodRoute = interpreter.toRoutes(
-      Endpoints.periods.startNew.serverLogic(_ => startNewPeriod(repos)),
-    )
-
-    val listSavingsAccountsRoute = interpreter.toRoutes(
-      Endpoints.savingsAccounts.list.serverLogic(_ => repos.savingsAccounts.findAll.map(Right(_))),
-    )
-
-    val createSavingsAccountRoute = interpreter.toRoutes(
-      Endpoints.savingsAccounts.create.serverLogic(createSavingsAccount(repos)),
-    )
-
-    val updateSavingsAccountRoute = interpreter.toRoutes(
-      Endpoints.savingsAccounts.update.serverLogic { case (id, dto) => updateSavingsAccount(repos)(id, dto) },
-    )
-
-    val updateSavingsAccountBalanceRoute = interpreter.toRoutes(
-      Endpoints.savingsAccounts.updateBalance.serverLogic { case (id, dto) => updateSavingsAccountBalance(repos)(id, dto) },
-    )
-
-    val deleteSavingsAccountRoute = interpreter.toRoutes(
-      Endpoints.savingsAccounts.delete.serverLogic(deleteSavingsAccount(repos)),
-    )
-
-    val listCurrentPeriodSavingsTransactionsRoute = interpreter.toRoutes(
-      Endpoints.savingsTransactions.listCurrent.serverLogic(_ => listCurrentPeriodSavingsTransactions(repos)),
-    )
-
-    val createSavingsTransactionRoute = interpreter.toRoutes(
-      Endpoints.savingsTransactions.create.serverLogic(createSavingsTransaction(repos)),
-    )
-
-    val deleteSavingsTransactionRoute = interpreter.toRoutes(
-      Endpoints.savingsTransactions.delete.serverLogic(deleteSavingsTransaction(repos)),
-    )
-
-    val getExchangeRateRoute = interpreter.toRoutes(
-      Endpoints.exchangeRate.get.serverLogic(_ => repos.exchangeRates.findLatest(Currency.EUR, Currency.PLN).map(Right(_))),
-    )
-
-    val testResetRoute = if testMode then {
-      interpreter.toRoutes(
-        Endpoints.test.reset.serverLogic(_ => resetDatabase(repos)),
-      )
-    } else {
-      HttpRoutes.empty[IO]
-    }
-
-    listAccountsRoute <+>
-      createAccountRoute <+>
-      listLatestBalancesRoute <+>
-      createBalanceSnapshotRoute <+>
-      listBudgetItemsRoute <+>
-      createBudgetItemRoute <+>
-      updateBudgetItemRoute <+>
-      deleteBudgetItemRoute <+>
-      listCurrentPeriodRecordsRoute <+>
-      payExpenseRecordRoute <+>
-      unpayExpenseRecordRoute <+>
-      listPeriodsRoute <+>
-      startNewPeriodRoute <+>
-      listSavingsAccountsRoute <+>
-      createSavingsAccountRoute <+>
-      updateSavingsAccountRoute <+>
-      updateSavingsAccountBalanceRoute <+>
-      deleteSavingsAccountRoute <+>
-      listCurrentPeriodSavingsTransactionsRoute <+>
-      createSavingsTransactionRoute <+>
-      deleteSavingsTransactionRoute <+>
-      getExchangeRateRoute <+>
-      testResetRoute
+    interpreter.toRoutes(routes)
   }
 
-  private def listCurrentPeriodRecords(repos: Repositories): IO[Either[String, List[ExpenseRecord]]] = {
+  private def listCurrentPeriodRecords(repos: Repositories): Result[List[ExpenseRecord]] = {
     for {
       currentPeriod <- repos.periods.findCurrent
       records       <- currentPeriod.fold(IO.pure(List.empty[ExpenseRecord]))(p => repos.expenseRecords.findByPeriod(p.id))
     } yield Right(records)
   }
 
-  private def listCurrentPeriodSavingsTransactions(repos: Repositories): IO[Either[String, List[SavingsTransaction]]] = {
+  private def listCurrentPeriodSavingsTransactions(repos: Repositories): Result[List[SavingsTransaction]] = {
     for {
       currentPeriod <- repos.periods.findCurrent
       txns          <- currentPeriod.fold(IO.pure(List.empty[SavingsTransaction]))(p => repos.savingsTransactions.findByPeriodId(p.id))
     } yield Right(txns)
   }
 
-  private def createAccount(repos: Repositories)(dto: CreateAccount): IO[Either[String, AccountResponse]] = {
+  private def createAccount(repos: Repositories)(dto: CreateAccount): Result[AccountResponse] = {
     val accountId  = AccountId(UUID.randomUUID().toString)
     val snapshotId = BalanceSnapshotId(UUID.randomUUID().toString)
     val now        = Instant.now()
@@ -165,7 +93,7 @@ object Routes {
     } yield Right(AccountResponse(account, snapshot))
   }
 
-  private def createBalanceSnapshot(repos: Repositories)(dto: CreateBalanceSnapshot): IO[Either[String, BalanceSnapshot]] = {
+  private def createBalanceSnapshot(repos: Repositories)(dto: CreateBalanceSnapshot): Result[BalanceSnapshot] = {
     for {
       accountOpt <- repos.accounts.findById(dto.accountId)
       result     <- accountOpt match {
@@ -180,7 +108,7 @@ object Routes {
     } yield result
   }
 
-  private def createBudgetItem(repos: Repositories)(dto: CreateBudgetItem): IO[Either[String, BudgetItemDefinition]] = {
+  private def createBudgetItem(repos: Repositories)(dto: CreateBudgetItem): Result[BudgetItemDefinition] = {
     val itemId = ExpenseDefId(UUID.randomUUID().toString)
     val item   = BudgetItemDefinition(itemId, dto.name, dto.itemType, EstimateMode.Fixed, Some(dto.estimateCents))
 
@@ -198,7 +126,7 @@ object Routes {
     } yield Right(item)
   }
 
-  private def updateBudgetItem(repos: Repositories)(id: ExpenseDefId, dto: UpdateBudgetItem): IO[Either[String, BudgetItemDefinition]] = {
+  private def updateBudgetItem(repos: Repositories)(id: ExpenseDefId, dto: UpdateBudgetItem): Result[BudgetItemDefinition] = {
     for {
       existingOpt <- repos.expenseDefinitions.findById(id)
       result      <- existingOpt match {
@@ -211,7 +139,7 @@ object Routes {
     } yield result
   }
 
-  private def deleteBudgetItem(repos: Repositories)(id: ExpenseDefId): IO[Either[String, Unit]] = {
+  private def deleteBudgetItem(repos: Repositories)(id: ExpenseDefId): Result[Unit] = {
     for {
       // Note: expense records referencing this item should be deleted or we could have FK issues
       // For now, just delete the definition (assuming cascade or manual cleanup)
@@ -219,7 +147,7 @@ object Routes {
     } yield Right(())
   }
 
-  private def payExpenseRecord(repos: Repositories)(expenseDefId: ExpenseDefId, dto: PayBudgetItem): IO[Either[String, ExpenseRecord]] = {
+  private def payExpenseRecord(repos: Repositories)(expenseDefId: ExpenseDefId, dto: PayBudgetItem): Result[ExpenseRecord] = {
     for {
       currentPeriod <- repos.periods.findCurrent
       result        <- currentPeriod match {
@@ -246,7 +174,7 @@ object Routes {
     } yield result
   }
 
-  private def unpayExpenseRecord(repos: Repositories)(expenseDefId: ExpenseDefId): IO[Either[String, ExpenseRecord]] = {
+  private def unpayExpenseRecord(repos: Repositories)(expenseDefId: ExpenseDefId): Result[ExpenseRecord] = {
     for {
       currentPeriod <- repos.periods.findCurrent
       result        <- currentPeriod match {
@@ -272,7 +200,7 @@ object Routes {
     } yield result
   }
 
-  private def startNewPeriod(repos: Repositories): IO[Either[String, Period]] = {
+  private def startNewPeriod(repos: Repositories): Result[Period] = {
     val now         = Instant.now()
     val newPeriodId = PeriodId(UUID.randomUUID().toString)
     val newPeriod   = Period(newPeriodId, now, None)
@@ -294,14 +222,14 @@ object Routes {
     } yield Right(newPeriod)
   }
 
-  private def createSavingsAccount(repos: Repositories)(dto: CreateSavingsAccount): IO[Either[String, SavingsAccount]] = {
+  private def createSavingsAccount(repos: Repositories)(dto: CreateSavingsAccount): Result[SavingsAccount] = {
     val accountId = SavingsAccountId(UUID.randomUUID().toString)
     val account   = SavingsAccount(accountId, dto.name, dto.currency, 0L, dto.plannedMonthly)
 
     repos.savingsAccounts.create(account).as(Right(account))
   }
 
-  private def updateSavingsAccount(repos: Repositories)(id: SavingsAccountId, dto: UpdateSavingsAccount): IO[Either[String, SavingsAccount]] = {
+  private def updateSavingsAccount(repos: Repositories)(id: SavingsAccountId, dto: UpdateSavingsAccount): Result[SavingsAccount] = {
     for {
       existingOpt <- repos.savingsAccounts.findById(id)
       result      <- existingOpt match {
@@ -314,9 +242,7 @@ object Routes {
     } yield result
   }
 
-  private def updateSavingsAccountBalance(
-      repos: Repositories,
-  )(id: SavingsAccountId, dto: UpdateSavingsAccountBalance): IO[Either[String, SavingsAccount]] = {
+  private def updateSavingsAccountBalance(repos: Repositories)(id: SavingsAccountId, dto: UpdateSavingsAccountBalance): Result[SavingsAccount] = {
     for {
       existingOpt <- repos.savingsAccounts.findById(id)
       result      <- existingOpt match {
@@ -329,7 +255,7 @@ object Routes {
     } yield result
   }
 
-  private def deleteSavingsAccount(repos: Repositories)(id: SavingsAccountId): IO[Either[String, Unit]] = {
+  private def deleteSavingsAccount(repos: Repositories)(id: SavingsAccountId): Result[Unit] = {
     for {
       // Delete related transactions first
       _ <- repos.savingsTransactions.deleteByAccountId(id)
@@ -337,7 +263,7 @@ object Routes {
     } yield Right(())
   }
 
-  private def createSavingsTransaction(repos: Repositories)(dto: CreateSavingsTransaction): IO[Either[String, SavingsTransactionResponse]] = {
+  private def createSavingsTransaction(repos: Repositories)(dto: CreateSavingsTransaction): Result[SavingsTransactionResponse] = {
     for {
       currentPeriod <- repos.periods.findCurrent
       accountOpt    <- repos.savingsAccounts.findById(dto.accountId)
@@ -363,7 +289,7 @@ object Routes {
     } yield result
   }
 
-  private def deleteSavingsTransaction(repos: Repositories)(id: SavingsTransactionId): IO[Either[String, SavingsAccount]] = {
+  private def deleteSavingsTransaction(repos: Repositories)(id: SavingsTransactionId): Result[SavingsAccount] = {
     for {
       txnOpt <- repos.savingsTransactions.findById(id)
       result <- txnOpt match {
@@ -389,7 +315,7 @@ object Routes {
     } yield result
   }
 
-  private def resetDatabase(repos: Repositories): IO[Either[String, Unit]] = {
+  private def resetDatabase(repos: Repositories): Result[Unit] = {
     // This is a test-only endpoint to reset the database
     // In a real implementation, you'd want to be more careful here
     IO.pure(Right(()))

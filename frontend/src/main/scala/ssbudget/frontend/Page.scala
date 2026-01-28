@@ -7,5 +7,6 @@ object Page {
   case object Budget    extends Page
   case object Accounts  extends Page
   case object Periods   extends Page
+  case object Settings  extends Page
   case object NotFound  extends Page
 }

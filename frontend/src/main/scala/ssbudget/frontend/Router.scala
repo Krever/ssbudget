@@ -11,12 +11,14 @@ object Router
         Route.static(Page.Budget, root / "budget" / endOfSegments),
         Route.static(Page.Accounts, root / "accounts" / endOfSegments),
         Route.static(Page.Periods, root / "periods" / endOfSegments),
+        Route.static(Page.Settings, root / "settings" / endOfSegments),
       ),
       getPageTitle = {
         case Page.Dashboard => "SSBudget - Dashboard"
         case Page.Budget    => "SSBudget - Budget"
         case Page.Accounts  => "SSBudget - Accounts"
         case Page.Periods   => "SSBudget - Periods"
+        case Page.Settings  => "SSBudget - Settings"
         case Page.NotFound  => "SSBudget - Not Found"
       },
       serializePage = {
@@ -24,6 +26,7 @@ object Router
         case Page.Budget    => "/budget"
         case Page.Accounts  => "/accounts"
         case Page.Periods   => "/periods"
+        case Page.Settings  => "/settings"
         case Page.NotFound  => "/404"
       },
       deserializePage = {
@@ -31,6 +34,7 @@ object Router
         case "/budget"   => Page.Budget
         case "/accounts" => Page.Accounts
         case "/periods"  => Page.Periods
+        case "/settings" => Page.Settings
         case _           => Page.NotFound
       },
     ) {

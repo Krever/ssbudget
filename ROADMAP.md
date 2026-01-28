@@ -152,35 +152,36 @@ Development is split into phases. Each phase should result in a usable increment
 
 ---
 
-## Phase 5: Authentication (Passkeys)
-**Goal**: WebAuthn passkey authentication protecting all routes.
+## Phase 5: Authentication (Password + Passkeys)
+**Goal**: Password and WebAuthn passkey authentication protecting all routes.
 
-- [ ] **5.1 Backend WebAuthn Setup**
-  - Add java-webauthn-server dependency
-  - Credential storage schema
-  - RelyingParty configuration
+- [x] **5.1 Backend Auth Setup**
+  - Add java-webauthn-server + argon2-jvm dependencies
+  - Credential storage schema (auth_config, sessions, passkey_credentials)
+  - RelyingParty configuration via environment variables
 
-- [ ] **5.2 Registration Flow**
-  - `/api/auth/register/start` - generate challenge
-  - `/api/auth/register/finish` - verify and store credential
-  - First-time setup flow (no existing credentials)
+- [x] **5.2 Registration Flow**
+  - `/api/auth/setup` - initial password setup (auto-login)
+  - `/api/auth/passkey/register/start` - generate WebAuthn challenge
+  - `/api/auth/passkey/register/finish` - verify and store credential
 
-- [ ] **5.3 Authentication Flow**
-  - `/api/auth/login/start` - generate challenge
-  - `/api/auth/login/finish` - verify credential
-  - Session token generation (JWT or simple token)
+- [x] **5.3 Authentication Flow**
+  - `/api/auth/login` - password login
+  - `/api/auth/passkey/login/start` - generate WebAuthn challenge
+  - `/api/auth/passkey/login/finish` - verify credential
+  - Session token generation (HttpOnly cookies, 30-day expiry)
 
-- [ ] **5.4 Frontend Auth Integration**
-  - WebAuthn browser API calls
-  - Login page component
-  - Registration page component
-  - Auth state management
-  - Protected route wrapper
+- [x] **5.4 Frontend Auth Integration**
+  - WebAuthn browser API wrapper (WebAuthnFacade)
+  - SetupPage - first-time password setup
+  - LoginPage - password + optional passkey login
+  - SettingsPage - passkey management
+  - Auth state management (AuthState)
 
-- [ ] **5.5 Middleware & Session**
-  - Auth middleware for protected endpoints
-  - Session cookie or Authorization header
-  - Logout endpoint
+- [x] **5.5 Middleware & Session**
+  - Session validation on all data endpoints via Tapir serverSecurityLogic
+  - HttpOnly session cookies (configurable secure flag)
+  - Logout endpoint with session invalidation
 
 ---
 
@@ -302,4 +303,5 @@ Development is split into phases. Each phase should result in a usable increment
 | 3       | 2026-01-27 | 3     | 3.1-3.5, 6.1-6.2 | Frontend UI complete with mock data, e2e tests, copy summary |
 | 4       | 2026-01-27 | 3.5   | 3.5.1, 3.5.2     | Savings support: data layer + UI, 50 backend tests, 33 e2e tests |
 | 5       | 2026-01-28 | 4     | 4.1-4.5          | API integration, e2e infrastructure with auto-managed servers |
+| 6       | 2026-01-28 | 5     | 5.1-5.5          | Password + passkey auth, 50 backend + 70 e2e tests |
 
