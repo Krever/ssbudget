@@ -29,6 +29,9 @@ object ServerBuilder {
     .map(_.split(",").toSet)
     .getOrElse(Set("http://localhost:3000", "http://localhost:8080"))
 
+  // Static files directory (for production deployment)
+  private val staticDir = sys.env.get("SSBUDGET_STATIC_DIR")
+
   /** Build a server resource with the given configuration */
   def build(
       repos: Repositories,
@@ -57,7 +60,12 @@ object ServerBuilder {
         // Routes now handle their own auth via Tapir's serverSecurityLogic
         val dataRoutes = Routes.make(repos, xa, dbPath, sessionService, currencyService, testMode)
 
-        val allRoutes = healthRoute <+> authRoutes <+> dataRoutes
+        // Static file routes for production (serves frontend build)
+        val staticRoutes = StaticRoutes.make(staticDir)
+
+        // Static routes first for non-API paths, then API routes
+        // (staticRoutes only handles non-API paths via the make method)
+        val allRoutes = staticRoutes <+> healthRoute <+> authRoutes <+> dataRoutes
 
         EmberServerBuilder
           .default[IO]

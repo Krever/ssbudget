@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import scalaJSPlugin from "@scala-js/vite-plugin-scalajs"
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     scalaJSPlugin({
       cwd: "..",
@@ -13,5 +13,10 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:8080'
     }
+  },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    sourcemap: true
   }
-})
+}))

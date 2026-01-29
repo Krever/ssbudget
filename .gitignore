@@ -48,3 +48,5 @@ node_modules/
 
 ### SSBudget ###
 data/
+
+frontend/dist

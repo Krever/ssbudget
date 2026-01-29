@@ -1,0 +1,6 @@
+# Ignore everything
+*
+
+# Except the pre-built artifacts
+!backend/target/universal/stage/
+!frontend/dist/

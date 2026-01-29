@@ -52,9 +52,12 @@ lazy val shared = crossProject(JSPlatform, JVMPlatform)
   )
 
 lazy val backend = (project in file("backend"))
+  .enablePlugins(JavaAppPackaging)
   .dependsOn(shared.jvm)
   .settings(
-    name := "backend",
+    name                 := "backend",
+    Compile / mainClass  := Some("ssbudget.backend.Main"),
+    executableScriptName := "ssbudget",
     libraryDependencies ++= Seq(
       "org.typelevel"                 %% "cats-effect"         % "3.5.7",
       "org.http4s"                    %% "http4s-ember-server" % http4sVersion,
@@ -64,7 +67,7 @@ lazy val backend = (project in file("backend"))
       "com.softwaremill.sttp.tapir"   %% "tapir-json-circe"    % tapirVersion,
       "com.softwaremill.sttp.client3" %% "cats"                % sttpVersion,
       "io.circe"                      %% "circe-generic"       % circeVersion,
-      "ch.qos.logback"               % "logback-classic"     % "1.5.15",
+      "ch.qos.logback"                 % "logback-classic"     % "1.5.15",
       // Database
       "org.tpolecat"  %% "doobie-core"   % doobieVersion,
       "org.tpolecat"  %% "doobie-hikari" % doobieVersion,
@@ -96,3 +99,4 @@ lazy val frontend = (project in file("frontend"))
       "io.circe"                      %%% "circe-parser"      % circeVersion
     )
   )
+
