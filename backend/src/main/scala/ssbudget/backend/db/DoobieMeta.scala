@@ -18,10 +18,8 @@ object DoobieMeta {
   given Meta[SavingsAccountId]     = Meta[String].timap(SavingsAccountId.apply)(_.value)
   given Meta[SavingsTransactionId] = Meta[String].timap(SavingsTransactionId.apply)(_.value)
 
-  // Enums
-  given Meta[Currency] = Meta[String].timap { s =>
-    Currency.values.find(_.toString == s).getOrElse(throw new RuntimeException(s"Unknown currency: $s"))
-  }(_.toString)
+  // Value types
+  given Meta[Currency] = Meta[String].timap(Currency.apply)(_.code)
 
   given Meta[BudgetItemType] = Meta[String].tiemap {
     case "planned_expense"   => BudgetItemType.PlannedExpense.asRight

@@ -67,7 +67,7 @@ class AccountsPageSpec extends E2ESpec {
 
     val bankCard   = findCard("Bank Accounts")
     val footerText = bankCard.findElement(By.cssSelector(".card-footer")).getText
-    footerText should include("Total Balance (PLN)")
+    footerText should include("Total:")
   }
 
   // ============ Savings Accounts ============

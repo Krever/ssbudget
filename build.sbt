@@ -57,6 +57,7 @@ lazy val backend = (project in file("backend"))
     libraryDependencies ++= Seq(
       "org.typelevel"               %% "cats-effect"         % "3.5.7",
       "org.http4s"                  %% "http4s-ember-server" % http4sVersion,
+      "org.http4s"                  %% "http4s-ember-client" % http4sVersion,
       "org.http4s"                  %% "http4s-dsl"          % http4sVersion,
       "org.http4s"                  %% "http4s-circe"        % http4sVersion,
       "com.softwaremill.sttp.tapir" %% "tapir-http4s-server" % tapirVersion,

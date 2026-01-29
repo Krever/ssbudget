@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.DataService
-import ssbudget.frontend.util.Formatting
+import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.shared.model.*
 
 import java.time.format.DateTimeFormatter
@@ -52,19 +52,19 @@ object DashboardPage {
           div(
             cls   := "col-auto",
             div(cls := "text-muted small", "BALANCE"),
-            div(cls := "fs-4 fw-bold font-monospace", child.text <-- dataService.totalBalance.map(_.formatted)),
+            div(cls := "fs-4 fw-bold font-monospace", MoneyFormatter.formatChild(dataService.totalBalance)),
           ),
           div(cls := "col-auto fs-4 text-muted", "→"),
           div(
             cls   := "col-auto",
             div(cls := "text-muted small", "AVAILABLE"),
-            div(cls := "fs-5 font-monospace text-info", child.text <-- dataService.availableNow.map(_.formatted)),
+            div(cls := "fs-5 font-monospace text-info", MoneyFormatter.formatChild(dataService.availableNow)),
           ),
           div(cls := "col-auto fs-4 text-muted", "→"),
           div(
             cls   := "col-auto",
             div(cls := "text-muted small", "FREE"),
-            div(cls := "fs-5 font-monospace text-success fw-bold", child.text <-- dataService.freeMoney.map(_.formatted)),
+            div(cls := "fs-5 font-monospace text-success fw-bold", MoneyFormatter.formatChild(dataService.freeMoney)),
           ),
           div(cls := "col-auto fs-4 text-muted", "÷"),
           div(
@@ -73,7 +73,7 @@ object DashboardPage {
               cls   := "text-muted small",
               child.text <-- dataService.daysRemainingInPeriod.map(d => s"$d DAYS"),
             ),
-            div(cls := "fs-5 font-monospace text-primary fw-bold", child.text <-- dataService.dailyBudget.map(_.formatted)),
+            div(cls := "fs-5 font-monospace text-primary fw-bold", MoneyFormatter.formatChild(dataService.dailyBudget)),
           ),
         ),
       ),
@@ -170,8 +170,8 @@ object DashboardPage {
       ),
       div(
         cls := "card-footer py-2 d-flex justify-content-between",
-        span(cls := "fw-bold", "Total (PLN)"),
-        span(cls := "font-monospace fw-bold", child.text <-- dataService.totalBalance.map(_.formatted)),
+        span(cls := "fw-bold", "Total"),
+        span(cls := "font-monospace fw-bold", MoneyFormatter.formatChild(dataService.totalBalance)),
       ),
     )
   }
@@ -192,11 +192,15 @@ object DashboardPage {
             defaultValue := (currentAmount / 100.0).toString,
             onInput.mapToValue --> { v => v.toDoubleOption.foreach(d => editedBalances.update(_.updated(account.id, (d * 100).toLong))) },
           ),
-          span(cls       := "input-group-text py-0", account.currency.toString),
+          span(cls       := "input-group-text py-0", account.currency.code),
         ),
       ),
     )
-    else tr(td(account.name), td(cls := "text-end font-monospace", balanceOpt.fold("-")(b => Money(b.amount, b.currency).formatted)))
+    else
+      tr(
+        td(account.name),
+        td(cls := "text-end font-monospace", balanceOpt.fold[HtmlElement](span("-"))(b => MoneyFormatter.format(b.amount, b.currency))),
+      )
   }
 
   private def savingsAccountQuickRow(account: SavingsAccount, isEditing: Boolean): HtmlElement = {
@@ -213,11 +217,11 @@ object DashboardPage {
             defaultValue := (account.currentBalance / 100.0).toString,
             onInput.mapToValue --> { v => v.toDoubleOption.foreach(d => editedSavingsBalances.update(_.updated(account.id, (d * 100).toLong))) },
           ),
-          span(cls       := "input-group-text py-0", account.currency.toString),
+          span(cls       := "input-group-text py-0", account.currency.code),
         ),
       ),
     )
-    else tr(td(account.name), td(cls := "text-end font-monospace", Money(account.currentBalance, account.currency).formatted))
+    else tr(td(account.name), td(cls := "text-end font-monospace", MoneyFormatter.format(account.currentBalance, account.currency)))
   }
 
   private def startEditingBalances(): Unit = {

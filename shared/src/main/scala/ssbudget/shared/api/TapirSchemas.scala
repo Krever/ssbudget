@@ -14,8 +14,8 @@ object TapirSchemas {
   given Schema[SavingsAccountId]     = Schema.string.map[SavingsAccountId]((s: String) => Some(SavingsAccountId(s)))(_.value)
   given Schema[SavingsTransactionId] = Schema.string.map[SavingsTransactionId]((s: String) => Some(SavingsTransactionId(s)))(_.value)
 
-  // Enums
-  given Schema[Currency]       = Schema.derivedEnumeration[Currency].defaultStringBased
+  // Enums and value types
+  given Schema[Currency]       = Schema.string.map[Currency]((s: String) => Some(Currency(s)))(_.code)
   given Schema[BudgetItemType] = Schema.derivedEnumeration[BudgetItemType].defaultStringBased
   given Schema[EstimateMode]   = Schema.derivedEnumeration[EstimateMode].defaultStringBased
 
@@ -43,6 +43,14 @@ object TapirSchemas {
   given Schema[IdResponse]                  = Schema.derived[IdResponse]
   given Schema[AccountResponse]             = Schema.derived[AccountResponse]
   given Schema[SavingsTransactionResponse]  = Schema.derived[SavingsTransactionResponse]
+
+  // Currency settings DTOs
+  given Schema[CurrencySetting]           = Schema.derived[CurrencySetting]
+  given Schema[EnableCurrencyRequest]     = Schema.derived[EnableCurrencyRequest]
+  given Schema[SetPrimaryCurrencyRequest] = Schema.derived[SetPrimaryCurrencyRequest]
+  given Schema[KnownCurrency]             = Schema.derived[KnownCurrency]
+  given Schema[CurrencySettingsResponse]  = Schema.derived[CurrencySettingsResponse]
+  given Schema[ExchangeRatesResponse]     = Schema.derived[ExchangeRatesResponse]
 
   // Auth DTO types
   given Schema[AuthStatus]                    = Schema.derived[AuthStatus]

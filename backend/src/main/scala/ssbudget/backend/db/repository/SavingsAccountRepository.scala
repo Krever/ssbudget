@@ -13,6 +13,7 @@ trait SavingsAccountRepository {
   def update(account: SavingsAccount): IO[Unit]
   def updateBalance(id: SavingsAccountId, newBalance: Long): IO[Unit]
   def delete(id: SavingsAccountId): IO[Unit]
+  def existsWithCurrency(currency: Currency): IO[Boolean]
 }
 
 class SavingsAccountRepositoryImpl(xa: Transactor[IO]) extends SavingsAccountRepository {
@@ -57,5 +58,11 @@ class SavingsAccountRepositoryImpl(xa: Transactor[IO]) extends SavingsAccountRep
     sql"""
       DELETE FROM savings_accounts WHERE id = $id
     """.update.run.transact(xa).void
+  }
+
+  override def existsWithCurrency(currency: Currency): IO[Boolean] = {
+    sql"""
+      SELECT EXISTS(SELECT 1 FROM savings_accounts WHERE currency = $currency)
+    """.query[Boolean].unique.transact(xa)
   }
 }

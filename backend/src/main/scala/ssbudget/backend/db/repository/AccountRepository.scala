@@ -12,6 +12,7 @@ trait AccountRepository {
   def findAll: IO[List[Account]]
   def update(account: Account): IO[Unit]
   def delete(id: AccountId): IO[Unit]
+  def existsWithCurrency(currency: Currency): IO[Boolean]
 }
 
 class AccountRepositoryImpl(xa: Transactor[IO]) extends AccountRepository {
@@ -46,5 +47,11 @@ class AccountRepositoryImpl(xa: Transactor[IO]) extends AccountRepository {
     sql"""
       DELETE FROM accounts WHERE id = $id
     """.update.run.transact(xa).void
+  }
+
+  override def existsWithCurrency(currency: Currency): IO[Boolean] = {
+    sql"""
+      SELECT EXISTS(SELECT 1 FROM accounts WHERE currency = $currency)
+    """.query[Boolean].unique.transact(xa)
   }
 }

@@ -29,8 +29,18 @@ trait DataService {
   def periods: Signal[List[Period]]
   def startNewPeriod(): Future[Unit]
 
-  // Exchange rate
-  def exchangeRate: Signal[ExchangeRate]
+  // Exchange rates (currency code -> rate to primary currency)
+  def exchangeRates: Signal[Map[Currency, Double]]
+
+  // Currency settings
+  def currencySettings: Signal[List[CurrencySetting]]
+  def availableCurrencies: Signal[List[(String, String)]] // (code, name) for dropdown
+  def enabledCurrencies: Signal[List[Currency]]
+  def primaryCurrency: Signal[Currency]
+  def enableCurrency(code: String): Future[Unit]
+  def disableCurrency(code: String): Future[Unit]
+  def setPrimaryCurrency(code: String): Future[Unit]
+  def refreshExchangeRates(): Future[Unit]
 
   // Savings accounts
   def savingsAccounts: Signal[List[SavingsAccount]]

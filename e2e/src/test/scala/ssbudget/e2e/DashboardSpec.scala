@@ -33,7 +33,7 @@ class DashboardSpec extends E2ESpec {
     click(card, "Save All")
 
     Thread.sleep(300)
-    card.getText should include("5000")
+    card.getText should include("5,000")
   }
 
   it should "cancel balance edit without saving" in {

@@ -16,34 +16,35 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   private val budgetItemsVar: Var[List[BudgetItemDefinition]]       = Var(List.empty)
   private val budgetRecordsVar: Var[List[ExpenseRecord]]            = Var(List.empty)
   private val periodsVar: Var[List[Period]]                         = Var(List.empty)
-  private val exchangeRateVar: Var[ExchangeRate]                    = Var(defaultExchangeRate)
+  private val exchangeRatesVar: Var[Map[Currency, Double]]          = Var(Map.empty)
   private val savingsAccountsVar: Var[List[SavingsAccount]]         = Var(List.empty)
   private val savingsTransactionsVar: Var[List[SavingsTransaction]] = Var(List.empty)
-
-  private def defaultExchangeRate: ExchangeRate =
-    ExchangeRate.fromDouble(Currency.EUR, Currency.PLN, 4.32, Instant.now())
+  private val currencySettingsVar: Var[List[CurrencySetting]]       = Var(List.empty)
+  private val availableCurrenciesVar: Var[List[(String, String)]]   = Var(List.empty)
 
   // Initialize by fetching all data from individual endpoints
   override def initialize(): Future[Unit] = {
     // Fetch all data in parallel
-    val accountsFut        = client.accounts.list()
-    val balancesFut        = client.balances.listLatest()
-    val budgetItemsFut     = client.budgetItems.list()
-    val periodsFut         = client.periods.list()
-    val recordsFut         = client.expenseRecords.listCurrent()
-    val savingsAccountsFut = client.savingsAccounts.list()
-    val savingsTxnsFut     = client.savingsTransactions.listCurrent()
-    val exchangeRateFut    = client.exchangeRate.get()
+    val accountsFut         = client.accounts.list()
+    val balancesFut         = client.balances.listLatest()
+    val budgetItemsFut      = client.budgetItems.list()
+    val periodsFut          = client.periods.list()
+    val recordsFut          = client.expenseRecords.listCurrent()
+    val savingsAccountsFut  = client.savingsAccounts.list()
+    val savingsTxnsFut      = client.savingsTransactions.listCurrent()
+    val exchangeRatesFut    = client.exchangeRates.getAll()
+    val currencySettingsFut = client.currencies.getSettings()
 
     for {
-      accounts        <- accountsFut
-      balances        <- balancesFut
-      budgetItems     <- budgetItemsFut
-      periods         <- periodsFut
-      records         <- recordsFut
-      savingsAccounts <- savingsAccountsFut
-      savingsTxns     <- savingsTxnsFut
-      exchangeRate    <- exchangeRateFut
+      accounts         <- accountsFut
+      balances         <- balancesFut
+      budgetItems      <- budgetItemsFut
+      periods          <- periodsFut
+      records          <- recordsFut
+      savingsAccounts  <- savingsAccountsFut
+      savingsTxns      <- savingsTxnsFut
+      exchangeRates    <- exchangeRatesFut
+      currencySettings <- currencySettingsFut
     } yield {
       accountsVar.set(accounts)
       balanceSnapshotsVar.set(balances)
@@ -52,7 +53,10 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       budgetRecordsVar.set(records)
       savingsAccountsVar.set(savingsAccounts)
       savingsTransactionsVar.set(savingsTxns)
-      exchangeRateVar.set(exchangeRate.getOrElse(defaultExchangeRate))
+      // Convert List[ExchangeRate] to Map[Currency, Double] (fromCurrency -> rate)
+      exchangeRatesVar.set(exchangeRates.map(r => r.fromCurrency -> r.rateAsDouble).toMap)
+      currencySettingsVar.set(currencySettings.currencies)
+      availableCurrenciesVar.set(currencySettings.availableCurrencies.map(c => (c.code, c.name)))
     }
   }
 
@@ -62,9 +66,17 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   override def budgetItems: Signal[List[BudgetItemDefinition]]       = budgetItemsVar.signal
   override def budgetRecords: Signal[List[ExpenseRecord]]            = budgetRecordsVar.signal
   override def periods: Signal[List[Period]]                         = periodsVar.signal
-  override def exchangeRate: Signal[ExchangeRate]                    = exchangeRateVar.signal
+  override def exchangeRates: Signal[Map[Currency, Double]]          = exchangeRatesVar.signal
   override def savingsAccounts: Signal[List[SavingsAccount]]         = savingsAccountsVar.signal
   override def savingsTransactions: Signal[List[SavingsTransaction]] = savingsTransactionsVar.signal
+  override def currencySettings: Signal[List[CurrencySetting]]       = currencySettingsVar.signal
+  override def availableCurrencies: Signal[List[(String, String)]]   = availableCurrenciesVar.signal
+
+  override def enabledCurrencies: Signal[List[Currency]] =
+    currencySettingsVar.signal.map(_.map(_.code))
+
+  override def primaryCurrency: Signal[Currency] =
+    currencySettingsVar.signal.map(_.find(_.isPrimary).map(_.code).getOrElse(Currency.PLN))
 
   // Derived signals
   override def currentPeriod: Signal[Option[Period]] =
@@ -94,19 +106,26 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       }
 
   private def totalBalanceCents: Signal[Long] =
-    Signal
-      .combine(balanceSnapshotsVar.signal, exchangeRateVar.signal)
-      .map { case (snapshots, rate) =>
+    balanceSnapshotsVar.signal
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (snapshots, rates, primary) =>
         snapshots.foldLeft(0L) { (acc, snap) =>
-          val amountInPLN = snap.currency match {
-            case Currency.PLN => snap.amount
-            case Currency.EUR => rate.convert(Money(snap.amount, Currency.EUR)).amountCents
-          }
-          acc + amountInPLN
+          val amountInPrimary =
+            if snap.currency == primary then snap.amount
+            else {
+              // Look up rate for this currency to primary
+              rates.get(snap.currency) match {
+                case Some(rate) => (snap.amount * rate).toLong
+                case None       => snap.amount // fallback if no rate available
+              }
+            }
+          acc + amountInPrimary
         }
       }
 
-  override def totalBalance: Signal[Money] = totalBalanceCents.map(Money.pln)
+  override def totalBalance: Signal[Money] =
+    totalBalanceCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
 
   override def daysRemainingInPeriod: Signal[Int] =
     currentPeriod.map {
@@ -130,7 +149,8 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
         }
       }
 
-  override def unpaidPlannedExpenses: Signal[Money] = unpaidPlannedCents.map(Money.pln)
+  override def unpaidPlannedExpenses: Signal[Money] =
+    unpaidPlannedCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
 
   private def scaledEstimatedCents: Signal[Long] =
     Signal
@@ -140,7 +160,8 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
         estimated.foldLeft(0L)((acc, exp) => acc + (exp.fixedEstimate.getOrElse(0L) * scaleFactor).toLong)
       }
 
-  override def scaledEstimatedExpenses: Signal[Money] = scaledEstimatedCents.map(Money.pln)
+  override def scaledEstimatedExpenses: Signal[Money] =
+    scaledEstimatedCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
 
   private def remainingSavingsCents: Signal[Long] =
     Signal
@@ -157,7 +178,8 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
         }
       }
 
-  override def remainingSavingsTarget: Signal[Money] = remainingSavingsCents.map(Money.pln)
+  override def remainingSavingsTarget: Signal[Money] =
+    remainingSavingsCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
 
   private def pendingIncomeCents: Signal[Long] =
     Signal
@@ -170,13 +192,15 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
         }
       }
 
-  override def pendingIncome: Signal[Money] = pendingIncomeCents.map(Money.pln)
+  override def pendingIncome: Signal[Money] =
+    pendingIncomeCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
 
   override def predictedExpenses: Signal[Money] =
     unpaidPlannedCents
       .combineWith(scaledEstimatedCents)
       .combineWith(remainingSavingsCents)
-      .map { case (unpaid, scaled, savings) => Money.pln(unpaid + scaled + savings) }
+      .combineWith(primaryCurrency)
+      .map { case (unpaid, scaled, savings, primary) => Money(unpaid + scaled + savings, primary) }
 
   override def freeMoney: Signal[Money] =
     totalBalanceCents
@@ -184,17 +208,20 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       .combineWith(scaledEstimatedCents)
       .combineWith(remainingSavingsCents)
       .combineWith(pendingIncomeCents)
-      .map { case (total, unpaid, scaled, savings, income) => Money.pln(total - unpaid - scaled - savings + income) }
+      .combineWith(primaryCurrency)
+      .map { case (total, unpaid, scaled, savings, income, primary) => Money(total - unpaid - scaled - savings + income, primary) }
 
   override def availableNow: Signal[Money] =
-    Signal
-      .combine(totalBalanceCents, unpaidPlannedCents)
-      .map { case (total, unpaid) => Money.pln(total - unpaid) }
+    totalBalanceCents
+      .combineWith(unpaidPlannedCents)
+      .combineWith(primaryCurrency)
+      .map { case (total, unpaid, primary) => Money(total - unpaid, primary) }
 
   override def dailyBudget: Signal[Money] =
-    Signal
-      .combine(freeMoney, daysRemainingInPeriod)
-      .map { case (free, days) => if days > 0 then free / days else Money.pln(0) }
+    freeMoney
+      .combineWith(daysRemainingInPeriod)
+      .combineWith(primaryCurrency)
+      .map { case (free, days, primary) => if days > 0 then free / days else Money.zero(primary) }
 
   // Mutation methods
   override def addAccount(name: String, currency: Currency): Future[Unit] = {
@@ -350,4 +377,37 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
 
   private def getCurrentPeriod: Option[Period] =
     periodsVar.now().find(_.endDate.isEmpty)
+
+  // Currency settings mutations
+  override def enableCurrency(code: String): Future[Unit] = {
+    client.currencies.enable(code).map { setting =>
+      currencySettingsVar.update(_ :+ setting)
+    }
+  }
+
+  override def disableCurrency(code: String): Future[Unit] = {
+    client.currencies.disable(code).map { _ =>
+      currencySettingsVar.update(_.filterNot(_.code.code == code))
+    }
+  }
+
+  override def setPrimaryCurrency(code: String): Future[Unit] = {
+    client.currencies.setPrimary(code).map { _ =>
+      currencySettingsVar.update { settings =>
+        settings.map { s =>
+          if s.code.code == code then s.copy(isPrimary = true)
+          else s.copy(isPrimary = false)
+        }
+      }
+    }
+  }
+
+  override def refreshExchangeRates(): Future[Unit] = {
+    client.currencies.refreshRates().flatMap { response =>
+      // After refreshing rates, fetch the updated rates
+      client.exchangeRates.getAll().map { rates =>
+        exchangeRatesVar.set(rates.map(r => r.fromCurrency -> r.rateAsDouble).toMap)
+      }
+    }
+  }
 }

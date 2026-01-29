@@ -57,6 +57,9 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   protected def findCardByDiv(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//div[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
+  protected def findCardByH5(headerText: String): WebElement =
+    driver.findElement(By.xpath(s"//h5[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
+
   protected def rows(parent: WebElement): List[WebElement] =
     parent.findElements(By.cssSelector("tbody tr")).asScala.toList
 

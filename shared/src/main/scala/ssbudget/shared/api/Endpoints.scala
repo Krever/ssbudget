@@ -166,11 +166,43 @@ object Endpoints {
         .errorOut(stringBody)
   }
 
-  object exchangeRate {
-    val get: Secured[Unit, Option[ExchangeRate]] =
+  object exchangeRates {
+    val getAll: Secured[Unit, List[ExchangeRate]] =
       secureEndpoint.get
-        .in("exchange-rate")
-        .out(jsonBody[Option[ExchangeRate]])
+        .in("exchange-rates")
+        .out(jsonBody[List[ExchangeRate]])
+        .errorOut(stringBody)
+  }
+
+  object currencies {
+    val getSettings: Secured[Unit, CurrencySettingsResponse] =
+      secureEndpoint.get
+        .in("currencies")
+        .out(jsonBody[CurrencySettingsResponse])
+        .errorOut(stringBody)
+
+    val enable: Secured[EnableCurrencyRequest, CurrencySetting] =
+      secureEndpoint.post
+        .in("currencies")
+        .in(jsonBody[EnableCurrencyRequest])
+        .out(jsonBody[CurrencySetting])
+        .errorOut(stringBody)
+
+    val disable: Secured[String, Unit] =
+      secureEndpoint.delete
+        .in("currencies" / path[String]("code"))
+        .errorOut(stringBody)
+
+    val setPrimary: Secured[SetPrimaryCurrencyRequest, Unit] =
+      secureEndpoint.post
+        .in("currencies" / "primary")
+        .in(jsonBody[SetPrimaryCurrencyRequest])
+        .errorOut(stringBody)
+
+    val refreshRates: Secured[Unit, ExchangeRatesResponse] =
+      secureEndpoint.post
+        .in("currencies" / "refresh-rates")
+        .out(jsonBody[ExchangeRatesResponse])
         .errorOut(stringBody)
   }
 
@@ -204,7 +236,12 @@ object Endpoints {
     savingsTransactions.listCurrent,
     savingsTransactions.create,
     savingsTransactions.delete,
-    exchangeRate.get,
+    exchangeRates.getAll,
+    currencies.getSettings,
+    currencies.enable,
+    currencies.disable,
+    currencies.setPrimary,
+    currencies.refreshRates,
     test.reset,
   )
 
@@ -311,9 +348,26 @@ object Endpoints {
         baseEndpoint.delete.in("savings-transactions" / path[SavingsTransactionId]("id")).out(jsonBody[SavingsAccount]).errorOut(stringBody)
     }
 
-    object exchangeRate {
-      val get: Client[Unit, Option[ExchangeRate]] =
-        baseEndpoint.get.in("exchange-rate").out(jsonBody[Option[ExchangeRate]]).errorOut(stringBody)
+    object exchangeRates {
+      val getAll: Client[Unit, List[ExchangeRate]] =
+        baseEndpoint.get.in("exchange-rates").out(jsonBody[List[ExchangeRate]]).errorOut(stringBody)
+    }
+
+    object currencies {
+      val getSettings: Client[Unit, CurrencySettingsResponse] =
+        baseEndpoint.get.in("currencies").out(jsonBody[CurrencySettingsResponse]).errorOut(stringBody)
+
+      val enable: Client[EnableCurrencyRequest, CurrencySetting] =
+        baseEndpoint.post.in("currencies").in(jsonBody[EnableCurrencyRequest]).out(jsonBody[CurrencySetting]).errorOut(stringBody)
+
+      val disable: Client[String, Unit] =
+        baseEndpoint.delete.in("currencies" / path[String]("code")).errorOut(stringBody)
+
+      val setPrimary: Client[SetPrimaryCurrencyRequest, Unit] =
+        baseEndpoint.post.in("currencies" / "primary").in(jsonBody[SetPrimaryCurrencyRequest]).errorOut(stringBody)
+
+      val refreshRates: Client[Unit, ExchangeRatesResponse] =
+        baseEndpoint.post.in("currencies" / "refresh-rates").out(jsonBody[ExchangeRatesResponse]).errorOut(stringBody)
     }
   }
 }

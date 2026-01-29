@@ -16,6 +16,7 @@ final case class Repositories(
     authConfig: AuthConfigRepository,
     sessions: SessionRepository,
     passkeyCredentials: PasskeyCredentialRepository,
+    currencySettings: CurrencySettingsRepository,
 )
 
 object Repositories {
@@ -32,6 +33,7 @@ object Repositories {
       authConfig = new AuthConfigRepositoryImpl(xa),
       sessions = new SessionRepositoryImpl(xa),
       passkeyCredentials = new PasskeyCredentialRepositoryImpl(xa),
+      currencySettings = new CurrencySettingsRepositoryImpl(xa),
     )
   }
 }

@@ -3,7 +3,7 @@ package ssbudget.frontend.pages
 import com.raquo.laminar.api.L.*
 import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.DataService
-import ssbudget.frontend.util.Formatting
+import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.shared.model.*
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -46,23 +46,25 @@ object AccountsPage {
         table(
           cls := "table table-sm table-hover mb-0",
           thead(
-            tr(th("Account"), th("Currency"), th(cls := "text-end", "Balance"), th(cls := "text-end", "In PLN"), th("Last Updated"), th("Actions")),
+            tr(th("Account"), th("Currency"), th(cls := "text-end", "Balance"), th("Last Updated"), th("Actions")),
           ),
           tbody(
             children <-- dataService.accounts
               .combineWith(dataService.balanceSnapshots)
-              .combineWith(dataService.exchangeRate)
               .combineWith(editingAccountId.signal)
-              .map { case (accounts, snapshots, rate, editingId) =>
+              .map { case (accounts, snapshots, editingId) =>
                 accounts.map { account =>
                   val snapshot = snapshots.find(_.accountId == account.id)
-                  accountRow(account, snapshot, rate.rateAsDouble, editingId)
+                  accountRow(account, snapshot, editingId)
                 }
               },
-            child <-- addingAccount.signal.map {
-              case true  => addAccountRow()
-              case false => emptyNode
-            },
+            child <-- addingAccount.signal
+              .combineWith(dataService.enabledCurrencies)
+              .combineWith(dataService.primaryCurrency)
+              .map {
+                case (true, currencies, primary) => addAccountRow(currencies, primary)
+                case (false, _, _)               => emptyNode
+              },
           ),
         ),
       ),
@@ -71,33 +73,35 @@ object AccountsPage {
         div(
           cls := "d-flex justify-content-between",
           div(
-            span(cls := "fw-bold", "Total Balance (PLN): "),
-            span(
-              cls    := "font-monospace fw-bold text-primary",
-              child.text <-- dataService.totalBalance.map(_.formatted),
-            ),
+            span(cls := "fw-bold", "Total: "),
+            span(cls := "font-monospace fw-bold text-primary", MoneyFormatter.formatChild(dataService.totalBalance)),
           ),
-          div(cls := "text-muted", child.text <-- dataService.exchangeRate.map(r => s"EUR/PLN: ${r.rateAsDouble}")),
+          child <-- dataService.exchangeRates.combineWith(dataService.primaryCurrency).map { case (rates, primary) =>
+            if rates.isEmpty then emptyNode
+            else {
+              val rateStrings = rates.map { case (currency, rate) => s"${currency.code}→${primary.code}: $rate" }.mkString(", ")
+              div(cls := "text-muted small", s"Rates: $rateStrings")
+            }
+          },
         ),
       ),
     )
   }
 
-  private def accountRow(account: Account, snapshotOpt: Option[BalanceSnapshot], eurToPlnRate: Double, editingId: Option[AccountId]): HtmlElement = {
+  private def accountRow(
+      account: Account,
+      snapshotOpt: Option[BalanceSnapshot],
+      editingId: Option[AccountId],
+  ): HtmlElement = {
     if editingId.contains(account.id) then editAccountRow(account)
     else {
-      val balanceStr = snapshotOpt.fold("-")(s => Money(s.amount, s.currency).formatted)
-      val plnStr     = snapshotOpt.fold("-") { s =>
-        if s.currency == Currency.PLN then "-"
-        else Money.pln((s.amount * eurToPlnRate).toLong).formatted
-      }
-      val dateStr    = snapshotOpt.fold("-")(s => Formatting.formatDate(s.recordedAt))
+      val balanceEl = snapshotOpt.fold[HtmlElement](span("-"))(s => MoneyFormatter.format(s.amount, s.currency))
+      val dateStr   = snapshotOpt.fold("-")(s => Formatting.formatDate(s.recordedAt))
 
       tr(
         td(account.name),
-        td(span(cls := "badge text-bg-secondary", account.currency.toString)),
-        td(cls := "text-end font-monospace", balanceStr),
-        td(cls := "text-end font-monospace text-muted", plnStr),
+        td(span(cls := "badge text-bg-secondary", account.currency.code)),
+        td(cls := "text-end font-monospace", balanceEl),
         td(cls := "text-muted small", dateStr),
         td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingAccountId.set(Some(account.id)) })),
       )
@@ -120,13 +124,15 @@ object AccountsPage {
         ),
       ),
       td(
-        select(
-          cls := "form-select form-select-sm",
-          Currency.values.toSeq.map { curr =>
-            option(value := curr.toString, selected := (curr == account.currency), curr.toString)
-          },
-          onChange.mapToValue --> { v => currencyValue.set(Currency.valueOf(v)) },
-        ),
+        child <-- dataService.enabledCurrencies.map { currencies =>
+          select(
+            cls := "form-select form-select-sm",
+            currencies.map { curr =>
+              option(value := curr.code, selected := (curr == account.currency), curr.code)
+            },
+            onChange.mapToValue --> { v => currencyValue.set(Currency(v)) },
+          )
+        },
       ),
       td(colSpan := 3, cls := "text-muted small", "Balance is edited from Dashboard"),
       td(
@@ -154,8 +160,8 @@ object AccountsPage {
     )
   }
 
-  private def addAccountRow(): HtmlElement = {
-    val currencyValue                       = Var(Currency.PLN)
+  private def addAccountRow(currencies: List[Currency], primaryCurrency: Currency): HtmlElement = {
+    val currencyValue                       = Var(primaryCurrency)
     var nameRef: org.scalajs.dom.html.Input = null
 
     tr(
@@ -172,8 +178,8 @@ object AccountsPage {
       td(
         select(
           cls := "form-select form-select-sm",
-          Currency.values.toSeq.map(curr => option(value := curr.toString, curr.toString)),
-          onChange.mapToValue --> { v => currencyValue.set(Currency.valueOf(v)) },
+          currencies.map(curr => option(value := curr.code, selected := (curr == primaryCurrency), curr.code)),
+          onChange.mapToValue --> { v => currencyValue.set(Currency(v)) },
         ),
       ),
       td(colSpan := 3, cls := "text-muted small", "Initial balance: 0"),
@@ -221,10 +227,13 @@ object AccountsPage {
               .map { case (accounts, editingId) =>
                 accounts.map(account => savingsRow(account, editingId))
               },
-            child <-- addingSavings.signal.map {
-              case true  => addSavingsRow()
-              case false => emptyNode
-            },
+            child <-- addingSavings.signal
+              .combineWith(dataService.enabledCurrencies)
+              .combineWith(dataService.primaryCurrency)
+              .map {
+                case (true, currencies, primary) => addSavingsRow(currencies, primary)
+                case (false, _, _)               => emptyNode
+              },
           ),
         ),
       ),
@@ -238,14 +247,14 @@ object AccountsPage {
   private def savingsRow(account: SavingsAccount, editingId: Option[SavingsAccountId]): HtmlElement = {
     if editingId.contains(account.id) then editSavingsRow(account)
     else {
-      val balanceStr = Money(account.currentBalance, account.currency).formatted
-      val targetStr  = account.plannedMonthly.fold("-")(t => Money(t, account.currency).formatted)
+      val balanceEl = MoneyFormatter.format(account.currentBalance, account.currency)
+      val targetEl  = account.plannedMonthly.fold[HtmlElement](span("-"))(t => MoneyFormatter.format(t, account.currency))
 
       tr(
         td(account.name),
-        td(span(cls := "badge text-bg-success", account.currency.toString)),
-        td(cls := "text-end font-monospace", balanceStr),
-        td(cls := "text-end font-monospace text-muted", targetStr),
+        td(span(cls := "badge text-bg-success", account.currency.code)),
+        td(cls := "text-end font-monospace", balanceEl),
+        td(cls := "text-end font-monospace text-muted", targetEl),
         td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingSavingsId.set(Some(account.id)) })),
       )
     }
@@ -268,13 +277,15 @@ object AccountsPage {
         ),
       ),
       td(
-        select(
-          cls := "form-select form-select-sm",
-          Currency.values.toSeq.map { curr =>
-            option(value := curr.toString, selected := (curr == account.currency), curr.toString)
-          },
-          onChange.mapToValue --> { v => currencyValue.set(Currency.valueOf(v)) },
-        ),
+        child <-- dataService.enabledCurrencies.map { currencies =>
+          select(
+            cls := "form-select form-select-sm",
+            currencies.map { curr =>
+              option(value := curr.code, selected := (curr == account.currency), curr.code)
+            },
+            onChange.mapToValue --> { v => currencyValue.set(Currency(v)) },
+          )
+        },
       ),
       td(cls := "text-muted small", "Balance: Dashboard"),
       td(
@@ -315,10 +326,10 @@ object AccountsPage {
     )
   }
 
-  private def addSavingsRow(): HtmlElement = {
+  private def addSavingsRow(currencies: List[Currency], primaryCurrency: Currency): HtmlElement = {
     var nameRef: org.scalajs.dom.html.Input   = null
     var targetRef: org.scalajs.dom.html.Input = null
-    val currencyValue                         = Var(Currency.PLN)
+    val currencyValue                         = Var(primaryCurrency)
 
     tr(
       cls := "table-success",
@@ -334,8 +345,8 @@ object AccountsPage {
       td(
         select(
           cls := "form-select form-select-sm",
-          Currency.values.toSeq.map(curr => option(value := curr.toString, curr.toString)),
-          onChange.mapToValue --> { v => currencyValue.set(Currency.valueOf(v)) },
+          currencies.map(curr => option(value := curr.code, selected := (curr == primaryCurrency), curr.code)),
+          onChange.mapToValue --> { v => currencyValue.set(Currency(v)) },
         ),
       ),
       td(cls := "text-muted small", "Balance: 0"),

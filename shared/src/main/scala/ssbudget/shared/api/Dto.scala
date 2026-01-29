@@ -31,3 +31,21 @@ final case class SavingsTransactionResponse(
     transaction: SavingsTransaction,
     updatedAccount: SavingsAccount,
 ) derives Codec.AsObject
+
+// Currency settings DTOs
+final case class EnableCurrencyRequest(code: String) derives Codec.AsObject
+
+final case class SetPrimaryCurrencyRequest(code: String) derives Codec.AsObject
+
+final case class KnownCurrency(code: String, name: String) derives Codec.AsObject
+
+final case class CurrencySettingsResponse(
+    currencies: List[CurrencySetting],
+    availableCurrencies: List[KnownCurrency],
+) derives Codec.AsObject
+
+final case class ExchangeRatesResponse(
+    rates: Map[String, Double],
+    baseCurrency: String,
+    fetchedAt: java.time.Instant,
+) derives Codec.AsObject

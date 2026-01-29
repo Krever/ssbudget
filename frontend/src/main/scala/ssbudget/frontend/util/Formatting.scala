@@ -1,7 +1,5 @@
 package ssbudget.frontend.util
 
-import ssbudget.shared.model.{Currency, Money}
-
 import java.time.{Instant, LocalDate, ZoneId}
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -13,14 +11,6 @@ object Formatting {
   // Use UTC instead of systemDefault() - systemDefault() fails silently in Scala.js
   // without the scala-java-time-tzdb dependency
   private val zone               = ZoneId.of("UTC")
-
-  def formatMoney(cents: Long, currency: Currency): String = {
-    val amount = cents / 100.0
-    s"$amount ${currency.toString}"
-  }
-
-  def formatMoney(money: Money): String =
-    formatMoney(money.amountCents, money.currency)
 
   def formatMoneyShort(cents: Long): String = {
     val amount = cents / 100.0

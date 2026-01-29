@@ -3,6 +3,7 @@ package ssbudget.frontend.pages
 import com.raquo.laminar.api.L.*
 import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.DataService
+import ssbudget.frontend.util.MoneyFormatter
 import ssbudget.shared.model.*
 
 import scala.concurrent.Future
@@ -86,12 +87,12 @@ object BudgetPage {
         div(
           cls := "d-flex justify-content-between mb-1",
           span(cls := "text-muted small", "Unpaid Expenses"),
-          span(cls := "font-monospace small", child.text <-- dataService.unpaidPlannedExpenses.map(_.formatted)),
+          span(cls := "font-monospace small", MoneyFormatter.formatChild(dataService.unpaidPlannedExpenses)),
         ),
         div(
           cls := "d-flex justify-content-between",
           span(cls := "text-muted small", "Pending Income"),
-          span(cls := "font-monospace small", child.text <-- dataService.pendingIncome.map(_.formatted)),
+          span(cls := "font-monospace small", MoneyFormatter.formatChild(dataService.pendingIncome)),
         ),
       ),
     )
@@ -128,7 +129,7 @@ object BudgetPage {
       div(
         cls := "card-footer py-2 d-flex justify-content-between",
         span("Scaled Total"),
-        span(cls := "font-monospace", child.text <-- dataService.scaledEstimatedExpenses.map(_.formatted)),
+        span(cls := "font-monospace", MoneyFormatter.formatChild(dataService.scaledEstimatedExpenses)),
       ),
     )
   }
@@ -180,7 +181,7 @@ object BudgetPage {
       div(
         cls := "card-footer py-2 d-flex justify-content-between",
         span("Remaining to Save"),
-        span(cls := "font-monospace text-warning", child.text <-- dataService.remainingSavingsTarget.map(_.formatted)),
+        span(cls := "font-monospace text-warning", MoneyFormatter.formatChild(dataService.remainingSavingsTarget)),
       ),
     )
   }
@@ -195,9 +196,9 @@ object BudgetPage {
     val target        = account.plannedMonthly.getOrElse(0L)
     val remaining     = math.max(0L, target - periodContribution)
     val currency      = account.currency
-    val targetStr     = Money(target, currency).formatted
-    val savedStr      = Money(periodContribution, currency).formatted
-    val remainingStr  = Money(remaining, currency).formatted
+    val targetEl      = MoneyFormatter.format(target, currency)
+    val savedEl       = MoneyFormatter.format(periodContribution, currency)
+    val remainingEl   = MoneyFormatter.format(remaining, currency)
     val progressClass = if periodContribution >= target then "text-success" else "text-warning"
 
     tr(
@@ -211,27 +212,26 @@ object BudgetPage {
       td(
         span(cls := "me-1", if isExpanded then "▼" else "▶"),
         account.name,
-        span(cls := "ms-2 badge text-bg-success", currency.toString),
+        span(cls := "ms-2 badge text-bg-success", currency.code),
       ),
-      td(cls := "text-end font-monospace", targetStr),
-      td(cls := s"text-end font-monospace $progressClass", savedStr),
-      td(cls := s"text-end font-monospace $progressClass", remainingStr),
+      td(cls := "text-end font-monospace", targetEl),
+      td(cls := s"text-end font-monospace $progressClass", savedEl),
+      td(cls := s"text-end font-monospace $progressClass", remainingEl),
       td(),
     )
   }
 
   private def savingsTransactionRow(txn: SavingsTransaction, currency: Currency): HtmlElement = {
     import ssbudget.frontend.util.Formatting
-    val amountStr = Money(txn.amount, currency).formatted
-    val sign      = if txn.amount >= 0 then "+" else ""
-    val colorCls  = if txn.amount >= 0 then "text-success" else "text-danger"
-    val dateStr   = Formatting.formatDate(txn.createdAt)
+    val sign     = if txn.amount >= 0 then "+" else ""
+    val colorCls = if txn.amount >= 0 then "text-success" else "text-danger"
+    val dateStr  = Formatting.formatDate(txn.createdAt)
 
     tr(
       cls := "table-light",
       td(cls     := "ps-4 text-muted small", dateStr),
       td(colSpan := 2, cls := "small", txn.note.getOrElse[String]("-")),
-      td(cls     := s"text-end font-monospace small $colorCls", s"$sign$amountStr"),
+      td(cls     := s"text-end font-monospace small $colorCls", span(sign), MoneyFormatter.format(math.abs(txn.amount), currency)),
       td(
         Loading.actionButton(
           "×",
@@ -329,8 +329,8 @@ object BudgetPage {
 
       tr(
         td(item.name),
-        td(cls := "text-end font-monospace", item.fixedEstimate.fold("-")(Money.pln(_).formatted)),
-        td(cls := "text-end font-monospace", paidAmount.fold("-")(Money.pln(_).formatted)),
+        td(cls := "text-end font-monospace", item.fixedEstimate.fold[HtmlElement](span("-"))(MoneyFormatter.formatPrimary)),
+        td(cls := "text-end font-monospace", paidAmount.fold[HtmlElement](span("-"))(MoneyFormatter.formatPrimary)),
         td(cls := "text-center", span(cls := s"badge $statusBadge", statusLabel)),
         td(
           div(
@@ -356,7 +356,7 @@ object BudgetPage {
     tr(
       cls := "table-info",
       td(item.name),
-      td(cls := "text-end font-monospace", item.fixedEstimate.fold("-")(Money.pln(_).formatted)),
+      td(cls := "text-end font-monospace", item.fixedEstimate.fold[HtmlElement](span("-"))(MoneyFormatter.formatPrimary)),
       td(moneyInput(item.fixedEstimate, ref => inputRef = ref, autoFocus = true)),
       td(),
       td(
@@ -378,8 +378,8 @@ object BudgetPage {
     else
       tr(
         td(item.name),
-        td(cls := "text-end font-monospace", Money.pln(monthlyEstimate).formatted),
-        td(cls := "text-end font-monospace", Money.pln(scaledEstimate).formatted),
+        td(cls := "text-end font-monospace", MoneyFormatter.formatPrimary(monthlyEstimate)),
+        td(cls := "text-end font-monospace", MoneyFormatter.formatPrimary(scaledEstimate)),
         td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingItemId.set(Some(item.id)) })),
       )
   }

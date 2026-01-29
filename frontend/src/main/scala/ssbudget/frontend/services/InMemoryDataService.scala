@@ -67,8 +67,8 @@ object InMemoryDataService extends DataService {
     ),
   )
 
-  private val exchangeRateVar: Var[ExchangeRate] = Var(
-    ExchangeRate.fromDouble(Currency.EUR, Currency.PLN, 4.32, now),
+  private val exchangeRatesVar: Var[Map[Currency, Double]] = Var(
+    Map(Currency.EUR -> 4.32),
   )
 
   private val savingsAccountsVar: Var[List[SavingsAccount]] = Var(
@@ -108,32 +108,49 @@ object InMemoryDataService extends DataService {
     ),
   )
 
+  private val currencySettingsVar: Var[List[CurrencySetting]] = Var(
+    List(
+      CurrencySetting(Currency.PLN, "Polish Zloty", isPrimary = true, now),
+      CurrencySetting(Currency.EUR, "Euro", isPrimary = false, now),
+    ),
+  )
+
   override def accounts: Signal[List[Account]]                       = accountsVar.signal
   override def balanceSnapshots: Signal[List[BalanceSnapshot]]       = balanceSnapshotsVar.signal
   override def budgetItems: Signal[List[BudgetItemDefinition]]       = budgetItemsVar.signal
   override def budgetRecords: Signal[List[ExpenseRecord]]            = budgetRecordsVar.signal
   override def periods: Signal[List[Period]]                         = periodsVar.signal
-  override def exchangeRate: Signal[ExchangeRate]                    = exchangeRateVar.signal
+  override def exchangeRates: Signal[Map[Currency, Double]]          = exchangeRatesVar.signal
   override def savingsAccounts: Signal[List[SavingsAccount]]         = savingsAccountsVar.signal
   override def savingsTransactions: Signal[List[SavingsTransaction]] = savingsTransactionsVar.signal
+  override def currencySettings: Signal[List[CurrencySetting]]       = currencySettingsVar.signal
+  override def availableCurrencies: Signal[List[(String, String)]]   = Val(Currency.knownCurrencies)
+  override def enabledCurrencies: Signal[List[Currency]]             = currencySettingsVar.signal.map(_.map(_.code))
+  override def primaryCurrency: Signal[Currency]                     = currencySettingsVar.signal.map(_.find(_.isPrimary).map(_.code).getOrElse(Currency.PLN))
 
   override def currentPeriod: Signal[Option[Period]] =
     periodsVar.signal.map(_.find(_.endDate.isEmpty))
 
   private def totalBalanceCents: Signal[Long] =
-    Signal
-      .combine(balanceSnapshotsVar.signal, exchangeRateVar.signal)
-      .map { case (snapshots, rate) =>
+    balanceSnapshotsVar.signal
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (snapshots, rates, primary) =>
         snapshots.foldLeft(0L) { (acc, snap) =>
-          val amountInPLN = snap.currency match {
-            case Currency.PLN => snap.amount
-            case Currency.EUR => rate.convert(Money(snap.amount, Currency.EUR)).amountCents
-          }
-          acc + amountInPLN
+          val amountInPrimary =
+            if snap.currency == primary then snap.amount
+            else {
+              rates.get(snap.currency) match {
+                case Some(rate) => (snap.amount * rate).toLong
+                case None       => snap.amount // fallback if no rate available
+              }
+            }
+          acc + amountInPrimary
         }
       }
 
-  override def totalBalance: Signal[Money] = totalBalanceCents.map(Money.pln)
+  override def totalBalance: Signal[Money] =
+    totalBalanceCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
 
   override def plannedExpenses: Signal[List[BudgetItemDefinition]] =
     budgetItemsVar.signal.map(_.filter(_.itemType == BudgetItemType.PlannedExpense))
@@ -162,7 +179,8 @@ object InMemoryDataService extends DataService {
         }
       }
 
-  override def unpaidPlannedExpenses: Signal[Money] = unpaidPlannedCents.map(Money.pln)
+  override def unpaidPlannedExpenses: Signal[Money] =
+    unpaidPlannedCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
 
   override def daysRemainingInPeriod: Signal[Int] =
     currentPeriod.map {
@@ -183,7 +201,8 @@ object InMemoryDataService extends DataService {
         estimated.foldLeft(0L)((acc, exp) => acc + (exp.fixedEstimate.getOrElse(0L) * scaleFactor).toLong)
       }
 
-  override def scaledEstimatedExpenses: Signal[Money] = scaledEstimatedCents.map(Money.pln)
+  override def scaledEstimatedExpenses: Signal[Money] =
+    scaledEstimatedCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
 
   override def currentPeriodSavingsTransactions: Signal[List[SavingsTransaction]] =
     Signal
@@ -207,7 +226,8 @@ object InMemoryDataService extends DataService {
         }
       }
 
-  override def remainingSavingsTarget: Signal[Money] = remainingSavingsCents.map(Money.pln)
+  override def remainingSavingsTarget: Signal[Money] =
+    remainingSavingsCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
 
   private def pendingIncomeCents: Signal[Long] =
     Signal
@@ -220,13 +240,15 @@ object InMemoryDataService extends DataService {
         }
       }
 
-  override def pendingIncome: Signal[Money] = pendingIncomeCents.map(Money.pln)
+  override def pendingIncome: Signal[Money] =
+    pendingIncomeCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
 
   override def predictedExpenses: Signal[Money] =
     unpaidPlannedCents
       .combineWith(scaledEstimatedCents)
       .combineWith(remainingSavingsCents)
-      .map { case (unpaid, scaled, savings) => Money.pln(unpaid + scaled + savings) }
+      .combineWith(primaryCurrency)
+      .map { case (unpaid, scaled, savings, primary) => Money(unpaid + scaled + savings, primary) }
 
   override def freeMoney: Signal[Money] =
     totalBalanceCents
@@ -234,17 +256,20 @@ object InMemoryDataService extends DataService {
       .combineWith(scaledEstimatedCents)
       .combineWith(remainingSavingsCents)
       .combineWith(pendingIncomeCents)
-      .map { case (total, unpaid, scaled, savings, income) => Money.pln(total - unpaid - scaled - savings + income) }
+      .combineWith(primaryCurrency)
+      .map { case (total, unpaid, scaled, savings, income, primary) => Money(total - unpaid - scaled - savings + income, primary) }
 
   override def availableNow: Signal[Money] =
-    Signal
-      .combine(totalBalanceCents, unpaidPlannedCents)
-      .map { case (total, unpaid) => Money.pln(total - unpaid) }
+    totalBalanceCents
+      .combineWith(unpaidPlannedCents)
+      .combineWith(primaryCurrency)
+      .map { case (total, unpaid, primary) => Money(total - unpaid, primary) }
 
   override def dailyBudget: Signal[Money] =
-    Signal
-      .combine(freeMoney, daysRemainingInPeriod)
-      .map { case (free, days) => if days > 0 then free / days else Money.pln(0) }
+    freeMoney
+      .combineWith(daysRemainingInPeriod)
+      .combineWith(primaryCurrency)
+      .map { case (free, days, primary) => if days > 0 then free / days else Money.zero(primary) }
 
   override def addAccount(name: String, currency: Currency): Future[Unit] = {
     val newId = AccountId(s"acc-${System.currentTimeMillis()}")
@@ -431,6 +456,33 @@ object InMemoryDataService extends DataService {
       }
       savingsTransactionsVar.update(_.filterNot(_.id == id))
     }
+    Future.successful(())
+  }
+
+  override def enableCurrency(code: String): Future[Unit] = {
+    val name    = Currency.nameFor(code).getOrElse(code)
+    val setting = CurrencySetting(Currency(code), name, isPrimary = false, Instant.now())
+    currencySettingsVar.update(_ :+ setting)
+    Future.successful(())
+  }
+
+  override def disableCurrency(code: String): Future[Unit] = {
+    currencySettingsVar.update(_.filterNot(_.code.code == code))
+    Future.successful(())
+  }
+
+  override def setPrimaryCurrency(code: String): Future[Unit] = {
+    currencySettingsVar.update { settings =>
+      settings.map { s =>
+        if s.code.code == code then s.copy(isPrimary = true)
+        else s.copy(isPrimary = false)
+      }
+    }
+    Future.successful(())
+  }
+
+  override def refreshExchangeRates(): Future[Unit] = {
+    // Mock implementation - rates stay the same
     Future.successful(())
   }
 }

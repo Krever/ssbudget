@@ -233,10 +233,13 @@ Development is split into phases. Each phase should result in a usable increment
 ## Phase 8: Polish & Extras
 **Goal**: Quality of life improvements.
 
-- [ ] **8.1 Exchange Rate API**
-  - Integrate external API (exchangerate-api.com or similar)
-  - Manual refresh button
-  - Display last updated time
+- [x] **8.1 Exchange Rate API & Multi-Currency Support**
+  - Changed Currency from enum to value class (32 ISO 4217 codes)
+  - CurrencySetting model: enable/disable currencies, set primary
+  - Integrated Frankfurter API (https://api.frankfurter.dev)
+  - Manual refresh button with last updated time
+  - Searchable dropdown for adding currencies
+  - Currency validation against known codes
 
 - [ ] **8.2 Historical Data**
   - View expense history per definition
@@ -283,7 +286,6 @@ Development is split into phases. Each phase should result in a usable increment
 
 ## Future Ideas (Not Planned)
 
-- Multiple currencies beyond EUR/PLN
 - Expense forecasting
 - Mobile native app (or PWA)
 - Multi-user with proper accounts
@@ -304,4 +306,5 @@ Development is split into phases. Each phase should result in a usable increment
 | 4       | 2026-01-27 | 3.5   | 3.5.1, 3.5.2     | Savings support: data layer + UI, 50 backend tests, 33 e2e tests |
 | 5       | 2026-01-28 | 4     | 4.1-4.5          | API integration, e2e infrastructure with auto-managed servers |
 | 6       | 2026-01-28 | 5     | 5.1-5.5          | Password + passkey auth, 50 backend + 70 e2e tests |
+| 7       | 2026-01-29 | 8     | 8.1              | Multi-currency support, 32 currencies, Frankfurter API, 86 e2e tests |
 

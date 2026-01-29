@@ -9,6 +9,7 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 import ssbudget.backend.auth.SessionService
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.service.CurrencyService
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 
@@ -20,7 +21,12 @@ object Routes {
   /** Result type for route handlers - IO with Either for error handling. */
   type Result[T] = IO[Either[String, T]]
 
-  def make(repos: Repositories, sessionService: SessionService, testMode: Boolean = false): HttpRoutes[IO] = {
+  def make(
+      repos: Repositories,
+      sessionService: SessionService,
+      currencyService: CurrencyService,
+      testMode: Boolean = false,
+  ): HttpRoutes[IO] = {
     val interpreter = Http4sServerInterpreter[IO]()
 
     def validateSession(tokenOpt: Option[String]): IO[Either[String, Unit]] =
@@ -58,8 +64,14 @@ object Routes {
       route(Endpoints.savingsTransactions.listCurrent)(_ => listCurrentPeriodSavingsTransactions(repos)),
       route(Endpoints.savingsTransactions.create)(createSavingsTransaction(repos)),
       route(Endpoints.savingsTransactions.delete)(deleteSavingsTransaction(repos)),
-      // Exchange rate
-      route(Endpoints.exchangeRate.get)(_ => repos.exchangeRates.findLatest(Currency.EUR, Currency.PLN).map(Right(_))),
+      // Exchange rates (all rates to primary currency)
+      route(Endpoints.exchangeRates.getAll)(_ => getAllExchangeRates(repos)),
+      // Currency settings
+      route(Endpoints.currencies.getSettings)(_ => currencyService.getSettings().map(Right(_))),
+      route(Endpoints.currencies.enable)(dto => currencyService.enableCurrency(dto.code)),
+      route(Endpoints.currencies.disable)(code => currencyService.disableCurrency(code)),
+      route(Endpoints.currencies.setPrimary)(dto => currencyService.setPrimaryCurrency(dto.code)),
+      route(Endpoints.currencies.refreshRates)(_ => currencyService.refreshRates()),
     ) ++ (if testMode then List(route(Endpoints.test.reset)(_ => resetDatabase(repos))) else Nil)
 
     interpreter.toRoutes(routes)
@@ -319,5 +331,20 @@ object Routes {
     // This is a test-only endpoint to reset the database
     // In a real implementation, you'd want to be more careful here
     IO.pure(Right(()))
+  }
+
+  private def getAllExchangeRates(repos: Repositories): Result[List[ExchangeRate]] = {
+    // Get latest exchange rates for all enabled currencies to the primary currency
+    for {
+      primaryOpt <- repos.currencySettings.findPrimary
+      enabled    <- repos.currencySettings.findAll
+      primary     = primaryOpt.map(_.code).getOrElse(Currency.PLN)
+      // For each non-primary enabled currency, get latest rate to primary
+      rates      <- enabled
+                      .filterNot(_.code == primary)
+                      .traverse { setting =>
+                        repos.exchangeRates.findLatest(setting.code, primary)
+                      }
+    } yield Right(rates.flatten)
   }
 }

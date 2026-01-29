@@ -16,6 +16,7 @@ class E2ESuite
       new AccountsPageSpec,
       new BudgetPageSpec,
       new PeriodsPageSpec,
+      new CurrencySettingsSpec,
     )
     with BeforeAndAfterAll {
 

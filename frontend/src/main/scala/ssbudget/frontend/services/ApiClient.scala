@@ -189,9 +189,36 @@ class ApiClient(implicit ec: ExecutionContext) {
     }
   }
 
-  object exchangeRate {
-    def get(): Future[Option[ExchangeRate]] = {
-      val request = interpreter.toRequest(Endpoints.client.exchangeRate.get, Some(baseUri))
+  object exchangeRates {
+    def getAll(): Future[List[ExchangeRate]] = {
+      val request = interpreter.toRequest(Endpoints.client.exchangeRates.getAll, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+  }
+
+  object currencies {
+    def getSettings(): Future[CurrencySettingsResponse] = {
+      val request = interpreter.toRequest(Endpoints.client.currencies.getSettings, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def enable(code: String): Future[CurrencySetting] = {
+      val request = interpreter.toRequest(Endpoints.client.currencies.enable, Some(baseUri))
+      backend.send(request(EnableCurrencyRequest(code))).map(handleResponse)
+    }
+
+    def disable(code: String): Future[Unit] = {
+      val request = interpreter.toRequest(Endpoints.client.currencies.disable, Some(baseUri))
+      backend.send(request(code)).map(handleResponse)
+    }
+
+    def setPrimary(code: String): Future[Unit] = {
+      val request = interpreter.toRequest(Endpoints.client.currencies.setPrimary, Some(baseUri))
+      backend.send(request(SetPrimaryCurrencyRequest(code))).map(handleResponse)
+    }
+
+    def refreshRates(): Future[ExchangeRatesResponse] = {
+      val request = interpreter.toRequest(Endpoints.client.currencies.refreshRates, Some(baseUri))
       backend.send(request(())).map(handleResponse)
     }
   }
