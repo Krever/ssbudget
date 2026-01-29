@@ -251,9 +251,10 @@ Development is split into phases. Each phase should result in a usable increment
   - Touch-friendly controls
   - PWA manifest (optional)
 
-- [ ] **8.4 Data Export**
-  - Export to CSV
-  - Backup/restore functionality
+- [x] **8.4 Data Backup/Restore**
+  - Database export (download SQLite file)
+  - Database import (upload SQLite file, live restore via SQLite backup API)
+  - E2E tests for Settings page Data card
 
 ---
 
@@ -307,4 +308,5 @@ Development is split into phases. Each phase should result in a usable increment
 | 5       | 2026-01-28 | 4     | 4.1-4.5          | API integration, e2e infrastructure with auto-managed servers |
 | 6       | 2026-01-28 | 5     | 5.1-5.5          | Password + passkey auth, 50 backend + 70 e2e tests |
 | 7       | 2026-01-29 | 8     | 8.1              | Multi-currency support, 32 currencies, Frankfurter API, 86 e2e tests |
+| 8       | 2026-01-29 | 8     | 8.4              | Database backup/restore via SQLite backup API, 3 functional e2e tests |
 

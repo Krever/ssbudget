@@ -54,14 +54,15 @@ object TestServers {
   }
 
   private def startBackend(): Unit = {
-    val tempDb  = Files.createTempFile("ssbudget-e2e-", ".db")
+    val tempDb    = Files.createTempFile("ssbudget-e2e-", ".db")
     dbPath = Some(tempDb)
-    val jdbcUrl = s"jdbc:sqlite:${tempDb.toAbsolutePath}"
-    val port    = Port.fromInt(_backendPort).get
+    val jdbcUrl   = s"jdbc:sqlite:${tempDb.toAbsolutePath}"
+    val port      = Port.fromInt(_backendPort).get
+    val dbPathStr = tempDb.toAbsolutePath.toString
 
     val serverIO: IO[Nothing] = Database.migrateAndTransactor(jdbcUrl).use { xa =>
       val repos = Repositories.fromTransactor(xa)
-      ServerBuilder.build(repos, port, testMode = true).useForever
+      ServerBuilder.build(repos, xa, port, testMode = true, dbPath = dbPathStr).useForever
     }
 
     backendFiber = Some(serverIO.start.unsafeRunSync())

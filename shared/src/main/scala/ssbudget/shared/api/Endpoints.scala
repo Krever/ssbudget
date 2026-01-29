@@ -219,6 +219,22 @@ object Endpoints {
         .errorOut(stringBody)
   }
 
+  object database {
+    val download: Secured[Unit, (String, Array[Byte])] =
+      secureEndpoint.get
+        .in("database" / "export")
+        .out(header[String]("Content-Disposition"))
+        .out(byteArrayBody)
+        .errorOut(stringBody)
+
+    val `import`: Secured[Array[Byte], String] =
+      secureEndpoint.post
+        .in("database" / "import")
+        .in(byteArrayBody)
+        .out(stringBody)
+        .errorOut(stringBody)
+  }
+
   val all: List[AnyEndpoint] = List(
     accounts.list,
     accounts.create,
@@ -377,6 +393,22 @@ object Endpoints {
 
       val refreshRates: Client[Unit, ExchangeRatesResponse] =
         baseEndpoint.post.in("currencies" / "refresh-rates").out(jsonBody[ExchangeRatesResponse]).errorOut(stringBody)
+    }
+
+    object database {
+      val download: Client[Unit, (String, Array[Byte])] =
+        baseEndpoint.get
+          .in("database" / "export")
+          .out(header[String]("Content-Disposition"))
+          .out(byteArrayBody)
+          .errorOut(stringBody)
+
+      val `import`: Client[Array[Byte], String] =
+        baseEndpoint.post
+          .in("database" / "import")
+          .in(byteArrayBody)
+          .out(stringBody)
+          .errorOut(stringBody)
     }
   }
 }

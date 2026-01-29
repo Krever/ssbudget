@@ -55,15 +55,16 @@ object AuthTestServers {
   }
 
   private def startBackend(): Unit = {
-    val tempDb = Files.createTempFile("ssbudget-auth-e2e-", ".db")
+    val tempDb    = Files.createTempFile("ssbudget-auth-e2e-", ".db")
     dbPath = Some(tempDb)
     jdbcUrl = s"jdbc:sqlite:${tempDb.toAbsolutePath}"
-    val port   = Port.fromInt(_backendPort).get
+    val port      = Port.fromInt(_backendPort).get
+    val dbPathStr = tempDb.toAbsolutePath.toString
 
     // NOTE: testMode = false - authentication is ENABLED
     val serverIO: IO[Nothing] = Database.migrateAndTransactor(jdbcUrl).use { xa =>
       val repos = Repositories.fromTransactor(xa)
-      ServerBuilder.build(repos, port, testMode = false).useForever
+      ServerBuilder.build(repos, xa, port, testMode = false, dbPath = dbPathStr).useForever
     }
 
     backendFiber = Some(serverIO.start.unsafeRunSync())
@@ -159,14 +160,15 @@ object AuthTestServers {
     }
 
     // Create new database and restart backend
-    val tempDb = Files.createTempFile("ssbudget-auth-e2e-", ".db")
+    val tempDb    = Files.createTempFile("ssbudget-auth-e2e-", ".db")
     dbPath = Some(tempDb)
     jdbcUrl = s"jdbc:sqlite:${tempDb.toAbsolutePath}"
-    val port   = Port.fromInt(_backendPort).get
+    val port      = Port.fromInt(_backendPort).get
+    val dbPathStr = tempDb.toAbsolutePath.toString
 
     val serverIO: IO[Nothing] = Database.migrateAndTransactor(jdbcUrl).use { xa =>
       val repos = Repositories.fromTransactor(xa)
-      ServerBuilder.build(repos, port, testMode = false).useForever
+      ServerBuilder.build(repos, xa, port, testMode = false, dbPath = dbPathStr).useForever
     }
 
     backendFiber = Some(serverIO.start.unsafeRunSync())

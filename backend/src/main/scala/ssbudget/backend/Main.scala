@@ -29,7 +29,7 @@ object Main extends IOApp.Simple {
       xa   <- Database.migrateAndTransactor(jdbcUrl)
       repos = Repositories.fromTransactor(xa)
       _    <- Resource.eval(IO.println("Database migrated successfully"))
-      s    <- ServerBuilder.build(repos, serverPort, testMode)
+      s    <- ServerBuilder.build(repos, xa, serverPort, testMode, dbPath)
     } yield s
 
     resources.use { s =>

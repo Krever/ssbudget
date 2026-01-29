@@ -2,7 +2,9 @@ package ssbudget.backend
 
 import cats.effect.IO
 import cats.implicits.*
+import doobie.hikari.HikariTransactor
 import org.http4s.HttpRoutes
+import org.sqlite.SQLiteConnection
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.*
 import sttp.tapir.server.ServerEndpoint
@@ -13,7 +15,10 @@ import ssbudget.backend.service.CurrencyService
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 
+import java.nio.file.{Files as JFiles, Paths}
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 object Routes {
@@ -23,6 +28,8 @@ object Routes {
 
   def make(
       repos: Repositories,
+      xa: HikariTransactor[IO],
+      dbPath: String,
       sessionService: SessionService,
       currencyService: CurrencyService,
       testMode: Boolean = false,
@@ -73,6 +80,9 @@ object Routes {
       route(Endpoints.currencies.disable)(code => currencyService.disableCurrency(code)),
       route(Endpoints.currencies.setPrimary)(dto => currencyService.setPrimaryCurrency(dto.code)),
       route(Endpoints.currencies.refreshRates)(_ => currencyService.refreshRates()),
+      // Database import/export
+      route(Endpoints.database.download)(_ => exportDatabase(dbPath)),
+      route(Endpoints.database.`import`)(bytes => importDatabase(xa, dbPath, bytes)),
     ) ++ (if testMode then List(route(Endpoints.test.reset)(_ => resetDatabase(repos))) else Nil)
 
     interpreter.toRoutes(routes)
@@ -356,5 +366,68 @@ object Routes {
                         repos.exchangeRates.findLatest(setting.code, primary)
                       }
     } yield Right(rates.flatten)
+  }
+
+  private def exportDatabase(dbPath: String): Result[(String, Array[Byte])] = {
+    val path      = Paths.get(dbPath)
+    val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmmss"))
+    val filename  = s"ssbudget_backup_$timestamp.db"
+
+    IO.blocking {
+      if JFiles.exists(path) then {
+        val bytes              = JFiles.readAllBytes(path)
+        val contentDisposition = s"""attachment; filename="$filename""""
+        Right((contentDisposition, bytes))
+      } else {
+        Left("Database file not found")
+      }
+    }
+  }
+
+  private def importDatabase(xa: HikariTransactor[IO], dbPath: String, bytes: Array[Byte]): Result[String] = {
+    val tempPath = Paths.get(dbPath + ".import.tmp")
+
+    // Validate SQLite header
+    def isValidSqlite: Boolean = {
+      if bytes.length >= 16 then {
+        val header   = bytes.take(16)
+        val expected = "SQLite format 3\u0000".getBytes("UTF-8")
+        header.sameElements(expected)
+      } else {
+        false
+      }
+    }
+
+    if !isValidSqlite then {
+      IO.pure(Left("Invalid SQLite file. Upload must be a valid SQLite database."))
+    } else {
+      val writeTemp = IO.blocking {
+        val parentDir = tempPath.getParent
+        if parentDir != null && !JFiles.exists(parentDir) then {
+          JFiles.createDirectories(parentDir)
+        }
+        JFiles.write(tempPath, bytes)
+      }
+
+      val restoreDb = IO.blocking {
+        val hikariDs = xa.kernel
+        val destConn = hikariDs.getConnection.unwrap(classOf[SQLiteConnection])
+        try {
+          destConn.getDatabase.restore("main", tempPath.toAbsolutePath.toString, null)
+        } finally {
+          destConn.close()
+        }
+      }
+
+      val cleanupTemp = IO.blocking {
+        if JFiles.exists(tempPath) then {
+          JFiles.delete(tempPath)
+        }
+      }
+
+      (writeTemp *> restoreDb *> cleanupTemp)
+        .as(Right("Database imported successfully. Please refresh the page to see the updated data."))
+        .handleError(e => Left(s"Import failed: ${e.getMessage}"))
+    }
   }
 }

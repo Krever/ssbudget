@@ -3,6 +3,7 @@ package ssbudget.backend
 import cats.effect.{IO, Resource}
 import cats.implicits.*
 import com.comcast.ip4s.{Host, Port, host}
+import doobie.hikari.HikariTransactor
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.server.Server
 import sttp.client3.httpclient.cats.HttpClientCatsBackend
@@ -31,8 +32,10 @@ object ServerBuilder {
   /** Build a server resource with the given configuration */
   def build(
       repos: Repositories,
+      xa: HikariTransactor[IO],
       port: Port,
       testMode: Boolean = false,
+      dbPath: String = "data/ssbudget.db",
   ): Resource[IO, Server] = {
     for {
       sttpBackend     <- HttpClientCatsBackend.resource[IO]()
@@ -52,7 +55,7 @@ object ServerBuilder {
         )
 
         // Routes now handle their own auth via Tapir's serverSecurityLogic
-        val dataRoutes = Routes.make(repos, sessionService, currencyService, testMode)
+        val dataRoutes = Routes.make(repos, xa, dbPath, sessionService, currencyService, testMode)
 
         val allRoutes = healthRoute <+> authRoutes <+> dataRoutes
 

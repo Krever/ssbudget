@@ -1,6 +1,8 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
+import org.scalajs.dom
+import org.scalajs.dom.{File, FileReader, HTMLInputElement, XMLHttpRequest}
 import ssbudget.frontend.auth.AuthState
 import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.{ApiClient, DataService}
@@ -204,6 +206,9 @@ object SettingsPage {
       // Currencies section
       currenciesCard(errorVar, successVar, addCurrencyCodeVar, refreshingRatesVar),
 
+      // Data section (import/export)
+      dataCard(errorVar, successVar),
+
       // Account section
       div(
         cls := "card",
@@ -364,6 +369,120 @@ object SettingsPage {
                 ),
               )
             },
+        ),
+      ),
+    )
+  }
+
+  private def dataCard(
+      errorVar: Var[Option[String]],
+      successVar: Var[Option[String]],
+  ): HtmlElement = {
+    val importingVar = Var(false)
+    val fileInputRef = Var(Option.empty[HTMLInputElement])
+
+    def triggerFileInput(): Unit = {
+      fileInputRef.now().foreach(_.click())
+    }
+
+    def handleFileSelect(input: HTMLInputElement): Unit = {
+      val files = input.files
+      if files.length > 0 then {
+        val file = files(0)
+        uploadFile(file)
+        // Reset the input so the same file can be selected again
+        input.value = ""
+      }
+    }
+
+    def uploadFile(file: File): Unit = {
+      importingVar.set(true)
+      errorVar.set(None)
+      successVar.set(None)
+
+      // Read file as ArrayBuffer and send as raw bytes
+      val reader = new FileReader()
+      reader.onload = { _ =>
+        val arrayBuffer = reader.result.asInstanceOf[scala.scalajs.js.typedarray.ArrayBuffer]
+
+        val xhr = new XMLHttpRequest()
+        xhr.open("POST", "/api/database/import", true)
+        xhr.withCredentials = true
+        xhr.setRequestHeader("Content-Type", "application/octet-stream")
+
+        xhr.onload = { _ =>
+          importingVar.set(false)
+          if xhr.status == 200 then {
+            successVar.set(Some(xhr.responseText))
+          } else {
+            errorVar.set(Some(s"Import failed: ${xhr.responseText}"))
+          }
+        }
+
+        xhr.onerror = { _ =>
+          importingVar.set(false)
+          errorVar.set(Some("Import failed: Network error"))
+        }
+
+        xhr.send(arrayBuffer)
+      }
+      reader.onerror = { _ =>
+        importingVar.set(false)
+        errorVar.set(Some("Failed to read file"))
+      }
+      reader.readAsArrayBuffer(file)
+    }
+
+    div(
+      cls := "card mb-4",
+      div(cls := "card-header", h5(cls := "mb-0", "Data")),
+      div(
+        cls   := "card-body",
+        p(cls := "text-muted small", "Export or import your database for backup and restore purposes."),
+        div(
+          cls := "d-flex gap-2",
+          a(
+            cls      := "btn btn-outline-primary",
+            href     := "/api/database/export",
+            download := "ssbudget_backup.db",
+            i(cls := "bi bi-download me-2"),
+            "Export Database",
+          ),
+          button(
+            cls      := "btn btn-outline-warning",
+            disabled <-- importingVar.signal,
+            onClick --> { _ => triggerFileInput() },
+            child <-- importingVar.signal.map { importing =>
+              if importing then {
+                span(
+                  span(cls := "spinner-border spinner-border-sm me-2"),
+                  "Importing...",
+                )
+              } else {
+                span(
+                  i(cls := "bi bi-upload me-2"),
+                  "Import Database",
+                )
+              }
+            },
+          ),
+          input(
+            tpe      := "file",
+            accept   := ".db,.sqlite,.sqlite3",
+            cls      := "d-none",
+            onMountCallback { ctx =>
+              fileInputRef.set(Some(ctx.thisNode.ref))
+            },
+            onChange --> { e =>
+              val input = e.target.asInstanceOf[HTMLInputElement]
+              handleFileSelect(input)
+            },
+          ),
+        ),
+        div(
+          cls := "alert alert-warning mt-3 mb-0 small",
+          strong("Warning: "),
+          "Importing a database will replace all your current data. The application will need to be refreshed after import. A backup of the current database will be saved automatically.",
         ),
       ),
     )
