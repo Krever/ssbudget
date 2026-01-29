@@ -10,36 +10,40 @@ import scala.concurrent.ExecutionContext.Implicits.global
 object NavBar {
 
   def apply(apiClient: ApiClient): HtmlElement = {
+    val isOpen = Var(false)
+
     navTag(
       cls := "navbar navbar-expand-lg navbar-dark bg-dark",
       div(
         cls := "container-fluid",
         a(
-          cls                   := "navbar-brand",
-          href                  := "/",
+          cls    := "navbar-brand",
+          href   := "/",
           Router.linkTo(Page.Dashboard),
           "SSBudget",
         ),
         button(
-          cls                   := "navbar-toggler",
-          tpe                   := "button",
-          dataAttr("bs-toggle") := "collapse",
-          dataAttr("bs-target") := "#navbarNav",
+          cls    := "navbar-toggler",
+          tpe    := "button",
+          onClick --> { _ => isOpen.update(!_) },
           span(cls := "navbar-toggler-icon"),
         ),
         div(
-          cls                   := "collapse navbar-collapse",
-          idAttr                := "navbarNav",
+          cls <-- isOpen.signal.map { open =>
+            if open then "collapse navbar-collapse show"
+            else "collapse navbar-collapse"
+          },
+          idAttr := "navbarNav",
           ul(
             cls := "navbar-nav me-auto",
-            navItem(Page.Dashboard, "Dashboard"),
-            navItem(Page.Budget, "Budget"),
-            navItem(Page.Accounts, "Accounts"),
-            navItem(Page.Periods, "Periods"),
+            navItem(Page.Dashboard, "Dashboard", isOpen),
+            navItem(Page.Budget, "Budget", isOpen),
+            navItem(Page.Accounts, "Accounts", isOpen),
+            navItem(Page.Periods, "Periods", isOpen),
           ),
           ul(
             cls := "navbar-nav",
-            navItem(Page.Settings, "Settings"),
+            navItem(Page.Settings, "Settings", isOpen),
             li(
               cls := "nav-item",
               button(
@@ -56,7 +60,7 @@ object NavBar {
     )
   }
 
-  private def navItem(page: Page, label: String): HtmlElement = {
+  private def navItem(page: Page, label: String, isOpen: Var[Boolean]): HtmlElement = {
     li(
       cls := "nav-item",
       a(
@@ -66,6 +70,7 @@ object NavBar {
         },
         href := Router.absoluteUrlForPage(page),
         Router.linkTo(page),
+        onClick --> { _ => isOpen.set(false) },
         label,
       ),
     )
