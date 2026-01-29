@@ -105,4 +105,30 @@ class BalanceSnapshotRepositorySpec extends RepositorySpec {
       found <- snapshotRepo.findById(BalanceSnapshotId("snap-1"))
     } yield found shouldBe None
   }
+
+  "deleteByAccountId removes all snapshots for that account" in {
+    val accountRepo  = new AccountRepositoryImpl(xa)
+    val snapshotRepo = new BalanceSnapshotRepositoryImpl(xa)
+
+    val acc1 = Account(AccountId("acc-1"), "Main", Currency.PLN)
+    val acc2 = Account(AccountId("acc-2"), "Savings", Currency.EUR)
+
+    val snap1a = BalanceSnapshot(BalanceSnapshotId("snap-1a"), AccountId("acc-1"), 100L, Currency.PLN, Instant.parse("2024-01-10T10:00:00Z"))
+    val snap1b = BalanceSnapshot(BalanceSnapshotId("snap-1b"), AccountId("acc-1"), 200L, Currency.PLN, Instant.parse("2024-01-15T10:00:00Z"))
+    val snap2a = BalanceSnapshot(BalanceSnapshotId("snap-2a"), AccountId("acc-2"), 300L, Currency.EUR, Instant.parse("2024-01-12T10:00:00Z"))
+
+    for {
+      _         <- accountRepo.create(acc1)
+      _         <- accountRepo.create(acc2)
+      _         <- snapshotRepo.create(snap1a)
+      _         <- snapshotRepo.create(snap1b)
+      _         <- snapshotRepo.create(snap2a)
+      _         <- snapshotRepo.deleteByAccountId(AccountId("acc-1"))
+      acc1Snaps <- snapshotRepo.findByAccount(AccountId("acc-1"))
+      acc2Snaps <- snapshotRepo.findByAccount(AccountId("acc-2"))
+    } yield {
+      acc1Snaps shouldBe empty
+      acc2Snaps shouldBe List(snap2a)
+    }
+  }
 }

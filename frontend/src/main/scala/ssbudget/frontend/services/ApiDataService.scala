@@ -231,6 +231,13 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     }
   }
 
+  override def deleteAccount(accountId: AccountId): Future[Unit] = {
+    client.accounts.delete(accountId).map { _ =>
+      accountsVar.update(_.filterNot(_.id == accountId))
+      balanceSnapshotsVar.update(_.filterNot(_.accountId == accountId))
+    }
+  }
+
   override def updateAccountBalance(accountId: AccountId, amountCents: Long): Future[Unit] = {
     client.balances.create(CreateBalanceSnapshot(accountId, amountCents)).map { snapshot =>
       balanceSnapshotsVar.update { snapshots =>

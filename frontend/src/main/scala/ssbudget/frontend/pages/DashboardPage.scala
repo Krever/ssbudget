@@ -33,11 +33,14 @@ object DashboardPage {
           onClick --> { _ => copySummaryToClipboard() },
         ),
       ),
-      summaryPanel(),
       div(
         cls := "row g-3",
-        div(cls := "col-md-6", accountsQuickView()),
-        div(cls := "col-md-6", periodCard()),
+        div(
+          cls := "col-lg-5",
+          summaryPanel(),
+          periodCard(),
+        ),
+        div(cls := "col-lg-7", accountsQuickView()),
       ),
     )
   }
@@ -47,18 +50,13 @@ object DashboardPage {
       cls := "card mb-3",
       div(
         cls := "card-body py-2",
+        // Quick summary row
         div(
-          cls := "row align-items-center",
+          cls  := "row align-items-center mb-2",
           div(
             cls   := "col-auto",
             div(cls := "text-muted small", "BALANCE"),
             div(cls := "fs-4 fw-bold font-monospace", MoneyFormatter.formatChild(dataService.totalBalance)),
-          ),
-          div(cls := "col-auto fs-4 text-muted", "→"),
-          div(
-            cls   := "col-auto",
-            div(cls := "text-muted small", "AVAILABLE"),
-            div(cls := "fs-5 font-monospace text-info", MoneyFormatter.formatChild(dataService.availableNow)),
           ),
           div(cls := "col-auto fs-4 text-muted", "→"),
           div(
@@ -76,7 +74,29 @@ object DashboardPage {
             div(cls := "fs-5 font-monospace text-primary fw-bold", MoneyFormatter.formatChild(dataService.dailyBudget)),
           ),
         ),
+        // Accounting breakdown
+        hr(cls := "my-2"),
+        div(
+          cls  := "font-monospace small",
+          accountingRow("Balance", dataService.totalBalance, positive = true, bold = true),
+          accountingRow("+ Pending Income", dataService.pendingIncome, positive = true),
+          accountingRow("- Planned Expenses", dataService.unpaidPlannedExpenses, positive = false),
+          accountingRow("- Estimated Expenses", dataService.scaledEstimatedExpenses, positive = false),
+          accountingRow("- Remaining Savings", dataService.remainingSavingsTarget, positive = false),
+          hr(cls := "my-1"),
+          accountingRow("= Free Money", dataService.freeMoney, positive = true, bold = true),
+        ),
       ),
+    )
+  }
+
+  private def accountingRow(label: String, amount: Signal[Money], positive: Boolean, bold: Boolean = false): HtmlElement = {
+    val textCls = if positive then "text-success" else "text-danger"
+    val fontCls = if bold then "fw-bold" else ""
+    div(
+      cls := s"d-flex justify-content-between $fontCls",
+      span(label),
+      span(cls := textCls, MoneyFormatter.formatChild(amount)),
     )
   }
 

@@ -18,6 +18,7 @@ object BudgetPage {
   private val addingPlanned   = Var(false)
   private val addingEstimated = Var(false)
   private val addingIncome    = Var(false)
+  private val showOnlyPending = Var(false)
 
   // Savings state
   private val savingToAccountId  = Var[Option[SavingsAccountId]](None)
@@ -43,9 +44,23 @@ object BudgetPage {
         cls := "card-header py-2 d-flex justify-content-between align-items-center",
         span("Planned Items"),
         div(
-          cls := "btn-group btn-group-sm",
-          button(cls := "btn btn-outline-primary", "+ Expense", onClick --> { _ => addingPlanned.set(true) }),
-          button(cls := "btn btn-outline-success", "+ Income", onClick --> { _ => addingIncome.set(true) }),
+          cls := "d-flex align-items-center gap-2",
+          div(
+            cls := "form-check form-switch mb-0",
+            input(
+              cls     := "form-check-input",
+              tpe     := "checkbox",
+              idAttr  := "showPendingOnly",
+              checked <-- showOnlyPending.signal,
+              onChange.mapToChecked --> showOnlyPending.writer,
+            ),
+            label(cls := "form-check-label small", forId := "showPendingOnly", "Pending only"),
+          ),
+          div(
+            cls := "btn-group btn-group-sm",
+            button(cls := "btn btn-outline-primary", "+ Expense", onClick --> { _ => addingPlanned.set(true) }),
+            button(cls := "btn btn-outline-success", "+ Income", onClick --> { _ => addingIncome.set(true) }),
+          ),
         ),
       ),
       div(
@@ -60,8 +75,12 @@ object BudgetPage {
               .combineWith(dataService.currentPeriodRecords)
               .combineWith(payingItemId.signal)
               .combineWith(editingItemId.signal)
-              .map { case (items, records, payingId, editingId) =>
-                items.map(item => plannedItemRow(item, records, payingId, editingId, isIncome = false))
+              .combineWith(showOnlyPending.signal)
+              .map { case (items, records, payingId, editingId, pendingOnly) =>
+                val filteredItems =
+                  if pendingOnly then items.filter(item => !records.exists(r => r.expenseDefId == item.id && r.paidAmount.isDefined))
+                  else items
+                filteredItems.map(item => plannedItemRow(item, records, payingId, editingId, isIncome = false))
               },
             child <-- addingPlanned.signal.map {
               case true  => addItemRow(BudgetItemType.PlannedExpense, addingPlanned, columns = 5)
@@ -72,8 +91,12 @@ object BudgetPage {
               .combineWith(dataService.currentPeriodRecords)
               .combineWith(payingItemId.signal)
               .combineWith(editingItemId.signal)
-              .map { case (items, records, payingId, editingId) =>
-                items.map(item => plannedItemRow(item, records, payingId, editingId, isIncome = true))
+              .combineWith(showOnlyPending.signal)
+              .map { case (items, records, payingId, editingId, pendingOnly) =>
+                val filteredItems =
+                  if pendingOnly then items.filter(item => !records.exists(r => r.expenseDefId == item.id && r.paidAmount.isDefined))
+                  else items
+                filteredItems.map(item => plannedItemRow(item, records, payingId, editingId, isIncome = true))
               },
             child <-- addingIncome.signal.map {
               case true  => addItemRow(BudgetItemType.PlannedIncome, addingIncome, columns = 5)
@@ -260,6 +283,23 @@ object BudgetPage {
     var amountRef: org.scalajs.dom.html.Input = null
     var noteRef: org.scalajs.dom.html.Input   = null
 
+    val addAction = Loading.actionGroup(
+      "Add",
+      () => {
+        val amountTxt = Option(amountRef).map(_.value.trim).getOrElse("")
+        val note      = Option(noteRef).map(_.value.trim).filter(_.nonEmpty)
+        amountTxt.toDoubleOption match {
+          case Some(amount) =>
+            val amountCents = (amount * 100).toLong
+            if amountCents != 0 then {
+              dataService.addSavingsTransaction(account.id, amountCents, note).map(_ => savingToAccountId.set(None))
+            } else Future.successful(())
+          case None         => Future.successful(())
+        }
+      },
+      "btn btn-success btn-sm py-0",
+    )
+
     tr(
       cls := "table-info",
       td(cls    := "ps-4 text-muted small", "New"),
@@ -270,6 +310,7 @@ object BudgetPage {
           tpe         := "text",
           placeholder := "Note (optional)",
           onMountCallback(ctx => noteRef = ctx.thisNode.ref),
+          addAction.onEnter,
         ),
       ),
       td(
@@ -281,27 +322,13 @@ object BudgetPage {
           defaultValue := (math.max(0L, suggestedAmount) / 100.0).toString,
           onMountCallback(ctx => amountRef = ctx.thisNode.ref),
           onMountFocus,
+          addAction.onEnter,
         ),
       ),
       td(
         div(
           cls := "btn-group btn-group-sm",
-          Loading.actionButton(
-            "Add",
-            () => {
-              val amountTxt = Option(amountRef).map(_.value.trim).getOrElse("")
-              val note      = Option(noteRef).map(_.value.trim).filter(_.nonEmpty)
-              amountTxt.toDoubleOption match {
-                case Some(amount) =>
-                  val amountCents = (amount * 100).toLong
-                  if amountCents != 0 then {
-                    dataService.addSavingsTransaction(account.id, amountCents, note).map(_ => savingToAccountId.set(None))
-                  } else Future.successful(())
-                case None         => Future.successful(())
-              }
-            },
-            "btn btn-success btn-sm py-0",
-          ),
+          addAction.btn,
           button(tpe := "button", cls := "btn btn-secondary btn-sm py-0", "×", onClick --> { _ => savingToAccountId.set(None) }),
         ),
       ),

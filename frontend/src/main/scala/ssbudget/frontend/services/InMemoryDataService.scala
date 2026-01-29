@@ -286,6 +286,12 @@ object InMemoryDataService extends DataService {
     Future.successful(())
   }
 
+  override def deleteAccount(accountId: AccountId): Future[Unit] = {
+    accountsVar.update(_.filterNot(_.id == accountId))
+    balanceSnapshotsVar.update(_.filterNot(_.accountId == accountId))
+    Future.successful(())
+  }
+
   override def updateAccountBalance(accountId: AccountId, amountCents: Long): Future[Unit] = {
     val account = accountsVar.now().find(_.id == accountId)
     account.foreach { acc =>

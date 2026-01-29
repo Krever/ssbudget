@@ -80,6 +80,11 @@ class ApiClient(implicit ec: ExecutionContext) {
       val request = interpreter.toRequest(Endpoints.client.accounts.create, Some(baseUri))
       backend.send(request(dto)).map(handleResponse)
     }
+
+    def delete(id: AccountId): Future[Unit] = {
+      val request = interpreter.toRequest(Endpoints.client.accounts.delete, Some(baseUri))
+      backend.send(request(id)).map(handleResponse)
+    }
   }
 
   object balances {

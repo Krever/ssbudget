@@ -14,6 +14,7 @@ trait DataService {
   def accounts: Signal[List[Account]]
   def balanceSnapshots: Signal[List[BalanceSnapshot]]
   def addAccount(name: String, currency: Currency): Future[Unit]
+  def deleteAccount(accountId: AccountId): Future[Unit]
   def updateAccountBalance(accountId: AccountId, amountCents: Long): Future[Unit]
 
   // Budget items

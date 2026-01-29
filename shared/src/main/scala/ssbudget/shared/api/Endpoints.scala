@@ -32,6 +32,11 @@ object Endpoints {
         .in(jsonBody[CreateAccount])
         .out(jsonBody[AccountResponse])
         .errorOut(stringBody)
+
+    val delete: Secured[AccountId, Unit] =
+      secureEndpoint.delete
+        .in("accounts" / path[AccountId]("id"))
+        .errorOut(stringBody)
   }
 
   object balances {
@@ -217,6 +222,7 @@ object Endpoints {
   val all: List[AnyEndpoint] = List(
     accounts.list,
     accounts.create,
+    accounts.delete,
     balances.listLatest,
     balances.create,
     budgetItems.list,
@@ -257,6 +263,9 @@ object Endpoints {
 
       val create: Client[CreateAccount, AccountResponse] =
         baseEndpoint.post.in("accounts").in(jsonBody[CreateAccount]).out(jsonBody[AccountResponse]).errorOut(stringBody)
+
+      val delete: Client[AccountId, Unit] =
+        baseEndpoint.delete.in("accounts" / path[AccountId]("id")).errorOut(stringBody)
     }
 
     object balances {

@@ -24,10 +24,11 @@ object AccountsPage {
     div(
       cls := "container-fluid mt-3",
       h4("Accounts"),
-      // Bank Accounts Card
-      bankAccountsCard(),
-      // Savings Accounts Card
-      div(cls := "mt-3", savingsAccountsCard()),
+      div(
+        cls := "row g-3",
+        div(cls := "col-lg-6", bankAccountsCard()),
+        div(cls := "col-lg-6", savingsAccountsCard()),
+      ),
     )
   }
 
@@ -46,7 +47,7 @@ object AccountsPage {
         table(
           cls := "table table-sm table-hover mb-0",
           thead(
-            tr(th("Account"), th("Currency"), th(cls := "text-end", "Balance"), th("Last Updated"), th("Actions")),
+            tr(th("Account"), th("Currency"), th("Balance"), th("Last Updated"), th("Actions")),
           ),
           tbody(
             children <-- dataService.accounts
@@ -101,7 +102,7 @@ object AccountsPage {
       tr(
         td(account.name),
         td(span(cls := "badge text-bg-secondary", account.currency.code)),
-        td(cls := "text-end font-monospace", balanceEl),
+        td(cls := "font-monospace", balanceEl),
         td(cls := "text-muted small", dateStr),
         td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingAccountId.set(Some(account.id)) })),
       )
@@ -147,13 +148,10 @@ object AccountsPage {
             },
           ),
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => editingAccountId.set(None) }),
-          button(
-            tpe      := "button",
-            cls      := "btn btn-danger btn-sm",
+          Loading.actionButton(
             "Del",
-            onClick --> { _ =>
-              editingAccountId.set(None)
-            },
+            () => dataService.deleteAccount(account.id).map(_ => editingAccountId.set(None)),
+            "btn btn-danger btn-sm",
           ),
         ),
       ),
@@ -164,6 +162,19 @@ object AccountsPage {
     val currencyValue                       = Var(primaryCurrency)
     var nameRef: org.scalajs.dom.html.Input = null
 
+    val addAction = Loading.actionGroup(
+      "Add",
+      () => {
+        val name = Option(nameRef).map(_.value.trim).getOrElse("")
+        if name.nonEmpty then {
+          dataService.addAccount(name, currencyValue.now()).map(_ => addingAccount.set(false))
+        } else {
+          scala.concurrent.Future.successful(())
+        }
+      },
+      "btn btn-success btn-sm",
+    )
+
     tr(
       cls := "table-primary",
       td(
@@ -173,6 +184,7 @@ object AccountsPage {
           placeholder := "Account name",
           onMountCallback(ctx => nameRef = ctx.thisNode.ref),
           onMountFocus,
+          addAction.onEnter,
         ),
       ),
       td(
@@ -186,18 +198,7 @@ object AccountsPage {
       td(
         div(
           cls := "btn-group btn-group-sm",
-          Loading.actionButton(
-            "Add",
-            () => {
-              val name = Option(nameRef).map(_.value.trim).getOrElse("")
-              if name.nonEmpty then {
-                dataService.addAccount(name, currencyValue.now()).map(_ => addingAccount.set(false))
-              } else {
-                scala.concurrent.Future.successful(())
-              }
-            },
-            "btn btn-success btn-sm",
-          ),
+          addAction.btn,
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => addingAccount.set(false) }),
         ),
       ),
@@ -219,7 +220,7 @@ object AccountsPage {
         table(
           cls := "table table-sm table-hover mb-0",
           thead(
-            tr(th("Account"), th("Currency"), th(cls := "text-end", "Balance"), th(cls := "text-end", "Target/mo"), th("Actions")),
+            tr(th("Account"), th("Currency"), th("Balance"), th("Target/mo"), th("Actions")),
           ),
           tbody(
             children <-- dataService.savingsAccounts
@@ -253,8 +254,8 @@ object AccountsPage {
       tr(
         td(account.name),
         td(span(cls := "badge text-bg-success", account.currency.code)),
-        td(cls := "text-end font-monospace", balanceEl),
-        td(cls := "text-end font-monospace text-muted", targetEl),
+        td(cls := "font-monospace", balanceEl),
+        td(cls := "font-monospace text-muted", targetEl),
         td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingSavingsId.set(Some(account.id)) })),
       )
     }
@@ -265,6 +266,21 @@ object AccountsPage {
     var targetRef: org.scalajs.dom.html.Input = null
     val currencyValue                         = Var(account.currency)
 
+    val saveAction = Loading.actionGroup(
+      "Save",
+      () => {
+        val name      = Option(nameRef).map(_.value.trim).getOrElse("")
+        val targetTxt = Option(targetRef).map(_.value.trim).getOrElse("")
+        if name.nonEmpty then {
+          val targetCents = if targetTxt.isEmpty then None else Some((targetTxt.toDoubleOption.getOrElse(0.0) * 100).toLong)
+          dataService.updateSavingsAccount(account.id, name, currencyValue.now(), targetCents).map(_ => editingSavingsId.set(None))
+        } else {
+          scala.concurrent.Future.successful(())
+        }
+      },
+      "btn btn-primary btn-sm",
+    )
+
     tr(
       cls := "table-warning",
       td(
@@ -274,6 +290,7 @@ object AccountsPage {
           defaultValue := account.name,
           onMountCallback(ctx => nameRef = ctx.thisNode.ref),
           onMountFocus,
+          saveAction.onEnter,
         ),
       ),
       td(
@@ -296,25 +313,13 @@ object AccountsPage {
           placeholder  := "No target",
           defaultValue := account.plannedMonthly.fold("")(t => (t / 100.0).toString),
           onMountCallback(ctx => targetRef = ctx.thisNode.ref),
+          saveAction.onEnter,
         ),
       ),
       td(
         div(
           cls := "btn-group btn-group-sm",
-          Loading.actionButton(
-            "Save",
-            () => {
-              val name      = Option(nameRef).map(_.value.trim).getOrElse("")
-              val targetTxt = Option(targetRef).map(_.value.trim).getOrElse("")
-              if name.nonEmpty then {
-                val targetCents = if targetTxt.isEmpty then None else Some((targetTxt.toDoubleOption.getOrElse(0.0) * 100).toLong)
-                dataService.updateSavingsAccount(account.id, name, currencyValue.now(), targetCents).map(_ => editingSavingsId.set(None))
-              } else {
-                scala.concurrent.Future.successful(())
-              }
-            },
-            "btn btn-primary btn-sm",
-          ),
+          saveAction.btn,
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => editingSavingsId.set(None) }),
           Loading.actionButton(
             "Del",
@@ -331,6 +336,21 @@ object AccountsPage {
     var targetRef: org.scalajs.dom.html.Input = null
     val currencyValue                         = Var(primaryCurrency)
 
+    val addAction = Loading.actionGroup(
+      "Add",
+      () => {
+        val name      = Option(nameRef).map(_.value.trim).getOrElse("")
+        val targetTxt = Option(targetRef).map(_.value.trim).getOrElse("")
+        if name.nonEmpty then {
+          val targetCents = if targetTxt.isEmpty then None else Some((targetTxt.toDoubleOption.getOrElse(0.0) * 100).toLong)
+          dataService.addSavingsAccount(name, currencyValue.now(), targetCents).map(_ => addingSavings.set(false))
+        } else {
+          scala.concurrent.Future.successful(())
+        }
+      },
+      "btn btn-success btn-sm",
+    )
+
     tr(
       cls := "table-success",
       td(
@@ -340,6 +360,7 @@ object AccountsPage {
           placeholder := "Account name",
           onMountCallback(ctx => nameRef = ctx.thisNode.ref),
           onMountFocus,
+          addAction.onEnter,
         ),
       ),
       td(
@@ -352,30 +373,18 @@ object AccountsPage {
       td(cls := "text-muted small", "Balance: 0"),
       td(
         input(
-          cls         := "form-control form-control-sm text-end",
+          cls         := "form-control form-control-sm",
           tpe         := "number",
           stepAttr    := "0.01",
           placeholder := "Target/mo",
           onMountCallback(ctx => targetRef = ctx.thisNode.ref),
+          addAction.onEnter,
         ),
       ),
       td(
         div(
           cls := "btn-group btn-group-sm",
-          Loading.actionButton(
-            "Add",
-            () => {
-              val name      = Option(nameRef).map(_.value.trim).getOrElse("")
-              val targetTxt = Option(targetRef).map(_.value.trim).getOrElse("")
-              if name.nonEmpty then {
-                val targetCents = if targetTxt.isEmpty then None else Some((targetTxt.toDoubleOption.getOrElse(0.0) * 100).toLong)
-                dataService.addSavingsAccount(name, currencyValue.now(), targetCents).map(_ => addingSavings.set(false))
-              } else {
-                scala.concurrent.Future.successful(())
-              }
-            },
-            "btn btn-success btn-sm",
-          ),
+          addAction.btn,
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => addingSavings.set(false) }),
         ),
       ),

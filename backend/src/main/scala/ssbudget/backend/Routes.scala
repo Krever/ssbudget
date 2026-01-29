@@ -39,6 +39,7 @@ object Routes {
       // Accounts
       route(Endpoints.accounts.list)(_ => repos.accounts.findAll.map(Right(_))),
       route(Endpoints.accounts.create)(createAccount(repos)),
+      route(Endpoints.accounts.delete)(deleteAccount(repos)),
       // Balances
       route(Endpoints.balances.listLatest)(_ => repos.balanceSnapshots.findAllLatest.map(Right(_))),
       route(Endpoints.balances.create)(createBalanceSnapshot(repos)),
@@ -103,6 +104,14 @@ object Routes {
       _ <- repos.accounts.create(account)
       _ <- repos.balanceSnapshots.create(snapshot)
     } yield Right(AccountResponse(account, snapshot))
+  }
+
+  private def deleteAccount(repos: Repositories)(id: AccountId): Result[Unit] = {
+    for {
+      // Delete related balance snapshots first
+      _ <- repos.balanceSnapshots.deleteByAccountId(id)
+      _ <- repos.accounts.delete(id)
+    } yield Right(())
   }
 
   private def createBalanceSnapshot(repos: Repositories)(dto: CreateBalanceSnapshot): Result[BalanceSnapshot] = {

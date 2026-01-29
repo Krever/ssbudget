@@ -13,6 +13,7 @@ trait BalanceSnapshotRepository {
   def findLatestByAccount(accountId: AccountId): IO[Option[BalanceSnapshot]]
   def findAllLatest: IO[List[BalanceSnapshot]]
   def delete(id: BalanceSnapshotId): IO[Unit]
+  def deleteByAccountId(accountId: AccountId): IO[Unit]
 }
 
 class BalanceSnapshotRepositoryImpl(xa: Transactor[IO]) extends BalanceSnapshotRepository {
@@ -60,6 +61,12 @@ class BalanceSnapshotRepositoryImpl(xa: Transactor[IO]) extends BalanceSnapshotR
   override def delete(id: BalanceSnapshotId): IO[Unit] = {
     sql"""
       DELETE FROM balance_snapshots WHERE id = $id
+    """.update.run.transact(xa).void
+  }
+
+  override def deleteByAccountId(accountId: AccountId): IO[Unit] = {
+    sql"""
+      DELETE FROM balance_snapshots WHERE account_id = $accountId
     """.update.run.transact(xa).void
   }
 }

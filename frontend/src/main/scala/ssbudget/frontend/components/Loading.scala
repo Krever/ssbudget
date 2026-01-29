@@ -52,6 +52,55 @@ object Loading {
     )
   }
 
+  /** Action group that provides a button and onKeyDown handler sharing the same loading state. Use this when you want Enter key on inputs to trigger
+    * the same action as clicking the button.
+    */
+  class ActionGroup(
+      label: String,
+      action: () => Future[Unit],
+      btnClass: String = "btn btn-primary btn-sm",
+  ) {
+    private val loading = Var(false)
+
+    private def executeAction(): Unit = {
+      if !loading.now() then {
+        loading.set(true)
+        action().onComplete { result =>
+          loading.set(false)
+          result match {
+            case Failure(ex) =>
+              dom.console.error(s"Action failed: ${ex.getMessage}")
+            case Success(_)  => // success
+          }
+        }
+      }
+    }
+
+    /** The button element */
+    val btn: HtmlElement = button(
+      tpe := "button",
+      cls := btnClass,
+      disabled <-- loading.signal,
+      child <-- loading.signal.map {
+        case true  => spinner
+        case false => span(label)
+      },
+      onClick --> { _ => executeAction() },
+    )
+
+    /** onKeyDown modifier that triggers action on Enter key */
+    val onEnter: Modifier[HtmlElement] = onKeyDown --> { ev =>
+      if ev.key == "Enter" then executeAction()
+    }
+  }
+
+  /** Create an action group for shared button/Enter key handling */
+  def actionGroup(
+      label: String,
+      action: () => Future[Unit],
+      btnClass: String = "btn btn-primary btn-sm",
+  ): ActionGroup = new ActionGroup(label, action, btnClass)
+
   /** Button with confirm dialog before action */
   def confirmActionButton(
       label: String,
