@@ -13,4 +13,6 @@ final case class SavingsAccount(
     currency: Currency,
     currentBalance: Long,        // in cents, editable directly
     plannedMonthly: Option[Long], // optional monthly target in cents
-) derives Codec.AsObject
+) derives Codec.AsObject {
+  def balance: Money                     = Money(currentBalance, currency)
+}

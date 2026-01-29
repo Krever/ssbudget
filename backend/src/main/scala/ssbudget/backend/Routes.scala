@@ -131,7 +131,7 @@ object Routes {
 
   private def createBudgetItem(repos: Repositories)(dto: CreateBudgetItem): Result[BudgetItemDefinition] = {
     val itemId = ExpenseDefId(UUID.randomUUID().toString)
-    val item   = BudgetItemDefinition(itemId, dto.name, dto.itemType, EstimateMode.Fixed, Some(dto.estimateCents))
+    val item   = BudgetItemDefinition(itemId, dto.name, dto.itemType, EstimateMode.Fixed, Some(dto.estimateCents), dto.currency)
 
     for {
       _             <- repos.expenseDefinitions.create(item)
@@ -152,7 +152,8 @@ object Routes {
       existingOpt <- repos.expenseDefinitions.findById(id)
       result      <- existingOpt match {
                        case Some(existing) =>
-                         val updated = existing.copy(name = dto.name, itemType = dto.itemType, fixedEstimate = Some(dto.estimateCents))
+                         val updated =
+                           existing.copy(name = dto.name, itemType = dto.itemType, fixedEstimate = Some(dto.estimateCents), currency = dto.currency)
                          repos.expenseDefinitions.update(updated).as(Right(updated))
                        case None           =>
                          IO.pure(Left(s"Budget item not found: ${id.value}"))

@@ -4,15 +4,15 @@ import cats.effect.IO
 import cats.implicits.*
 import io.circe.generic.auto.*
 import io.circe.parser.decode
-import org.http4s.client.Client
-import org.http4s.{Method, Request, Uri}
 import ssbudget.backend.db.Repositories
 import ssbudget.shared.api.{CurrencySettingsResponse, ExchangeRatesResponse, KnownCurrency}
 import ssbudget.shared.model.{Currency, CurrencySetting, ExchangeRate}
+import sttp.client3.*
+import sttp.client3.httpclient.cats.HttpClientCatsBackend
 
 import java.time.Instant
 
-class CurrencyService(repos: Repositories, httpClient: Client[IO]) {
+class CurrencyService(repos: Repositories, sttpBackend: SttpBackend[IO, Any]) {
 
   def getSettings(): IO[CurrencySettingsResponse] = {
     repos.currencySettings.findAll.map { currencies =>
@@ -102,23 +102,26 @@ class CurrencyService(repos: Repositories, httpClient: Client[IO]) {
   )
 
   private def fetchRatesFromFrankfurter(baseCurrency: String): IO[Either[String, ExchangeRatesResponse]] = {
-    val uri     = Uri.unsafeFromString(s"https://api.frankfurter.dev/v1/latest?base=$baseCurrency")
-    val request = Request[IO](Method.GET, uri)
+    val request = basicRequest
+      .get(uri"https://api.frankfurter.dev/v1/latest?base=$baseCurrency")
+      .response(asString)
 
-    httpClient.expect[String](request).attempt.map {
-      case Left(error) => Left(s"Failed to fetch rates: ${error.getMessage}")
-      case Right(body) =>
-        decode[FrankfurterResponse](body) match {
-          case Left(error)     => Left(s"Failed to parse response: ${error.getMessage}")
-          case Right(response) =>
-            Right(
-              ExchangeRatesResponse(
-                rates = response.rates,
-                baseCurrency = response.base,
-                fetchedAt = Instant.now(),
-              ),
-            )
-        }
+    sttpBackend.send(request).map { response =>
+      response.body match {
+        case Left(error) => Left(s"Failed to fetch rates: $error")
+        case Right(body) =>
+          decode[FrankfurterResponse](body) match {
+            case Left(error)     => Left(s"Failed to parse response: ${error.getMessage}")
+            case Right(response) =>
+              Right(
+                ExchangeRatesResponse(
+                  rates = response.rates,
+                  baseCurrency = response.base,
+                  fetchedAt = Instant.now(),
+                ),
+              )
+          }
+      }
     }
   }
 }

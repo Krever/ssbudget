@@ -12,7 +12,7 @@ class ExpenseRecordRepositorySpec extends RepositorySpec {
       expenseRepo: ExpenseDefinitionRepository,
   ): IO[Unit] = {
     val period  = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), None)
-    val expense = BudgetItemDefinition(ExpenseDefId("exp-1"), "Rent", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(200000L))
+    val expense = BudgetItemDefinition(ExpenseDefId("exp-1"), "Rent", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(200000L), Currency.PLN)
     periodRepo.create(period) *> expenseRepo.create(expense)
   }
 
@@ -44,7 +44,7 @@ class ExpenseRecordRepositorySpec extends RepositorySpec {
 
     val period1 = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), None)
     val period2 = Period(PeriodId("per-2"), Instant.parse("2024-02-25T00:00:00Z"), None)
-    val expense = BudgetItemDefinition(ExpenseDefId("exp-1"), "Rent", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(100L))
+    val expense = BudgetItemDefinition(ExpenseDefId("exp-1"), "Rent", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(100L), Currency.PLN)
     val record1 = ExpenseRecord(ExpenseRecordId("rec-1"), PeriodId("per-1"), ExpenseDefId("exp-1"), None, None)
     val record2 = ExpenseRecord(ExpenseRecordId("rec-2"), PeriodId("per-2"), ExpenseDefId("exp-1"), None, None)
 

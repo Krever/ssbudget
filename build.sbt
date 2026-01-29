@@ -9,6 +9,7 @@ val http4sVersion  = "0.23.30"
 val tapirVersion   = "1.11.11"
 val circeVersion   = "0.14.10"
 val doobieVersion  = "1.0.0-RC6"
+val sttpVersion    = "3.10.2"
 
 lazy val root = (project in file("."))
   .aggregate(shared.jvm, shared.js, backend, frontend, e2e)
@@ -55,14 +56,14 @@ lazy val backend = (project in file("backend"))
   .settings(
     name := "backend",
     libraryDependencies ++= Seq(
-      "org.typelevel"               %% "cats-effect"         % "3.5.7",
-      "org.http4s"                  %% "http4s-ember-server" % http4sVersion,
-      "org.http4s"                  %% "http4s-ember-client" % http4sVersion,
-      "org.http4s"                  %% "http4s-dsl"          % http4sVersion,
-      "org.http4s"                  %% "http4s-circe"        % http4sVersion,
-      "com.softwaremill.sttp.tapir" %% "tapir-http4s-server" % tapirVersion,
-      "com.softwaremill.sttp.tapir" %% "tapir-json-circe"    % tapirVersion,
-      "io.circe"                    %% "circe-generic"       % circeVersion,
+      "org.typelevel"                 %% "cats-effect"         % "3.5.7",
+      "org.http4s"                    %% "http4s-ember-server" % http4sVersion,
+      "org.http4s"                    %% "http4s-dsl"          % http4sVersion,
+      "org.http4s"                    %% "http4s-circe"        % http4sVersion,
+      "com.softwaremill.sttp.tapir"   %% "tapir-http4s-server" % tapirVersion,
+      "com.softwaremill.sttp.tapir"   %% "tapir-json-circe"    % tapirVersion,
+      "com.softwaremill.sttp.client3" %% "cats"                % sttpVersion,
+      "io.circe"                      %% "circe-generic"       % circeVersion,
       "ch.qos.logback"               % "logback-classic"     % "1.5.15",
       // Database
       "org.tpolecat"  %% "doobie-core"   % doobieVersion,
@@ -90,7 +91,7 @@ lazy val frontend = (project in file("frontend"))
       "com.raquo"                     %%% "laminar"           % "17.2.0",
       "com.raquo"                     %%% "waypoint"          % "10.0.0-M1",
       "com.softwaremill.sttp.tapir"   %%% "tapir-sttp-client" % tapirVersion,
-      "com.softwaremill.sttp.client3" %%% "core"              % "3.10.2",
+      "com.softwaremill.sttp.client3" %%% "core"              % sttpVersion,
       "io.circe"                      %%% "circe-generic"     % circeVersion,
       "io.circe"                      %%% "circe-parser"      % circeVersion
     )

@@ -48,7 +48,10 @@ final case class BudgetItemDefinition(
     itemType: BudgetItemType,
     estimateMode: EstimateMode,
     fixedEstimate: Option[Long], // in cents, only for Fixed mode
-) derives Codec.AsObject
+    currency: Currency,
+) derives Codec.AsObject {
+  def estimateMoney: Option[Money] = fixedEstimate.map(cents => Money(cents, currency))
+}
 
 // Keep ExpenseDefinition as alias for compatibility
 type ExpenseDefinition = BudgetItemDefinition

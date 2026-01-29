@@ -19,28 +19,28 @@ class ExpenseDefinitionRepositoryImpl(xa: Transactor[IO]) extends ExpenseDefinit
 
   override def create(expense: BudgetItemDefinition): IO[Unit] = {
     sql"""
-      INSERT INTO expense_definitions (id, name, item_type, estimate_mode, fixed_estimate)
-      VALUES (${expense.id}, ${expense.name}, ${expense.itemType}, ${expense.estimateMode}, ${expense.fixedEstimate})
+      INSERT INTO expense_definitions (id, name, item_type, estimate_mode, fixed_estimate, currency)
+      VALUES (${expense.id}, ${expense.name}, ${expense.itemType}, ${expense.estimateMode}, ${expense.fixedEstimate}, ${expense.currency})
     """.update.run.transact(xa).void
   }
 
   override def findById(id: ExpenseDefId): IO[Option[BudgetItemDefinition]] = {
     sql"""
-      SELECT id, name, item_type, estimate_mode, fixed_estimate
+      SELECT id, name, item_type, estimate_mode, fixed_estimate, currency
       FROM expense_definitions WHERE id = $id
     """.query[BudgetItemDefinition].option.transact(xa)
   }
 
   override def findAll: IO[List[BudgetItemDefinition]] = {
     sql"""
-      SELECT id, name, item_type, estimate_mode, fixed_estimate
+      SELECT id, name, item_type, estimate_mode, fixed_estimate, currency
       FROM expense_definitions ORDER BY name
     """.query[BudgetItemDefinition].to[List].transact(xa)
   }
 
   override def findByType(itemType: BudgetItemType): IO[List[BudgetItemDefinition]] = {
     sql"""
-      SELECT id, name, item_type, estimate_mode, fixed_estimate
+      SELECT id, name, item_type, estimate_mode, fixed_estimate, currency
       FROM expense_definitions WHERE item_type = $itemType ORDER BY name
     """.query[BudgetItemDefinition].to[List].transact(xa)
   }
@@ -49,7 +49,8 @@ class ExpenseDefinitionRepositoryImpl(xa: Transactor[IO]) extends ExpenseDefinit
     sql"""
       UPDATE expense_definitions
       SET name = ${expense.name}, item_type = ${expense.itemType},
-          estimate_mode = ${expense.estimateMode}, fixed_estimate = ${expense.fixedEstimate}
+          estimate_mode = ${expense.estimateMode}, fixed_estimate = ${expense.fixedEstimate},
+          currency = ${expense.currency}
       WHERE id = ${expense.id}
     """.update.run.transact(xa).void
   }

@@ -12,6 +12,7 @@ class ExpenseDefinitionRepositorySpec extends RepositorySpec {
       BudgetItemType.PlannedExpense,
       EstimateMode.Fixed,
       Some(200000L),
+      Currency.PLN,
     )
 
     for {
@@ -30,9 +31,9 @@ class ExpenseDefinitionRepositorySpec extends RepositorySpec {
 
   "findAll returns all budget item definitions ordered by name" in {
     val repo = new ExpenseDefinitionRepositoryImpl(xa)
-    val exp1 = BudgetItemDefinition(ExpenseDefId("exp-1"), "Zebra", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(100L))
-    val exp2 = BudgetItemDefinition(ExpenseDefId("exp-2"), "Alpha", BudgetItemType.EstimatedExpense, EstimateMode.Average, None)
-    val exp3 = BudgetItemDefinition(ExpenseDefId("exp-3"), "Beta", BudgetItemType.PlannedIncome, EstimateMode.LastMonth, None)
+    val exp1 = BudgetItemDefinition(ExpenseDefId("exp-1"), "Zebra", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(100L), Currency.PLN)
+    val exp2 = BudgetItemDefinition(ExpenseDefId("exp-2"), "Alpha", BudgetItemType.EstimatedExpense, EstimateMode.Average, None, Currency.PLN)
+    val exp3 = BudgetItemDefinition(ExpenseDefId("exp-3"), "Beta", BudgetItemType.PlannedIncome, EstimateMode.LastMonth, None, Currency.PLN)
 
     for {
       _   <- repo.create(exp1)
@@ -44,9 +45,12 @@ class ExpenseDefinitionRepositorySpec extends RepositorySpec {
 
   "findByType returns only items of that type" in {
     val repo             = new ExpenseDefinitionRepositoryImpl(xa)
-    val plannedExpense   = BudgetItemDefinition(ExpenseDefId("exp-1"), "Rent", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(100L))
-    val estimatedExpense = BudgetItemDefinition(ExpenseDefId("exp-2"), "Groceries", BudgetItemType.EstimatedExpense, EstimateMode.Average, None)
-    val plannedIncome    = BudgetItemDefinition(ExpenseDefId("exp-3"), "Salary", BudgetItemType.PlannedIncome, EstimateMode.Fixed, Some(500000L))
+    val plannedExpense   =
+      BudgetItemDefinition(ExpenseDefId("exp-1"), "Rent", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(100L), Currency.PLN)
+    val estimatedExpense =
+      BudgetItemDefinition(ExpenseDefId("exp-2"), "Groceries", BudgetItemType.EstimatedExpense, EstimateMode.Average, None, Currency.PLN)
+    val plannedIncome    =
+      BudgetItemDefinition(ExpenseDefId("exp-3"), "Salary", BudgetItemType.PlannedIncome, EstimateMode.Fixed, Some(500000L), Currency.PLN)
 
     for {
       _                 <- repo.create(plannedExpense)
@@ -64,7 +68,7 @@ class ExpenseDefinitionRepositorySpec extends RepositorySpec {
 
   "update modifies budget item definition" in {
     val repo    = new ExpenseDefinitionRepositoryImpl(xa)
-    val item    = BudgetItemDefinition(ExpenseDefId("exp-1"), "Old", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(100L))
+    val item    = BudgetItemDefinition(ExpenseDefId("exp-1"), "Old", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(100L), Currency.PLN)
     val updated = item.copy(name = "New", fixedEstimate = Some(200L))
 
     for {
@@ -76,7 +80,7 @@ class ExpenseDefinitionRepositorySpec extends RepositorySpec {
 
   "delete removes budget item definition" in {
     val repo = new ExpenseDefinitionRepositoryImpl(xa)
-    val item = BudgetItemDefinition(ExpenseDefId("exp-1"), "Test", BudgetItemType.PlannedExpense, EstimateMode.Fixed, None)
+    val item = BudgetItemDefinition(ExpenseDefId("exp-1"), "Test", BudgetItemType.PlannedExpense, EstimateMode.Fixed, None, Currency.PLN)
 
     for {
       _     <- repo.create(item)

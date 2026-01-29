@@ -36,7 +36,7 @@ object DashboardPage {
       div(
         cls := "row g-3",
         div(
-          cls := "col-lg-5",
+          cls   := "col-lg-5",
           summaryPanel(),
           periodCard(),
         ),

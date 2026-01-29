@@ -82,9 +82,9 @@ object BudgetPage {
                   else items
                 filteredItems.map(item => plannedItemRow(item, records, payingId, editingId, isIncome = false))
               },
-            child <-- addingPlanned.signal.map {
-              case true  => addItemRow(BudgetItemType.PlannedExpense, addingPlanned, columns = 5)
-              case false => emptyNode
+            child <-- addingPlanned.signal.combineWith(dataService.primaryCurrency).map {
+              case (true, currency) => addItemRow(BudgetItemType.PlannedExpense, addingPlanned, columns = 5, currency)
+              case (false, _)       => emptyNode
             },
             tr(cls := "table-secondary", td(colSpan := 5, cls := "py-1 small text-muted", "— Incomes —")),
             children <-- dataService.plannedIncomes
@@ -98,9 +98,9 @@ object BudgetPage {
                   else items
                 filteredItems.map(item => plannedItemRow(item, records, payingId, editingId, isIncome = true))
               },
-            child <-- addingIncome.signal.map {
-              case true  => addItemRow(BudgetItemType.PlannedIncome, addingIncome, columns = 5)
-              case false => emptyNode
+            child <-- addingIncome.signal.combineWith(dataService.primaryCurrency).map {
+              case (true, currency) => addItemRow(BudgetItemType.PlannedIncome, addingIncome, columns = 5, currency)
+              case (false, _)       => emptyNode
             },
           ),
         ),
@@ -142,9 +142,9 @@ object BudgetPage {
                 val scaleFactor = daysRemaining.toDouble / 30.0
                 items.map(item => estimatedItemRow(item, scaleFactor, editingId))
               },
-            child <-- addingEstimated.signal.map {
-              case true  => addItemRow(BudgetItemType.EstimatedExpense, addingEstimated, columns = 4)
-              case false => emptyNode
+            child <-- addingEstimated.signal.combineWith(dataService.primaryCurrency).map {
+              case (true, currency) => addItemRow(BudgetItemType.EstimatedExpense, addingEstimated, columns = 4, currency)
+              case (false, _)       => emptyNode
             },
           ),
         ),
@@ -183,20 +183,22 @@ object BudgetPage {
               .combineWith(savingToAccountId.signal)
               .combineWith(expandedSavingsIds.signal)
               .map { case (accounts, txns, savingToId, expandedIds) =>
-                accounts
-                  .filter(_.plannedMonthly.isDefined) // Only show accounts with targets
-                  .flatMap { account =>
-                    val periodTxns  = txns.filter(_.accountId == account.id)
-                    val periodTotal = periodTxns.map(_.amount).sum
-                    val isExpanded  = expandedIds.contains(account.id)
-                    val mainRow     = savingsTargetRow(account, periodTotal, periodTxns, savingToId, isExpanded)
-                    val txnRows     = if isExpanded then {
-                      periodTxns.map(txn => savingsTransactionRow(txn, account.currency)) :+
-                        (if savingToId.contains(account.id) then addSavingsTransactionRow(account, account.plannedMonthly.getOrElse(0L) - periodTotal)
-                         else addTransactionButton(account))
-                    } else Nil
-                    mainRow :: txnRows
-                  }
+                // Show accounts with targets first, then accounts without targets
+                val (withTargets, withoutTargets) = accounts.partition(_.plannedMonthly.isDefined)
+                val sortedAccounts                = withTargets ++ withoutTargets
+                sortedAccounts.flatMap { account =>
+                  val periodTxns      = txns.filter(_.accountId == account.id)
+                  val periodTotal     = periodTxns.map(_.amount).sum
+                  val isExpanded      = expandedIds.contains(account.id)
+                  val mainRow         = savingsTargetRow(account, periodTotal, periodTxns, savingToId, isExpanded)
+                  val suggestedAmount = account.plannedMonthly.map(_ - periodTotal).getOrElse(0L)
+                  val txnRows         = if isExpanded then {
+                    periodTxns.map(txn => savingsTransactionRow(txn, account.currency)) :+
+                      (if savingToId.contains(account.id) then addSavingsTransactionRow(account, suggestedAmount)
+                       else addTransactionButton(account))
+                  } else Nil
+                  mainRow :: txnRows
+                }
               },
           ),
         ),
@@ -216,13 +218,17 @@ object BudgetPage {
       savingToId: Option[SavingsAccountId],
       isExpanded: Boolean,
   ): HtmlElement = {
-    val target        = account.plannedMonthly.getOrElse(0L)
-    val remaining     = math.max(0L, target - periodContribution)
-    val currency      = account.currency
-    val targetEl      = MoneyFormatter.format(target, currency)
-    val savedEl       = MoneyFormatter.format(periodContribution, currency)
-    val remainingEl   = MoneyFormatter.format(remaining, currency)
-    val progressClass = if periodContribution >= target then "text-success" else "text-warning"
+    val currency = account.currency
+    val savedEl  = MoneyFormatter.format(periodContribution, currency)
+
+    val (targetEl, remainingEl, progressClass) = account.plannedMonthly match {
+      case Some(target) =>
+        val remaining = math.max(0L, target - periodContribution)
+        val cls       = if periodContribution >= target then "text-success" else "text-warning"
+        (MoneyFormatter.format(target, currency), MoneyFormatter.format(remaining, currency), cls)
+      case None         =>
+        (span("-"), span("-"), "text-muted")
+    }
 
     tr(
       styleAttr := "cursor: pointer",
@@ -424,7 +430,7 @@ object BudgetPage {
       td(
         saveCancelDelete(
           onSave = () => {
-            dataService.updateBudgetItemEstimate(item.id, parseCents(estimateRef)).map(_ => editingItemId.set(None))
+            dataService.updateBudgetItemEstimate(item.id, parseCents(estimateRef), item.currency).map(_ => editingItemId.set(None))
           },
           onCancel = () => editingItemId.set(None),
           onDelete = () => {
@@ -435,7 +441,7 @@ object BudgetPage {
     )
   }
 
-  private def addItemRow(itemType: BudgetItemType, addingVar: Var[Boolean], columns: Int): HtmlElement = {
+  private def addItemRow(itemType: BudgetItemType, addingVar: Var[Boolean], columns: Int, currency: Currency): HtmlElement = {
     var nameRef: org.scalajs.dom.html.Input     = null
     var estimateRef: org.scalajs.dom.html.Input = null
     val emptyCols                               = columns - 3
@@ -453,7 +459,7 @@ object BudgetPage {
           onSave = () => {
             val name = Option(nameRef).map(_.value.trim).getOrElse("")
             if name.nonEmpty then {
-              dataService.addBudgetItem(name, itemType, parseCents(estimateRef)).map(_ => addingVar.set(false))
+              dataService.addBudgetItem(name, itemType, parseCents(estimateRef), currency).map(_ => addingVar.set(false))
             } else {
               Future.successful(())
             }

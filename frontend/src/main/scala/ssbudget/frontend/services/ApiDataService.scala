@@ -105,27 +105,25 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
         periodOpt.fold(List.empty[SavingsTransaction])(period => txns.filter(_.periodId == period.id))
       }
 
-  private def totalBalanceCents: Signal[Long] =
-    balanceSnapshotsVar.signal
-      .combineWith(exchangeRatesVar.signal)
-      .combineWith(primaryCurrency)
-      .map { case (snapshots, rates, primary) =>
-        snapshots.foldLeft(0L) { (acc, snap) =>
-          val amountInPrimary =
-            if snap.currency == primary then snap.amount
-            else {
-              // Look up rate for this currency to primary
-              rates.get(snap.currency) match {
-                case Some(rate) => (snap.amount * rate).toLong
-                case None       => snap.amount // fallback if no rate available
-              }
-            }
-          acc + amountInPrimary
-        }
-      }
+  // Helper to sum Money in various currencies into primary currency
+  private def sumInPrimary(amounts: Seq[Money], rates: Map[Currency, Double], primary: Currency): Money = {
+    val total = amounts.foldLeft(0L) { (acc, money) =>
+      val converted =
+        if money.currency == primary then money.amountCents
+        else rates.get(money.currency).map(rate => (money.amountCents * rate).toLong).getOrElse(money.amountCents)
+      acc + converted
+    }
+    Money(total, primary)
+  }
 
   override def totalBalance: Signal[Money] =
-    totalBalanceCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
+    balanceSnapshotsVar.signal
+      .combineWith(savingsAccountsVar.signal)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (snapshots, savings, rates, primary) =>
+        sumInPrimary(snapshots.map(_.balance) ++ savings.map(_.balance), rates, primary)
+      }
 
   override def daysRemainingInPeriod: Signal[Int] =
     currentPeriod.map {
@@ -138,90 +136,84 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       case None    => 0
     }
 
-  private def unpaidPlannedCents: Signal[Long] =
-    Signal
-      .combine(plannedExpenses, currentPeriodRecords)
-      .map { case (planned, records) =>
-        planned.foldLeft(0L) { (acc, exp) =>
-          val record = records.find(_.expenseDefId == exp.id)
-          val isPaid = record.flatMap(_.paidAmount).isDefined
-          if isPaid then acc else acc + exp.fixedEstimate.getOrElse(0L)
-        }
-      }
-
   override def unpaidPlannedExpenses: Signal[Money] =
-    unpaidPlannedCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
-
-  private def scaledEstimatedCents: Signal[Long] =
-    Signal
-      .combine(estimatedExpenses, daysRemainingInPeriod)
-      .map { case (estimated, daysRemaining) =>
-        val scaleFactor = daysRemaining.toDouble / 30.0
-        estimated.foldLeft(0L)((acc, exp) => acc + (exp.fixedEstimate.getOrElse(0L) * scaleFactor).toLong)
+    plannedExpenses
+      .combineWith(currentPeriodRecords)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (planned, records, rates, primary) =>
+        val unpaidAmounts = planned.flatMap { exp =>
+          val isPaid = records.exists(r => r.expenseDefId == exp.id && r.paidAmount.isDefined)
+          if isPaid then None else exp.estimateMoney
+        }
+        sumInPrimary(unpaidAmounts, rates, primary)
       }
 
   override def scaledEstimatedExpenses: Signal[Money] =
-    scaledEstimatedCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
-
-  private def remainingSavingsCents: Signal[Long] =
-    Signal
-      .combine(savingsAccountsVar.signal, currentPeriodSavingsTransactions)
-      .map { case (accounts, txns) =>
-        accounts.foldLeft(0L) { (acc, account) =>
-          account.plannedMonthly match {
-            case Some(target) =>
-              val contributions = txns.filter(_.accountId == account.id).map(_.amount).sum
-              val remaining     = math.max(0L, target - contributions)
-              acc + remaining
-            case None         => acc
-          }
+    estimatedExpenses
+      .combineWith(daysRemainingInPeriod)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (estimated, daysRemaining, rates, primary) =>
+        val scaleFactor   = daysRemaining.toDouble / 30.0
+        val scaledAmounts = estimated.flatMap { exp =>
+          exp.estimateMoney.map(_ * scaleFactor)
         }
+        sumInPrimary(scaledAmounts, rates, primary)
       }
 
   override def remainingSavingsTarget: Signal[Money] =
-    remainingSavingsCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
-
-  private def pendingIncomeCents: Signal[Long] =
-    Signal
-      .combine(plannedIncomes, currentPeriodRecords)
-      .map { case (incomes, records) =>
-        incomes.foldLeft(0L) { (acc, inc) =>
-          val record     = records.find(_.expenseDefId == inc.id)
-          val isReceived = record.flatMap(_.paidAmount).isDefined
-          if isReceived then acc else acc + inc.fixedEstimate.getOrElse(0L)
+    savingsAccountsVar.signal
+      .combineWith(currentPeriodSavingsTransactions)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (accounts, txns, rates, primary) =>
+        val remainingAmounts = accounts.flatMap { account =>
+          account.plannedMonthly.map { target =>
+            val contributions = txns.filter(_.accountId == account.id).map(_.amount).sum
+            val remaining     = math.max(0L, target - contributions)
+            Money(remaining, account.currency)
+          }
         }
+        sumInPrimary(remainingAmounts, rates, primary)
       }
 
   override def pendingIncome: Signal[Money] =
-    pendingIncomeCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
+    plannedIncomes
+      .combineWith(currentPeriodRecords)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (incomes, records, rates, primary) =>
+        val pendingAmounts = incomes.flatMap { inc =>
+          val isReceived = records.exists(r => r.expenseDefId == inc.id && r.paidAmount.isDefined)
+          if isReceived then None else inc.estimateMoney
+        }
+        sumInPrimary(pendingAmounts, rates, primary)
+      }
 
   override def predictedExpenses: Signal[Money] =
-    unpaidPlannedCents
-      .combineWith(scaledEstimatedCents)
-      .combineWith(remainingSavingsCents)
-      .combineWith(primaryCurrency)
-      .map { case (unpaid, scaled, savings, primary) => Money(unpaid + scaled + savings, primary) }
+    unpaidPlannedExpenses
+      .combineWith(scaledEstimatedExpenses)
+      .combineWith(remainingSavingsTarget)
+      .map { case (unpaid, scaled, savings) => unpaid + scaled + savings }
 
   override def freeMoney: Signal[Money] =
-    totalBalanceCents
-      .combineWith(unpaidPlannedCents)
-      .combineWith(scaledEstimatedCents)
-      .combineWith(remainingSavingsCents)
-      .combineWith(pendingIncomeCents)
-      .combineWith(primaryCurrency)
-      .map { case (total, unpaid, scaled, savings, income, primary) => Money(total - unpaid - scaled - savings + income, primary) }
+    totalBalance
+      .combineWith(unpaidPlannedExpenses)
+      .combineWith(scaledEstimatedExpenses)
+      .combineWith(remainingSavingsTarget)
+      .combineWith(pendingIncome)
+      .map { case (total, unpaid, scaled, savings, income) => total - unpaid - scaled - savings + income }
 
   override def availableNow: Signal[Money] =
-    totalBalanceCents
-      .combineWith(unpaidPlannedCents)
-      .combineWith(primaryCurrency)
-      .map { case (total, unpaid, primary) => Money(total - unpaid, primary) }
+    totalBalance
+      .combineWith(unpaidPlannedExpenses)
+      .map { case (total, unpaid) => total - unpaid }
 
   override def dailyBudget: Signal[Money] =
     freeMoney
       .combineWith(daysRemainingInPeriod)
-      .combineWith(primaryCurrency)
-      .map { case (free, days, primary) => if days > 0 then free / days else Money.zero(primary) }
+      .map { case (free, days) => if days > 0 then free / days else Money.zero(free.currency) }
 
   // Mutation methods
   override def addAccount(name: String, currency: Currency): Future[Unit] = {
@@ -246,8 +238,8 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     }
   }
 
-  override def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long): Future[Unit] = {
-    client.budgetItems.create(CreateBudgetItem(name, itemType, estimateCents)).map { item =>
+  override def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long, currency: Currency): Future[Unit] = {
+    client.budgetItems.create(CreateBudgetItem(name, itemType, estimateCents, currency)).map { item =>
       budgetItemsVar.update(_ :+ item)
       // If it's a planned expense or income, we need to refetch the records for current period
       if itemType == BudgetItemType.PlannedExpense || itemType == BudgetItemType.PlannedIncome then {
@@ -268,11 +260,11 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     }
   }
 
-  override def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long): Future[Unit] = {
+  override def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long, currency: Currency): Future[Unit] = {
     val current = budgetItemsVar.now().find(_.id == itemId)
     current match {
       case Some(item) =>
-        client.budgetItems.update(itemId, UpdateBudgetItem(item.name, item.itemType, newEstimateCents)).map { updated =>
+        client.budgetItems.update(itemId, UpdateBudgetItem(item.name, item.itemType, newEstimateCents, currency)).map { updated =>
           budgetItemsVar.update(items => items.map(i => if i.id == itemId then updated else i))
         }
       case None       => Future.failed(new Exception(s"Budget item not found: $itemId"))

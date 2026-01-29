@@ -3,9 +3,9 @@ package ssbudget.backend
 import cats.effect.{IO, Resource}
 import cats.implicits.*
 import com.comcast.ip4s.{Host, Port, host}
-import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.server.Server
+import sttp.client3.httpclient.cats.HttpClientCatsBackend
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 
 import ssbudget.backend.auth.{PasswordService, SessionService, WebAuthnService}
@@ -35,12 +35,12 @@ object ServerBuilder {
       testMode: Boolean = false,
   ): Resource[IO, Server] = {
     for {
-      httpClient      <- EmberClientBuilder.default[IO].build
+      sttpBackend     <- HttpClientCatsBackend.resource[IO]()
       webAuthnService <- Resource.eval(WebAuthnService(repos.passkeyCredentials, rpId, rpName, rpOrigins))
       server          <- {
         val passwordService = PasswordService()
         val sessionService  = SessionService(repos.sessions)
-        val currencyService = new CurrencyService(repos, httpClient)
+        val currencyService = new CurrencyService(repos, sttpBackend)
 
         val authRoutes = AuthRoutes.make(
           repos.authConfig,

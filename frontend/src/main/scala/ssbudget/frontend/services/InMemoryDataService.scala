@@ -35,16 +35,16 @@ object InMemoryDataService extends DataService {
   private val budgetItemsVar: Var[List[BudgetItemDefinition]] = Var(
     List(
       // Planned expenses
-      BudgetItemDefinition(ExpenseDefId("exp-1"), "Rent", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(250000)),
-      BudgetItemDefinition(ExpenseDefId("exp-2"), "Electricity", BudgetItemType.PlannedExpense, EstimateMode.LastMonth, Some(15000)),
-      BudgetItemDefinition(ExpenseDefId("exp-3"), "Netflix", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(5500)),
+      BudgetItemDefinition(ExpenseDefId("exp-1"), "Rent", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(250000), Currency.PLN),
+      BudgetItemDefinition(ExpenseDefId("exp-2"), "Electricity", BudgetItemType.PlannedExpense, EstimateMode.LastMonth, Some(15000), Currency.PLN),
+      BudgetItemDefinition(ExpenseDefId("exp-3"), "Netflix", BudgetItemType.PlannedExpense, EstimateMode.Fixed, Some(5500), Currency.PLN),
       // Estimated expenses
-      BudgetItemDefinition(ExpenseDefId("exp-4"), "Groceries", BudgetItemType.EstimatedExpense, EstimateMode.Fixed, Some(150000)),
-      BudgetItemDefinition(ExpenseDefId("exp-5"), "Fuel", BudgetItemType.EstimatedExpense, EstimateMode.Average, Some(60000)),
-      BudgetItemDefinition(ExpenseDefId("exp-6"), "Entertainment", BudgetItemType.EstimatedExpense, EstimateMode.Fixed, Some(30000)),
+      BudgetItemDefinition(ExpenseDefId("exp-4"), "Groceries", BudgetItemType.EstimatedExpense, EstimateMode.Fixed, Some(150000), Currency.PLN),
+      BudgetItemDefinition(ExpenseDefId("exp-5"), "Fuel", BudgetItemType.EstimatedExpense, EstimateMode.Average, Some(60000), Currency.PLN),
+      BudgetItemDefinition(ExpenseDefId("exp-6"), "Entertainment", BudgetItemType.EstimatedExpense, EstimateMode.Fixed, Some(30000), Currency.PLN),
       // Planned incomes
-      BudgetItemDefinition(ExpenseDefId("inc-1"), "Freelance Project", BudgetItemType.PlannedIncome, EstimateMode.Fixed, Some(200000)),
-      BudgetItemDefinition(ExpenseDefId("inc-2"), "Tax Refund", BudgetItemType.PlannedIncome, EstimateMode.Fixed, Some(50000)),
+      BudgetItemDefinition(ExpenseDefId("inc-1"), "Freelance Project", BudgetItemType.PlannedIncome, EstimateMode.Fixed, Some(200000), Currency.PLN),
+      BudgetItemDefinition(ExpenseDefId("inc-2"), "Tax Refund", BudgetItemType.PlannedIncome, EstimateMode.Fixed, Some(50000), Currency.PLN),
     ),
   )
 
@@ -131,26 +131,25 @@ object InMemoryDataService extends DataService {
   override def currentPeriod: Signal[Option[Period]] =
     periodsVar.signal.map(_.find(_.endDate.isEmpty))
 
-  private def totalBalanceCents: Signal[Long] =
-    balanceSnapshotsVar.signal
-      .combineWith(exchangeRatesVar.signal)
-      .combineWith(primaryCurrency)
-      .map { case (snapshots, rates, primary) =>
-        snapshots.foldLeft(0L) { (acc, snap) =>
-          val amountInPrimary =
-            if snap.currency == primary then snap.amount
-            else {
-              rates.get(snap.currency) match {
-                case Some(rate) => (snap.amount * rate).toLong
-                case None       => snap.amount // fallback if no rate available
-              }
-            }
-          acc + amountInPrimary
-        }
-      }
+  // Helper to sum Money in various currencies into primary currency
+  private def sumInPrimary(amounts: Seq[Money], rates: Map[Currency, Double], primary: Currency): Money = {
+    val total = amounts.foldLeft(0L) { (acc, money) =>
+      val converted =
+        if money.currency == primary then money.amountCents
+        else rates.get(money.currency).map(rate => (money.amountCents * rate).toLong).getOrElse(money.amountCents)
+      acc + converted
+    }
+    Money(total, primary)
+  }
 
   override def totalBalance: Signal[Money] =
-    totalBalanceCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
+    balanceSnapshotsVar.signal
+      .combineWith(savingsAccountsVar.signal)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (snapshots, savings, rates, primary) =>
+        sumInPrimary(snapshots.map(_.balance) ++ savings.map(_.balance), rates, primary)
+      }
 
   override def plannedExpenses: Signal[List[BudgetItemDefinition]] =
     budgetItemsVar.signal.map(_.filter(_.itemType == BudgetItemType.PlannedExpense))
@@ -168,19 +167,18 @@ object InMemoryDataService extends DataService {
         periodOpt.fold(List.empty[ExpenseRecord])(period => records.filter(_.periodId == period.id))
       }
 
-  private def unpaidPlannedCents: Signal[Long] =
-    Signal
-      .combine(plannedExpenses, currentPeriodRecords)
-      .map { case (planned, records) =>
-        planned.foldLeft(0L) { (acc, exp) =>
-          val record = records.find(_.expenseDefId == exp.id)
-          val isPaid = record.flatMap(_.paidAmount).isDefined
-          if isPaid then acc else acc + exp.fixedEstimate.getOrElse(0L)
-        }
-      }
-
   override def unpaidPlannedExpenses: Signal[Money] =
-    unpaidPlannedCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
+    plannedExpenses
+      .combineWith(currentPeriodRecords)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (planned, records, rates, primary) =>
+        val unpaidAmounts = planned.flatMap { exp =>
+          val isPaid = records.exists(r => r.expenseDefId == exp.id && r.paidAmount.isDefined)
+          if isPaid then None else exp.estimateMoney
+        }
+        sumInPrimary(unpaidAmounts, rates, primary)
+      }
 
   override def daysRemainingInPeriod: Signal[Int] =
     currentPeriod.map {
@@ -193,16 +191,18 @@ object InMemoryDataService extends DataService {
       case None    => 0
     }
 
-  private def scaledEstimatedCents: Signal[Long] =
-    Signal
-      .combine(estimatedExpenses, daysRemainingInPeriod)
-      .map { case (estimated, daysRemaining) =>
-        val scaleFactor = daysRemaining.toDouble / 30.0
-        estimated.foldLeft(0L)((acc, exp) => acc + (exp.fixedEstimate.getOrElse(0L) * scaleFactor).toLong)
-      }
-
   override def scaledEstimatedExpenses: Signal[Money] =
-    scaledEstimatedCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
+    estimatedExpenses
+      .combineWith(daysRemainingInPeriod)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (estimated, daysRemaining, rates, primary) =>
+        val scaleFactor   = daysRemaining.toDouble / 30.0
+        val scaledAmounts = estimated.flatMap { exp =>
+          exp.estimateMoney.map(_ * scaleFactor)
+        }
+        sumInPrimary(scaledAmounts, rates, primary)
+      }
 
   override def currentPeriodSavingsTransactions: Signal[List[SavingsTransaction]] =
     Signal
@@ -211,65 +211,58 @@ object InMemoryDataService extends DataService {
         periodOpt.fold(List.empty[SavingsTransaction])(period => txns.filter(_.periodId == period.id))
       }
 
-  private def remainingSavingsCents: Signal[Long] =
-    Signal
-      .combine(savingsAccountsVar.signal, currentPeriodSavingsTransactions)
-      .map { case (accounts, txns) =>
-        accounts.foldLeft(0L) { (acc, account) =>
-          account.plannedMonthly match {
-            case Some(target) =>
-              val contributions = txns.filter(_.accountId == account.id).map(_.amount).sum
-              val remaining     = math.max(0L, target - contributions)
-              acc + remaining
-            case None         => acc
+  override def remainingSavingsTarget: Signal[Money] =
+    savingsAccountsVar.signal
+      .combineWith(currentPeriodSavingsTransactions)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (accounts, txns, rates, primary) =>
+        val remainingAmounts = accounts.flatMap { account =>
+          account.plannedMonthly.map { target =>
+            val contributions = txns.filter(_.accountId == account.id).map(_.amount).sum
+            val remaining     = math.max(0L, target - contributions)
+            Money(remaining, account.currency)
           }
         }
-      }
-
-  override def remainingSavingsTarget: Signal[Money] =
-    remainingSavingsCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
-
-  private def pendingIncomeCents: Signal[Long] =
-    Signal
-      .combine(plannedIncomes, currentPeriodRecords)
-      .map { case (incomes, records) =>
-        incomes.foldLeft(0L) { (acc, inc) =>
-          val record     = records.find(_.expenseDefId == inc.id)
-          val isReceived = record.flatMap(_.paidAmount).isDefined
-          if isReceived then acc else acc + inc.fixedEstimate.getOrElse(0L)
-        }
+        sumInPrimary(remainingAmounts, rates, primary)
       }
 
   override def pendingIncome: Signal[Money] =
-    pendingIncomeCents.combineWith(primaryCurrency).map { case (cents, primary) => Money(cents, primary) }
+    plannedIncomes
+      .combineWith(currentPeriodRecords)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (incomes, records, rates, primary) =>
+        val pendingAmounts = incomes.flatMap { inc =>
+          val isReceived = records.exists(r => r.expenseDefId == inc.id && r.paidAmount.isDefined)
+          if isReceived then None else inc.estimateMoney
+        }
+        sumInPrimary(pendingAmounts, rates, primary)
+      }
 
   override def predictedExpenses: Signal[Money] =
-    unpaidPlannedCents
-      .combineWith(scaledEstimatedCents)
-      .combineWith(remainingSavingsCents)
-      .combineWith(primaryCurrency)
-      .map { case (unpaid, scaled, savings, primary) => Money(unpaid + scaled + savings, primary) }
+    unpaidPlannedExpenses
+      .combineWith(scaledEstimatedExpenses)
+      .combineWith(remainingSavingsTarget)
+      .map { case (unpaid, scaled, savings) => unpaid + scaled + savings }
 
   override def freeMoney: Signal[Money] =
-    totalBalanceCents
-      .combineWith(unpaidPlannedCents)
-      .combineWith(scaledEstimatedCents)
-      .combineWith(remainingSavingsCents)
-      .combineWith(pendingIncomeCents)
-      .combineWith(primaryCurrency)
-      .map { case (total, unpaid, scaled, savings, income, primary) => Money(total - unpaid - scaled - savings + income, primary) }
+    totalBalance
+      .combineWith(unpaidPlannedExpenses)
+      .combineWith(scaledEstimatedExpenses)
+      .combineWith(remainingSavingsTarget)
+      .combineWith(pendingIncome)
+      .map { case (total, unpaid, scaled, savings, income) => total - unpaid - scaled - savings + income }
 
   override def availableNow: Signal[Money] =
-    totalBalanceCents
-      .combineWith(unpaidPlannedCents)
-      .combineWith(primaryCurrency)
-      .map { case (total, unpaid, primary) => Money(total - unpaid, primary) }
+    totalBalance
+      .combineWith(unpaidPlannedExpenses)
+      .map { case (total, unpaid) => total - unpaid }
 
   override def dailyBudget: Signal[Money] =
     freeMoney
       .combineWith(daysRemainingInPeriod)
-      .combineWith(primaryCurrency)
-      .map { case (free, days, primary) => if days > 0 then free / days else Money.zero(primary) }
+      .map { case (free, days) => if days > 0 then free / days else Money.zero(free.currency) }
 
   override def addAccount(name: String, currency: Currency): Future[Unit] = {
     val newId = AccountId(s"acc-${System.currentTimeMillis()}")
@@ -309,9 +302,9 @@ object InMemoryDataService extends DataService {
     Future.successful(())
   }
 
-  override def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long): Future[Unit] = {
+  override def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long, currency: Currency): Future[Unit] = {
     val newId  = ExpenseDefId(s"item-${System.currentTimeMillis()}")
-    val newDef = BudgetItemDefinition(newId, name, itemType, EstimateMode.Fixed, Some(estimateCents))
+    val newDef = BudgetItemDefinition(newId, name, itemType, EstimateMode.Fixed, Some(estimateCents), currency)
     budgetItemsVar.update(_ :+ newDef)
 
     if itemType == BudgetItemType.PlannedExpense || itemType == BudgetItemType.PlannedIncome then {
@@ -330,10 +323,10 @@ object InMemoryDataService extends DataService {
     Future.successful(())
   }
 
-  override def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long): Future[Unit] = {
+  override def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long, currency: Currency): Future[Unit] = {
     budgetItemsVar.update { defs =>
       defs.map { item =>
-        if item.id == itemId then item.copy(fixedEstimate = Some(newEstimateCents))
+        if item.id == itemId then item.copy(fixedEstimate = Some(newEstimateCents), currency = currency)
         else item
       }
     }

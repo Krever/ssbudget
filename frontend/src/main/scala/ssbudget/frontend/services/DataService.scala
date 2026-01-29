@@ -20,8 +20,8 @@ trait DataService {
   // Budget items
   def budgetItems: Signal[List[BudgetItemDefinition]]
   def budgetRecords: Signal[List[ExpenseRecord]]
-  def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long): Future[Unit]
-  def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long): Future[Unit]
+  def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long, currency: Currency): Future[Unit]
+  def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long, currency: Currency): Future[Unit]
   def deleteBudgetItem(itemId: ExpenseDefId): Future[Unit]
   def markBudgetItemAsPaid(itemId: ExpenseDefId, amountCents: Long): Future[Unit]
   def unmarkBudgetItemAsPaid(itemId: ExpenseDefId): Future[Unit]

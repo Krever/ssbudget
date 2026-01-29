@@ -8,9 +8,19 @@ final case class CreateAccount(name: String, currency: Currency) derives Codec.A
 
 final case class CreateBalanceSnapshot(accountId: AccountId, amountCents: Long) derives Codec.AsObject
 
-final case class CreateBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long) derives Codec.AsObject
+final case class CreateBudgetItem(
+    name: String,
+    itemType: BudgetItemType,
+    estimateCents: Long,
+    currency: Currency,
+) derives Codec.AsObject
 
-final case class UpdateBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long) derives Codec.AsObject
+final case class UpdateBudgetItem(
+    name: String,
+    itemType: BudgetItemType,
+    estimateCents: Long,
+    currency: Currency,
+) derives Codec.AsObject
 
 final case class PayBudgetItem(amountCents: Long) derives Codec.AsObject
 

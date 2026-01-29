@@ -14,4 +14,6 @@ final case class BalanceSnapshot(
     amount: Long, // in cents
     currency: Currency,
     recordedAt: Instant,
-) derives Codec.AsObject
+) derives Codec.AsObject {
+  def balance: Money = Money(amount, currency)
+}
