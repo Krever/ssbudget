@@ -48,5 +48,7 @@ node_modules/
 
 ### SSBudget ###
 data/
+bugs.md
+spec.md
 
 frontend/dist

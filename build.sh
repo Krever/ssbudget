@@ -12,7 +12,7 @@ cd frontend && npm install && npm run build
 cd ..
 
 echo "=== Building Docker image ==="
-docker build -t registry.fly.io/ssbudget:latest .
+docker build -t ssbudget:latest .
 
 echo "=== Build complete ==="
-echo "Run: fly deploy --local-only"
+echo "Run: docker run -p 8080:8080 -v ./data:/data ssbudget:latest"
