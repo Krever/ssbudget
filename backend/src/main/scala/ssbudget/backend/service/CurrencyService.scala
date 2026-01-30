@@ -78,13 +78,16 @@ class CurrencyService(repos: Repositories, sttpBackend: SttpBackend[IO, Any]) {
                           case Left(error)  => IO.pure(Left(error))
                           case Right(rates) =>
                             // Store exchange rates for each currency pair
+                            // Frankfurter returns rates like { "EUR": 0.24 } meaning 1 PLN = 0.24 EUR
+                            // We need to store the inverse: 1 EUR = 4.17 PLN (rate to convert TO primary)
                             val now = Instant.now()
                             rates.rates.toList
-                              .traverse { case (toCurrency, rate) =>
+                              .traverse { case (otherCurrency, apiRate) =>
+                                val inverseRate  = if apiRate != 0 then 1.0 / apiRate else 0.0
                                 val exchangeRate = ExchangeRate.fromDouble(
+                                  Currency(otherCurrency),
                                   Currency(baseCurrency),
-                                  Currency(toCurrency),
-                                  rate,
+                                  inverseRate,
                                   now,
                                 )
                                 repos.exchangeRates.create(exchangeRate)

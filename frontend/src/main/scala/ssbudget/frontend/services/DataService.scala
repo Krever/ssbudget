@@ -66,10 +66,11 @@ trait DataService {
   def scaledEstimatedExpenses: Signal[Money]
   def pendingIncome: Signal[Money]
   def predictedExpenses: Signal[Money]
-  def freeMoney: Signal[Money]    // balance - predicted expenses - remaining savings + pending income
-  def availableNow: Signal[Money] // balance - unpaid planned only (conservative estimate)
+  def freeMoney: Signal[Money]          // bankAccountBalance - predicted expenses - remaining savings + pending income
+  def availableNow: Signal[Money]       // bankAccountBalance - unpaid planned only (conservative estimate)
   def dailyBudget: Signal[Money]
-  def totalBalance: Signal[Money]
+  def bankAccountBalance: Signal[Money] // only bank accounts, not savings
+  def totalBalance: Signal[Money]       // all accounts including savings (for accounts table footer)
   def daysRemainingInPeriod: Signal[Int]
 }
 

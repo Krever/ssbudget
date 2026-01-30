@@ -116,13 +116,21 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     Money(total, primary)
   }
 
-  override def totalBalance: Signal[Money] =
+  override def bankAccountBalance: Signal[Money] =
     balanceSnapshotsVar.signal
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (snapshots, rates, primary) =>
+        sumInPrimary(snapshots.map(_.balance), rates, primary)
+      }
+
+  override def totalBalance: Signal[Money] =
+    bankAccountBalance
       .combineWith(savingsAccountsVar.signal)
       .combineWith(exchangeRatesVar.signal)
       .combineWith(primaryCurrency)
-      .map { case (snapshots, savings, rates, primary) =>
-        sumInPrimary(snapshots.map(_.balance) ++ savings.map(_.balance), rates, primary)
+      .map { case (bankBalance, savings, rates, primary) =>
+        bankBalance + sumInPrimary(savings.map(_.balance), rates, primary)
       }
 
   override def daysRemainingInPeriod: Signal[Int] =
@@ -198,17 +206,17 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       .map { case (unpaid, scaled, savings) => unpaid + scaled + savings }
 
   override def freeMoney: Signal[Money] =
-    totalBalance
+    bankAccountBalance
       .combineWith(unpaidPlannedExpenses)
       .combineWith(scaledEstimatedExpenses)
       .combineWith(remainingSavingsTarget)
       .combineWith(pendingIncome)
-      .map { case (total, unpaid, scaled, savings, income) => total - unpaid - scaled - savings + income }
+      .map { case (bankBalance, unpaid, scaled, savings, income) => bankBalance - unpaid - scaled - savings + income }
 
   override def availableNow: Signal[Money] =
-    totalBalance
+    bankAccountBalance
       .combineWith(unpaidPlannedExpenses)
-      .map { case (total, unpaid) => total - unpaid }
+      .map { case (bankBalance, unpaid) => bankBalance - unpaid }
 
   override def dailyBudget: Signal[Money] =
     freeMoney

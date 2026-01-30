@@ -56,7 +56,7 @@ object DashboardPage {
           div(
             cls   := "col-auto",
             div(cls := "text-muted small", "BALANCE"),
-            div(cls := "fs-4 fw-bold font-monospace", MoneyFormatter.formatChild(dataService.totalBalance)),
+            div(cls := "fs-4 fw-bold font-monospace", MoneyFormatter.formatChild(dataService.bankAccountBalance)),
           ),
           div(cls := "col-auto fs-4 text-muted", "→"),
           div(
@@ -78,7 +78,7 @@ object DashboardPage {
         hr(cls := "my-2"),
         div(
           cls  := "font-monospace small",
-          accountingRow("Balance", dataService.totalBalance, positive = true, bold = true),
+          accountingRow("Balance", dataService.bankAccountBalance, positive = true, bold = true),
           accountingRow("+ Pending Income", dataService.pendingIncome, positive = true),
           accountingRow("- Planned Expenses", dataService.unpaidPlannedExpenses, positive = false),
           accountingRow("- Estimated Expenses", dataService.scaledEstimatedExpenses, positive = false),
@@ -284,7 +284,7 @@ object DashboardPage {
     import com.raquo.airstream.ownership.OneTimeOwner
     given owner: OneTimeOwner = new OneTimeOwner(() => ())
 
-    val balance       = dataService.totalBalance.observe.now()
+    val balance       = dataService.bankAccountBalance.observe.now()
     val availableNow  = dataService.availableNow.observe.now()
     val freeMoney     = dataService.freeMoney.observe.now()
     val dailyBudget   = dataService.dailyBudget.observe.now()

@@ -38,6 +38,33 @@ class CurrencySettingsSpec extends E2ESpec {
     refreshButton.isDisplayed shouldBe true
   }
 
+  it should "refresh exchange rates and display them" in {
+    driver.get(s"$baseUrl/settings")
+    waitFor.until(_ => driver.findElement(By.tagName("h2")).getText.contains("Settings"))
+
+    val currenciesCard = findCardByH5("Currencies")
+
+    // Click refresh rates button
+    click(currenciesCard, "Refresh Rates")
+    Thread.sleep(2000) // Wait for API call to external service
+
+    // Wait for success message
+    waitFor.until { _ =>
+      val alerts = driver.findElements(By.cssSelector(".alert-success")).asScala
+      alerts.exists(_.getText.contains("Exchange rates refreshed"))
+    }
+
+    // Verify EUR row has a rate displayed (not N/A)
+    val eurRow     = currenciesCard.findElement(By.xpath(".//tr[contains(.,'EUR')]"))
+    val eurRowText = eurRow.getText
+    eurRowText should not include "N/A"
+
+    // Verify the rate is a valid number (should be something like "4.1234")
+    val rateCell = eurRow.findElement(By.cssSelector("td.text-end.font-monospace"))
+    val rateText = rateCell.getText.trim
+    rateText should fullyMatch regex """\d+\.\d{4}"""
+  }
+
   it should "add a new currency" in {
     driver.get(s"$baseUrl/settings")
     waitFor.until(_ => driver.findElement(By.tagName("h2")).getText.contains("Settings"))
