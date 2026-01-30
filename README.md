@@ -11,12 +11,17 @@ SSBudget takes a different approach:
 - Update account balances and mark previously planned payments throughout the period
 - Get your remaining free cash — your budget until the next paycheck
 
+<video src="demo.webm" controls width="600"></video>
+
 ## Additional Features
 
 - **Multi-currency** — PLN, EUR, USD + 30 more with live exchange rates
 - **Passkey auth** — Passwordless login, no user management needed
+- **Import/Export** — You can take your whole database with you (god bless SQLite!) 
 - **Spreadsheet-like UI** — Edit in place, minimal clicks, maximum density
-- **Self-hosted** — Your data stays on your SQLite file
+- **Self-hosted** — You can run it yourself anywhere.
+- **E2E test coverage** — Everything important is covered with e2e selenium test. 
+- \[Planned] **WhatsApp notification** - So that you can proactively share your budget with your spouse.
 
 ## Built With Claude
 
