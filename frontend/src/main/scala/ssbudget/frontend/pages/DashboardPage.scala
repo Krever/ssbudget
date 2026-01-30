@@ -27,10 +27,18 @@ object DashboardPage {
       div(
         cls := "d-flex justify-content-between align-items-center mb-3",
         h4(cls := "mb-0", "Dashboard"),
-        button(
-          cls  := "btn btn-sm btn-outline-secondary",
-          child.text <-- copyButtonText.signal,
-          onClick --> { _ => copySummaryToClipboard() },
+        div(
+          cls  := "btn-group btn-group-sm",
+          button(
+            cls := "btn btn-outline-secondary",
+            child.text <-- copyButtonText.signal,
+            onClick --> { _ => copySummaryToClipboard() },
+          ),
+          button(
+            cls := "btn btn-outline-success",
+            "WhatsApp",
+            onClick --> { _ => shareViaWhatsApp() },
+          ),
         ),
       ),
       div(
@@ -280,7 +288,7 @@ object DashboardPage {
     }
   }
 
-  private def copySummaryToClipboard(): Unit = {
+  private def buildSummaryText(): String = {
     import com.raquo.airstream.ownership.OneTimeOwner
     given owner: OneTimeOwner = new OneTimeOwner(() => ())
 
@@ -291,13 +299,15 @@ object DashboardPage {
     val daysRemaining = dataService.daysRemainingInPeriod.observe.now()
 
     val dateStr = DateTimeFormatter.ofPattern("MMM d").format(Instant.now().atZone(ZoneOffset.UTC))
-    val summary =
-      s"""Budget Update ($dateStr)
-         |Balance: ${balance.formatted}
-         |Available: ${availableNow.formatted}
-         |Free: ${freeMoney.formatted}
-         |Daily: ${dailyBudget.formatted} ($daysRemaining days left)""".stripMargin
+    s"""Budget Update ($dateStr)
+       |Balance: ${balance.formatted}
+       |Available: ${availableNow.formatted}
+       |Free: ${freeMoney.formatted}
+       |Daily: ${dailyBudget.formatted} ($daysRemaining days left)""".stripMargin
+  }
 
+  private def copySummaryToClipboard(): Unit = {
+    val summary = buildSummaryText()
     dom.window.navigator.clipboard
       .writeText(summary)
       .toFuture
@@ -305,5 +315,13 @@ object DashboardPage {
         copyButtonText.set("Copied!")
         dom.window.setTimeout(() => copyButtonText.set("Copy Summary"), 2000)
       }(scala.concurrent.ExecutionContext.global)
+  }
+
+  private def shareViaWhatsApp(): Unit = {
+    import scala.scalajs.js.URIUtils
+    val summary    = buildSummaryText()
+    val encodedMsg = URIUtils.encodeURIComponent(summary)
+    val url        = s"https://wa.me/?text=$encodedMsg"
+    dom.window.open(url, "_blank")
   }
 }

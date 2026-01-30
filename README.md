@@ -21,7 +21,7 @@ SSBudget takes a different approach:
 - **Spreadsheet-like UI** — Edit in place, minimal clicks, maximum density
 - **Self-hosted** — You can run it yourself anywhere.
 - **E2E test coverage** — Everything important is covered with e2e selenium test. 
-- \[Planned] **WhatsApp notification** - So that you can proactively share your budget with your spouse.
+- **WhatsApp notification** - So that you can proactively share your budget with your spouse.
 
 ## Built With Claude
 
