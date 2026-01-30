@@ -14,8 +14,7 @@ import scala.jdk.CollectionConverters.*
 
 /** Comprehensive demo scenario for recording.
   *
-  * This test walks through all major features in a logical order, simulating a realistic user workflow. Designed for
-  * screen recording with:
+  * This test walks through all major features in a logical order, simulating a realistic user workflow. Designed for screen recording with:
   *   - Visual click indicators (ripple effect)
   *   - Phase banners showing current section
   *   - Authentication flow
@@ -28,16 +27,16 @@ import scala.jdk.CollectionConverters.*
 class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 
   import scala.compiletime.uninitialized
-  protected var driver: WebDriver = uninitialized
+  protected var driver: WebDriver    = uninitialized
   private var js: JavascriptExecutor = uninitialized
 
   protected def baseUrl: String = AuthTestServers.frontendUrl
 
   // Timing constants for demo (adjust for speed)
-  private val shortPause = 500
+  private val shortPause  = 500
   private val mediumPause = 900
-  private val longPause = 1500
-  private val phasePause = 2000
+  private val longPause   = 1500
+  private val phasePause  = 2000
 
   override def beforeAll(): Unit = {
     AuthTestServers.startAll()
@@ -54,7 +53,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   override def beforeEach(): Unit = {
     val options = new ChromeOptions()
 
-    if (sys.env.get("E2E_REMOTE_BROWSER").isDefined) {
+    if sys.env.get("E2E_REMOTE_BROWSER").isDefined then {
       // Connect to existing browser with remote debugging
       // Start Chrome with: chrome --remote-debugging-port=9222
       val debugPort = sys.env.getOrElse("E2E_DEBUG_PORT", "9222")
@@ -63,7 +62,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       println(s"[Demo] Connecting to existing browser on port $debugPort...")
     } else {
       // Launch new browser
-      if (sys.env.get("E2E_HEADED").isEmpty) {
+      if sys.env.get("E2E_HEADED").isEmpty then {
         options.addArguments("--headless")
       }
       options.addArguments("--no-sandbox", "--disable-dev-shm-usage")
@@ -75,14 +74,14 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10))
     js = driver.asInstanceOf[JavascriptExecutor]
 
-    if (isRemoteBrowser) {
+    if isRemoteBrowser then {
       // Set window size for remote browser
       driver.manage().window().setSize(new org.openqa.selenium.Dimension(1400, 900))
     }
   }
 
   override def afterEach(): Unit = {
-    if (driver != null && !isRemoteBrowser) {
+    if driver != null && !isRemoteBrowser then {
       driver.quit()
     }
     // Don't quit remote browser - user wants to keep it open
@@ -158,7 +157,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       indicator.style.top = '${y}px';
       document.body.appendChild(indicator);
       setTimeout(() => indicator.remove(), 400);
-    """
+    """,
     )
   }
 
@@ -174,7 +173,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       banner.className = 'demo-phase-banner';
       banner.textContent = '$title';
       document.body.appendChild(banner);
-    """
+    """,
     )
     Thread.sleep(phasePause)
     js.executeScript("""
@@ -190,8 +189,8 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   /** Click with visual indicator */
   private def demoClick(element: WebElement): Unit = {
     val rect = element.getRect
-    val x = rect.getX + rect.getWidth / 2
-    val y = rect.getY + rect.getHeight / 2
+    val x    = rect.getX + rect.getWidth / 2
+    val y    = rect.getY + rect.getHeight / 2
     showClickAt(x.toInt, y.toInt)
     Thread.sleep(150)
     element.click()
@@ -242,7 +241,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     injectDemoStyles()
 
     // Give time to start recording if using remote browser
-    if (isRemoteBrowser) {
+    if isRemoteBrowser then {
       println("[Demo] Page loaded - start your recording now! (3 seconds...)")
       Thread.sleep(3000)
     } else {
@@ -289,7 +288,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause()
 
     val periodCard = findCardByDiv("Current Period")
-    if (periodCard.getText.contains("No active period")) {
+    if periodCard.getText.contains("No active period") then {
       demoClickButton(periodCard, "Start New Period")
       pause(longPause)
     }
@@ -341,7 +340,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     demoClickButton(bankCard, "+ Add")
     pause(shortPause)
 
-    val bankAddRow = bankCard.findElement(By.cssSelector("tbody tr.table-primary"))
+    val bankAddRow    = bankCard.findElement(By.cssSelector("tbody tr.table-primary"))
     val bankNameInput = bankAddRow.findElement(By.cssSelector("input[type='text']"))
     demoClick(bankNameInput)
     typeSlowly(bankNameInput, "Main Account")
@@ -353,11 +352,11 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     demoClickButton(bankCard, "+ Add")
     pause(shortPause)
 
-    val eurAddRow = bankCard.findElement(By.cssSelector("tbody tr.table-primary"))
+    val eurAddRow    = bankCard.findElement(By.cssSelector("tbody tr.table-primary"))
     val eurNameInput = eurAddRow.findElement(By.cssSelector("input[type='text']"))
     demoClick(eurNameInput)
     typeSlowly(eurNameInput, "Euro Savings")
-    val eurSelect = eurAddRow.findElement(By.cssSelector("select"))
+    val eurSelect    = eurAddRow.findElement(By.cssSelector("select"))
     demoClick(eurSelect)
     eurSelect.findElement(By.xpath(".//option[text()='EUR']")).click()
     pause(shortPause)
@@ -372,11 +371,11 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     demoClickButton(savingsCard, "+ Add")
     pause(shortPause)
 
-    val savingsAddRow = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
+    val savingsAddRow    = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
     val savingsNameInput = savingsAddRow.findElement(By.cssSelector("input[type='text']"))
     demoClick(savingsNameInput)
     typeSlowly(savingsNameInput, "Emergency Fund")
-    val targetInput = savingsAddRow.findElement(By.cssSelector("input[type='number']"))
+    val targetInput      = savingsAddRow.findElement(By.cssSelector("input[type='number']"))
     targetInput.clear()
     demoClick(targetInput)
     typeSlowly(targetInput, "500")
@@ -388,11 +387,11 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     demoClickButton(savingsCard, "+ Add")
     pause(shortPause)
 
-    val vacationAddRow = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
+    val vacationAddRow    = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
     val vacationNameInput = vacationAddRow.findElement(By.cssSelector("input[type='text']"))
     demoClick(vacationNameInput)
     typeSlowly(vacationNameInput, "Vacation Fund")
-    val vacationTarget = vacationAddRow.findElement(By.cssSelector("input[type='number']"))
+    val vacationTarget    = vacationAddRow.findElement(By.cssSelector("input[type='number']"))
     vacationTarget.clear()
     demoClick(vacationTarget)
     typeSlowly(vacationTarget, "300")
@@ -417,8 +416,8 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     demoClickButton(plannedCard, "+ Income")
     pause(shortPause)
 
-    val incomeRow = plannedCard.findElement(By.cssSelector("tr.table-primary"))
-    val incomeNameInput = incomeRow.findElement(By.cssSelector("input[type='text']"))
+    val incomeRow         = plannedCard.findElement(By.cssSelector("tr.table-primary"))
+    val incomeNameInput   = incomeRow.findElement(By.cssSelector("input[type='text']"))
     demoClick(incomeNameInput)
     typeSlowly(incomeNameInput, "Monthly Salary")
     val incomeAmountInput = incomeRow.findElement(By.cssSelector("input[type='number']"))
@@ -432,15 +431,15 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     val expenses = List(
       ("Rent", "2000"),
       ("Utilities", "350"),
-      ("Subscriptions", "85")
+      ("Subscriptions", "85"),
     )
 
     expenses.foreach { case (name, amount) =>
       demoClickButton(findCard("Planned Items"), "+ Expense")
       pause(shortPause)
 
-      val expenseRow = findCard("Planned Items").findElement(By.cssSelector("tr.table-primary"))
-      val expNameInput = expenseRow.findElement(By.cssSelector("input[type='text']"))
+      val expenseRow     = findCard("Planned Items").findElement(By.cssSelector("tr.table-primary"))
+      val expNameInput   = expenseRow.findElement(By.cssSelector("input[type='text']"))
       demoClick(expNameInput)
       typeSlowly(expNameInput, name)
       val expAmountInput = expenseRow.findElement(By.cssSelector("input[type='number']"))
@@ -462,15 +461,15 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     val estimated = List(
       ("Groceries", "1200"),
       ("Fuel", "400"),
-      ("Dining Out", "300")
+      ("Dining Out", "300"),
     )
 
     estimated.foreach { case (name, amount) =>
       demoClickButton(findCard("Estimated Expenses"), "+ Add")
       pause(shortPause)
 
-      val estRow = findCard("Estimated Expenses").findElement(By.cssSelector("tr.table-primary"))
-      val estNameInput = estRow.findElement(By.cssSelector("input[type='text']"))
+      val estRow         = findCard("Estimated Expenses").findElement(By.cssSelector("tr.table-primary"))
+      val estNameInput   = estRow.findElement(By.cssSelector("input[type='text']"))
       demoClick(estNameInput)
       typeSlowly(estNameInput, name)
       val estAmountInput = estRow.findElement(By.cssSelector("input[type='number']"))
@@ -492,7 +491,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
 
     // Expand Emergency Fund and add transaction
     val emergencyRow = findCard("Planned Savings").findElement(
-      By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]")
+      By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]"),
     )
     demoClick(emergencyRow)
     pause()
@@ -500,11 +499,11 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     demoClickButton(findCard("Planned Savings"), "+ Add")
     pause(shortPause)
 
-    val txnRow = findCard("Planned Savings").findElement(By.cssSelector("tr.table-info"))
+    val txnRow       = findCard("Planned Savings").findElement(By.cssSelector("tr.table-info"))
     val txnNoteInput = txnRow.findElement(By.cssSelector("input[type='text']"))
     demoClick(txnNoteInput)
     typeSlowly(txnNoteInput, "Monthly deposit")
-    val txnAmount = txnRow.findElement(By.cssSelector("input[type='number']"))
+    val txnAmount    = txnRow.findElement(By.cssSelector("input[type='number']"))
     txnAmount.clear()
     demoClick(txnAmount)
     typeSlowly(txnAmount, "500")
@@ -527,11 +526,11 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     demoClickButton(findCard("Planned Savings"), "+ Add")
     pause(shortPause)
 
-    val vacTxnRow = findCard("Planned Savings").findElement(By.cssSelector("tr.table-info"))
+    val vacTxnRow       = findCard("Planned Savings").findElement(By.cssSelector("tr.table-info"))
     val vacTxnNoteInput = vacTxnRow.findElement(By.cssSelector("input[type='text']"))
     demoClick(vacTxnNoteInput)
     typeSlowly(vacTxnNoteInput, "Vacation savings")
-    val vacTxnAmount = vacTxnRow.findElement(By.cssSelector("input[type='number']"))
+    val vacTxnAmount    = vacTxnRow.findElement(By.cssSelector("input[type='number']"))
     vacTxnAmount.clear()
     demoClick(vacTxnAmount)
     typeSlowly(vacTxnAmount, "200")
@@ -554,7 +553,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
 
     // Receive income first
     val incomePayRow = findCard("Planned Items").findElement(
-      By.xpath(".//tr[.//td[contains(text(),'Monthly Salary')]]")
+      By.xpath(".//tr[.//td[contains(text(),'Monthly Salary')]]"),
     )
     demoClickButton(incomePayRow, "Receive")
     pause(shortPause)
@@ -570,13 +569,13 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
 
     // Pay Utilities with different amount
     val utilitiesRow = findCard("Planned Items").findElement(
-      By.xpath(".//tr[.//td[contains(text(),'Utilities')]]")
+      By.xpath(".//tr[.//td[contains(text(),'Utilities')]]"),
     )
     demoClickButton(utilitiesRow, "Pay")
     pause(shortPause)
 
     val utilPayRow = findCard("Planned Items").findElement(By.cssSelector("tr.table-info"))
-    val utilInput = utilPayRow.findElement(By.cssSelector("input[type='number']"))
+    val utilInput  = utilPayRow.findElement(By.cssSelector("input[type='number']"))
     utilInput.clear()
     demoClick(utilInput)
     typeSlowly(utilInput, "320.50")
@@ -610,7 +609,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause(shortPause)
 
     // Set Euro account balance
-    if (balanceInputs.size > 1) {
+    if balanceInputs.size > 1 then {
       balanceInputs(1).clear()
       demoClick(balanceInputs(1))
       typeSlowly(balanceInputs(1), "850")
@@ -628,8 +627,8 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
         "permissions",
         java.util.List.of("clipboardReadWrite", "clipboardSanitizedWrite"),
         "origin",
-        baseUrl
-      )
+        baseUrl,
+      ),
     )
 
     val copyBtn = driver.findElement(By.xpath("//button[contains(text(),'Copy Summary')]"))
@@ -653,7 +652,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause(longPause)
 
     // Give time to stop recording if using remote browser
-    if (isRemoteBrowser) {
+    if isRemoteBrowser then {
       println("[Demo] Demo complete - stop your recording now! (3 seconds...)")
       Thread.sleep(3000)
     }
