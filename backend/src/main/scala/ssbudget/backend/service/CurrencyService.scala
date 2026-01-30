@@ -1,0 +1,130 @@
+package ssbudget.backend.service
+
+import cats.effect.IO
+import cats.implicits.*
+import io.circe.generic.auto.*
+import io.circe.parser.decode
+import ssbudget.backend.db.Repositories
+import ssbudget.shared.api.{CurrencySettingsResponse, ExchangeRatesResponse, KnownCurrency}
+import ssbudget.shared.model.{Currency, CurrencySetting, ExchangeRate}
+import sttp.client3.*
+import sttp.client3.httpclient.cats.HttpClientCatsBackend
+
+import java.time.Instant
+
+class CurrencyService(repos: Repositories, sttpBackend: SttpBackend[IO, Any]) {
+
+  def getSettings(): IO[CurrencySettingsResponse] = {
+    repos.currencySettings.findAll.map { currencies =>
+      val available = Currency.knownCurrencies.map { case (code, name) => KnownCurrency(code, name) }
+      CurrencySettingsResponse(
+        currencies = currencies,
+        availableCurrencies = available,
+      )
+    }
+  }
+
+  def enableCurrency(code: String): IO[Either[String, CurrencySetting]] = {
+    if !Currency.isKnown(code) then {
+      IO.pure(Left(s"Unknown currency code: $code"))
+    } else {
+      repos.currencySettings.findByCode(code).flatMap {
+        case Some(existing) => IO.pure(Right(existing))
+        case None           =>
+          val name    = Currency.nameFor(code).getOrElse(code)
+          val setting = CurrencySetting(Currency(code), name, isPrimary = false, Instant.now())
+          repos.currencySettings.create(setting).as(Right(setting))
+      }
+    }
+  }
+
+  def disableCurrency(code: String): IO[Either[String, Unit]] = {
+    for {
+      settingOpt <- repos.currencySettings.findByCode(code)
+      result     <- settingOpt match {
+                      case None                               => IO.pure(Left(s"Currency not found: $code"))
+                      case Some(setting) if setting.isPrimary => IO.pure(Left("Cannot disable primary currency"))
+                      case Some(_)                            =>
+                        // Check if currency is in use
+                        val currency = Currency(code)
+                        for {
+                          accountsUse <- repos.accounts.existsWithCurrency(currency)
+                          savingsUse  <- repos.savingsAccounts.existsWithCurrency(currency)
+                          result      <- if accountsUse || savingsUse then {
+                                           IO.pure(Left(s"Currency $code is in use by accounts and cannot be disabled"))
+                                         } else {
+                                           repos.currencySettings.delete(code).as(Right(()))
+                                         }
+                        } yield result
+                    }
+    } yield result
+  }
+
+  def setPrimaryCurrency(code: String): IO[Either[String, Unit]] = {
+    repos.currencySettings.findByCode(code).flatMap {
+      case None    => IO.pure(Left(s"Currency not enabled: $code"))
+      case Some(_) => repos.currencySettings.setPrimary(code).as(Right(()))
+    }
+  }
+
+  def refreshRates(): IO[Either[String, ExchangeRatesResponse]] = {
+    for {
+      primaryOpt <- repos.currencySettings.findPrimary
+      result     <- primaryOpt match {
+                      case None          => IO.pure(Left("No primary currency configured"))
+                      case Some(primary) =>
+                        val baseCurrency = primary.code.code
+                        fetchRatesFromFrankfurter(baseCurrency).flatMap {
+                          case Left(error)  => IO.pure(Left(error))
+                          case Right(rates) =>
+                            // Store exchange rates for each currency pair
+                            // Frankfurter returns rates like { "EUR": 0.24 } meaning 1 PLN = 0.24 EUR
+                            // We need to store the inverse: 1 EUR = 4.17 PLN (rate to convert TO primary)
+                            val now = Instant.now()
+                            rates.rates.toList
+                              .traverse { case (otherCurrency, apiRate) =>
+                                val inverseRate  = if apiRate != 0 then 1.0 / apiRate else 0.0
+                                val exchangeRate = ExchangeRate.fromDouble(
+                                  Currency(otherCurrency),
+                                  Currency(baseCurrency),
+                                  inverseRate,
+                                  now,
+                                )
+                                repos.exchangeRates.create(exchangeRate)
+                              }
+                              .as(Right(rates))
+                        }
+                    }
+    } yield result
+  }
+
+  private case class FrankfurterResponse(
+      base: String,
+      date: String,
+      rates: Map[String, Double],
+  )
+
+  private def fetchRatesFromFrankfurter(baseCurrency: String): IO[Either[String, ExchangeRatesResponse]] = {
+    val request = basicRequest
+      .get(uri"https://api.frankfurter.dev/v1/latest?base=$baseCurrency")
+      .response(asString)
+
+    sttpBackend.send(request).map { response =>
+      response.body match {
+        case Left(error) => Left(s"Failed to fetch rates: $error")
+        case Right(body) =>
+          decode[FrankfurterResponse](body) match {
+            case Left(error)     => Left(s"Failed to parse response: ${error.getMessage}")
+            case Right(response) =>
+              Right(
+                ExchangeRatesResponse(
+                  rates = response.rates,
+                  baseCurrency = response.base,
+                  fetchedAt = Instant.now(),
+                ),
+              )
+          }
+      }
+    }
+  }
+}
