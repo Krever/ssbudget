@@ -11,7 +11,7 @@ SSBudget takes a different approach:
 - Update account balances and mark previously planned payments throughout the period
 - Get your remaining free cash — your budget until the next paycheck
 
-<video src="demo.webm" controls width="600"></video>
+  ![Demo](demo.gif)
 
 ## Additional Features
 
