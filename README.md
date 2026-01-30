@@ -10,8 +10,10 @@ SSBudget takes a different approach:
 - Define your **fixed expenses** (rent, bills), **savings goals**, and **estimated variable costs** (groceries, fuel)
 - Update account balances and mark previously planned payments throughout the period
 - Get your remaining free cash — your budget until the next paycheck
+  
+[demo.webm](https://github.com/user-attachments/assets/54a9688f-e4d3-4279-988b-be4c40bc5f5a)
 
-## Additional Features
+### Additional Features
 
 - **Multi-currency** — PLN, EUR, USD + 30 more with live exchange rates
 - **Passkey auth** — Passwordless login, no user management needed
