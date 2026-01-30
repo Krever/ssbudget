@@ -24,7 +24,8 @@ object AuthTestServers {
 
   def backendPort: Int    = _backendPort
   def frontendPort: Int   = _frontendPort
-  def frontendUrl: String = s"http://127.0.0.1:$_frontendPort"
+  // Use localhost instead of 127.0.0.1 for WebAuthn secure context compatibility
+  def frontendUrl: String = s"http://localhost:$_frontendPort"
 
   private def findAvailablePort(): Int = {
     Using(new ServerSocket(0)) { socket =>
@@ -55,16 +56,18 @@ object AuthTestServers {
   }
 
   private def startBackend(): Unit = {
-    val tempDb    = Files.createTempFile("ssbudget-auth-e2e-", ".db")
+    val tempDb          = Files.createTempFile("ssbudget-auth-e2e-", ".db")
     dbPath = Some(tempDb)
     jdbcUrl = s"jdbc:sqlite:${tempDb.toAbsolutePath}"
-    val port      = Port.fromInt(_backendPort).get
-    val dbPathStr = tempDb.toAbsolutePath.toString
+    val port            = Port.fromInt(_backendPort).get
+    val dbPathStr       = tempDb.toAbsolutePath.toString
+    // Configure WebAuthn origins to include the dynamic frontend port
+    val webAuthnOrigins = Some(Set(frontendUrl))
 
     // NOTE: testMode = false - authentication is ENABLED
     val serverIO: IO[Nothing] = Database.migrateAndTransactor(jdbcUrl).use { xa =>
       val repos = Repositories.fromTransactor(xa)
-      ServerBuilder.build(repos, xa, port, testMode = false, dbPath = dbPathStr).useForever
+      ServerBuilder.build(repos, xa, port, testMode = false, dbPath = dbPathStr, webAuthnOrigins = webAuthnOrigins).useForever
     }
 
     backendFiber = Some(serverIO.start.unsafeRunSync())
@@ -160,15 +163,17 @@ object AuthTestServers {
     }
 
     // Create new database and restart backend
-    val tempDb    = Files.createTempFile("ssbudget-auth-e2e-", ".db")
+    val tempDb          = Files.createTempFile("ssbudget-auth-e2e-", ".db")
     dbPath = Some(tempDb)
     jdbcUrl = s"jdbc:sqlite:${tempDb.toAbsolutePath}"
-    val port      = Port.fromInt(_backendPort).get
-    val dbPathStr = tempDb.toAbsolutePath.toString
+    val port            = Port.fromInt(_backendPort).get
+    val dbPathStr       = tempDb.toAbsolutePath.toString
+    // Configure WebAuthn origins to include the dynamic frontend port
+    val webAuthnOrigins = Some(Set(frontendUrl))
 
     val serverIO: IO[Nothing] = Database.migrateAndTransactor(jdbcUrl).use { xa =>
       val repos = Repositories.fromTransactor(xa)
-      ServerBuilder.build(repos, xa, port, testMode = false, dbPath = dbPathStr).useForever
+      ServerBuilder.build(repos, xa, port, testMode = false, dbPath = dbPathStr, webAuthnOrigins = webAuthnOrigins).useForever
     }
 
     backendFiber = Some(serverIO.start.unsafeRunSync())

@@ -22,9 +22,9 @@ object ServerBuilder {
   )
 
   // WebAuthn configuration from environment
-  private val rpId      = sys.env.getOrElse("SSBUDGET_RP_ID", "localhost")
-  private val rpName    = sys.env.getOrElse("SSBUDGET_RP_NAME", "SSBudget")
-  private val rpOrigins = sys.env
+  private def defaultRpId: String           = sys.env.getOrElse("SSBUDGET_RP_ID", "localhost")
+  private def defaultRpName: String         = sys.env.getOrElse("SSBUDGET_RP_NAME", "SSBudget")
+  private def defaultRpOrigins: Set[String] = sys.env
     .get("SSBUDGET_RP_ORIGINS")
     .map(_.split(",").toSet)
     .getOrElse(Set("http://localhost:3000", "http://localhost:8080"))
@@ -39,10 +39,12 @@ object ServerBuilder {
       port: Port,
       testMode: Boolean = false,
       dbPath: String = "data/ssbudget.db",
+      webAuthnOrigins: Option[Set[String]] = None,
   ): Resource[IO, Server] = {
+    val rpOrigins = webAuthnOrigins.getOrElse(defaultRpOrigins)
     for {
       sttpBackend     <- HttpClientCatsBackend.resource[IO]()
-      webAuthnService <- Resource.eval(WebAuthnService(repos.passkeyCredentials, rpId, rpName, rpOrigins))
+      webAuthnService <- Resource.eval(WebAuthnService(repos.passkeyCredentials, defaultRpId, defaultRpName, rpOrigins))
       server          <- {
         val passwordService = PasswordService()
         val sessionService  = SessionService(repos.sessions)
