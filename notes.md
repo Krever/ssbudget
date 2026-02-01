@@ -1,0 +1,42 @@
+AI-coding in Scala: Experiences from last month
+
+- Intro
+    - I've been programming for almost 15 years now, last 5 years on mission-critical software within finance domain. I'm not some script kiddie who builds only things for yourself. I know the stakes
+- I've build ssbudget, completely vibecoded
+    - No prompt crafting
+    - tests, tests, tests - developing e2e selenium test at the very beginning was a blessing.
+    - bugs happened. make a list, give it to claude, ask to cover those with tests when applicable, done
+    - instructions from claude.md are notoriously ignored. instructions from /plan as well
+    - It handled eveything, from stuff I could do (backend) through stuf I can barely do (frontend) to stuff I definitely cannot do without significant learning (passkey support). And stuff I would never done ebcause its pain in the ass (selenium tests)
+    - It handled video creation with banners pauses and stuff.
+    - tech stack
+        - asked it to leanr laminar from docs, it found waypoint and didnt struggle with it at all.
+- Do I miss organic coding?
+    - Yes, and no
+    - I sitll write a bit of code (mayeb 10-20%) where the problems are really hard and AI cant get it.
+    - Reviews are a real PITA, and their dilligence became function of code importance
+        - I've nto been reviewing UI (view) code at all. If it looks ok I dont give a crap how its expressed under the hood. I wouldnt ne able to write in the first place, I wont be able to review it either
+        - For OSS I employ code rabbit and it helps a lot with PRs traffic
+        - At work I used claude for semi-manual reviews and its also ok, but not enough
+    - In general solving problems gives me much more satisfaction than typing.
+- AI has no problems neither with Scala 3 nor its libraries
+    - I asked it to leverage/understands even more obscure libraries (decisions4s) and it handles it pretty well. Having sources around helps but is not necessary
+    - Same with Laminar/Tapir, it just goes to the docs/github if it doesnt know somehting
+    - I dont use significant whitespace and dont plan to. I've hear AI can get confused with it but never checked this. It for sure doesnt get confused with good old curly braces.
+- I use it for design equally with coding
+    - the output design docs are good for both hjumans and later agentic coding
+    - they need a lot of back-and-forth, much more than actual coding
+    - I planned not only particular features (where /plan is usually mentioned) but also bigger multi-phase projects
+- How I use AI
+    - I've been playing with agentic coding since Junie release (May 2025?) But the results were varying. Everything changed around December when they got significantly better
+    - No I use Mostly Claude Code, a little bit of Junie, I tried Codex but it was completely subpar.
+    - I never bother with prompt crafting - over time I've built a bit of intuition of what to mention to get good results but Im not doing it explicitly. I just write and hope for the best
+    -  I dont use mcp, plugins, skills, sub-agents and similar. I dont see special value in CLAUDE.md either. I expect I will start to use them when they start giving significant leverage. But for now they are too non-deterministic  and bleeding edge. I put a lot of effort to eliminate noise (in my life in general) and those tools fall into noise category for now.
+    - I try to have 2-3 AI-compatible tasks all the time, so at least something is running always. This sometimes required multiple clones of the same repository, if Im trying to work on two features at the same time.
+- Verbosity has to be constantly fought against - in docs, code comments, code itself. "Keep succinct", "eliminate repetition", "remove redundant comments" are probably my most often repeated phrases
+- Testing harness is the most important thing for vibe-coding.
+    - The more you rely on AI the more harness you need to have
+    - Im calling it harness because its not only tests. It's also types, linters and any other automated checks you can put in place
+    - For anything UI-related e2e testing is a blessing. AI can handle it perfectly well and it gives it huge autonomy in fixing its own mistakes.
+    - Even for non-UI I recommend good dose of e2e/integration tests. AI is still very much local-reasoning-focused and it can easily miss the big picture.
+    - 
