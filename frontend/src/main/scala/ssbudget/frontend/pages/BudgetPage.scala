@@ -252,11 +252,14 @@ object BudgetPage {
               .combineWith(dataService.currentPeriod)
               .combineWith(editingOneTimeId.signal)
               .map { case (expenses, periodOpt, editId) =>
+                val zone           = java.time.ZoneId.of("UTC")
                 val periodExpenses = periodOpt match {
                   case Some(period) =>
+                    val periodStartDay = period.startDate.atZone(zone).toLocalDate
                     expenses.filter { e =>
-                      !e.date.isBefore(period.startDate) &&
-                      period.endDate.forall(end => e.date.isBefore(end))
+                      val expDay = e.date.atZone(zone).toLocalDate
+                      !expDay.isBefore(periodStartDay) &&
+                      period.endDate.forall(end => expDay.isBefore(end.atZone(zone).toLocalDate))
                     }
                   case None         => List.empty
                 }
