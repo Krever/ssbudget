@@ -93,6 +93,8 @@ object DashboardPage {
           accountingRow("- Remaining Savings", dataService.remainingSavingsTarget, positive = false),
           hr(cls := "my-1"),
           accountingRow("= Free Money", dataService.freeMoney, positive = true, bold = true),
+          hr(cls := "my-1"),
+          accountingRow("Saved", dataService.periodSavingsTotal, positive = true),
         ),
       ),
     )

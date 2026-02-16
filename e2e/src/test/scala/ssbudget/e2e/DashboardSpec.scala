@@ -53,6 +53,41 @@ class DashboardSpec extends E2ESpec {
     card.findElement(By.cssSelector(".card-footer .font-monospace")).getText shouldBe initialTotal
   }
 
+  it should "show cumulative savings for current period" in {
+    ensurePeriodExists()
+    addSavingsAccount("E2E Savings", targetAmount = Some(500))
+
+    // Navigate to budget page and add a savings transaction
+    driver.get(s"$baseUrl/budget")
+    waitForPage("Budget")
+
+    val savingsCard = findCard("Planned Savings")
+    // Click the savings account row to expand it
+    val accountRow  = savingsCard.findElement(By.xpath(".//tbody/tr[contains(.,'E2E Savings')]"))
+    accountRow.click()
+    Thread.sleep(300)
+
+    // Click "+ Add" to open the transaction form
+    click(savingsCard, "+ Add")
+
+    // Fill in the amount
+    val txnRow      = savingsCard.findElement(By.cssSelector("tr.table-info"))
+    val amountInput = txnRow.findElement(By.cssSelector("input[type='number']"))
+    amountInput.clear()
+    amountInput.sendKeys("200")
+    click(txnRow, "Add")
+    Thread.sleep(500)
+
+    // Navigate to dashboard and verify "Saved" row
+    driver.get(baseUrl)
+    waitForPage("Dashboard")
+
+    val summaryCard = driver.findElement(By.cssSelector(".card"))
+    val cardText    = summaryCard.getText
+    cardText should include("Saved")
+    cardText should include("200")
+  }
+
   it should "copy summary to clipboard" in {
     ensurePeriodExists()
     addBankAccount("Clipboard Test Account")

@@ -54,6 +54,7 @@ trait DataService {
   def addSavingsTransaction(accountId: SavingsAccountId, amount: Long, note: Option[String]): Future[Unit]
   def deleteSavingsTransaction(id: SavingsTransactionId): Future[Unit]
   def remainingSavingsTarget: Signal[Money] // planned - actual contributions for current period
+  def periodSavingsTotal: Signal[Money]     // cumulative savings in current period
 
   // One-time expenses
   def oneTimeExpenses: Signal[List[OneTimeExpense]]

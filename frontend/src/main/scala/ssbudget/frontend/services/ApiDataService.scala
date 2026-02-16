@@ -191,6 +191,20 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
         sumInPrimary(remainingAmounts, rates, primary)
       }
 
+  override def periodSavingsTotal: Signal[Money] =
+    currentPeriodSavingsTransactions
+      .combineWith(savingsAccountsVar.signal)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (txns, accounts, rates, primary) =>
+        val accountCurrency = accounts.map(a => a.id -> a.currency).toMap
+        val amounts         = txns.map { txn =>
+          val currency = accountCurrency.getOrElse(txn.accountId, primary)
+          Money(txn.amount, currency)
+        }
+        sumInPrimary(amounts, rates, primary)
+      }
+
   override def pendingIncome: Signal[Money] =
     plannedIncomes
       .combineWith(currentPeriodRecords)
