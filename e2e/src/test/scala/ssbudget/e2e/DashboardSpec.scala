@@ -88,6 +88,30 @@ class DashboardSpec extends E2ESpec {
     cardText should include("200")
   }
 
+  it should "show cumulative one-time expenses for current period" in {
+    ensurePeriodExists()
+
+    // Navigate to budget page and add a one-time expense
+    driver.get(s"$baseUrl/budget")
+    waitForPage("Budget")
+
+    click(findCard("One-Time Expenses"), "+ Add")
+    val addRow = findCard("One-Time Expenses").findElement(By.cssSelector("tr.table-primary"))
+    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("Test Purchase")
+    addRow.findElement(By.cssSelector("input[type='number']")).sendKeys("350")
+    click(addRow, "Add")
+    Thread.sleep(500)
+
+    // Navigate to dashboard and verify "One-Time Expenses" row
+    driver.get(baseUrl)
+    waitForPage("Dashboard")
+
+    val summaryCard = driver.findElement(By.cssSelector(".card"))
+    val cardText    = summaryCard.getText
+    cardText should include("One-Time Expenses")
+    cardText should include("350")
+  }
+
   it should "copy summary to clipboard" in {
     ensurePeriodExists()
     addBankAccount("Clipboard Test Account")

@@ -95,6 +95,7 @@ object DashboardPage {
           accountingRow("= Free Money", dataService.freeMoney, positive = true, bold = true),
           hr(cls := "my-1"),
           accountingRow("Saved", dataService.periodSavingsTotal, positive = true),
+          accountingRow("One-Time Expenses", dataService.periodOneTimeExpensesTotal, positive = false),
         ),
       ),
     )

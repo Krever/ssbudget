@@ -258,6 +258,25 @@ object InMemoryDataService extends DataService {
         sumInPrimary(amounts, rates, primary)
       }
 
+  override def periodOneTimeExpensesTotal: Signal[Money] =
+    oneTimeExpensesVar.signal
+      .combineWith(currentPeriod)
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (expenses, periodOpt, rates, primary) =>
+        val zone           = ZoneId.of("UTC")
+        val periodExpenses = periodOpt.fold(List.empty[OneTimeExpense]) { period =>
+          val periodStartDay = period.startDate.atZone(zone).toLocalDate
+          expenses.filter { e =>
+            val expDay = e.date.atZone(zone).toLocalDate
+            !expDay.isBefore(periodStartDay) &&
+            period.endDate.forall(end => expDay.isBefore(end.atZone(zone).toLocalDate))
+          }
+        }
+        val amounts        = periodExpenses.map(e => Money(e.amountCents, e.currency))
+        sumInPrimary(amounts, rates, primary)
+      }
+
   override def pendingIncome: Signal[Money] =
     plannedIncomes
       .combineWith(currentPeriodRecords)
