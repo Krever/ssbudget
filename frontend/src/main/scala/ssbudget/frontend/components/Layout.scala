@@ -11,7 +11,7 @@ object Layout {
     div(
       NavBar(apiClient),
       div(
-        cls       := "main-content mx-auto",
+        cls       := "main-content mx-auto pb-4",
         styleAttr := "max-width: 1600px",
         child <-- Router.currentPageSignal.map(page => renderPage(page, apiClient)),
       ),
