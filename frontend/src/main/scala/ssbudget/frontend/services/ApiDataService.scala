@@ -21,6 +21,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   private val savingsTransactionsVar: Var[List[SavingsTransaction]] = Var(List.empty)
   private val currencySettingsVar: Var[List[CurrencySetting]]       = Var(List.empty)
   private val availableCurrenciesVar: Var[List[(String, String)]]   = Var(List.empty)
+  private val oneTimeExpensesVar: Var[List[OneTimeExpense]]         = Var(List.empty)
 
   // Initialize by fetching all data from individual endpoints
   override def initialize(): Future[Unit] = {
@@ -34,6 +35,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     val savingsTxnsFut      = client.savingsTransactions.listCurrent()
     val exchangeRatesFut    = client.exchangeRates.getAll()
     val currencySettingsFut = client.currencies.getSettings()
+    val oneTimeExpensesFut  = client.oneTimeExpenses.list()
 
     for {
       accounts         <- accountsFut
@@ -45,6 +47,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       savingsTxns      <- savingsTxnsFut
       exchangeRates    <- exchangeRatesFut
       currencySettings <- currencySettingsFut
+      oneTimeExpenses  <- oneTimeExpensesFut
     } yield {
       accountsVar.set(accounts)
       balanceSnapshotsVar.set(balances)
@@ -57,6 +60,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       exchangeRatesVar.set(exchangeRates.map(r => r.fromCurrency -> r.rateAsDouble).toMap)
       currencySettingsVar.set(currencySettings.currencies)
       availableCurrenciesVar.set(currencySettings.availableCurrencies.map(c => (c.code, c.name)))
+      oneTimeExpensesVar.set(oneTimeExpenses)
     }
   }
 
@@ -71,6 +75,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   override def savingsTransactions: Signal[List[SavingsTransaction]] = savingsTransactionsVar.signal
   override def currencySettings: Signal[List[CurrencySetting]]       = currencySettingsVar.signal
   override def availableCurrencies: Signal[List[(String, String)]]   = availableCurrenciesVar.signal
+  override def oneTimeExpenses: Signal[List[OneTimeExpense]]         = oneTimeExpensesVar.signal
 
   override def enabledCurrencies: Signal[List[Currency]] =
     currencySettingsVar.signal.map(_.map(_.code))
@@ -379,6 +384,25 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
           savingsAccountsVar.update(accs => accs.map(a => if a.id == txn.accountId then updatedAccount else a))
         }
       case None      => Future.successful(())
+    }
+  }
+
+  // One-time expenses
+  override def addOneTimeExpense(name: String, amountCents: Long, currency: Currency, date: Option[Instant]): Future[Unit] = {
+    client.oneTimeExpenses.create(CreateOneTimeExpense(name, amountCents, currency, date)).map { expense =>
+      oneTimeExpensesVar.update(_ :+ expense)
+    }
+  }
+
+  override def updateOneTimeExpense(id: OneTimeExpenseId, name: String, amountCents: Long, currency: Currency, date: Instant): Future[Unit] = {
+    client.oneTimeExpenses.update(id, UpdateOneTimeExpense(name, amountCents, currency, date)).map { updated =>
+      oneTimeExpensesVar.update(exps => exps.map(e => if e.id == id then updated else e))
+    }
+  }
+
+  override def deleteOneTimeExpense(id: OneTimeExpenseId): Future[Unit] = {
+    client.oneTimeExpenses.delete(id).map { _ =>
+      oneTimeExpensesVar.update(_.filterNot(_.id == id))
     }
   }
 

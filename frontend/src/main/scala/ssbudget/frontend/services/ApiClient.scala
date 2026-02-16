@@ -194,6 +194,28 @@ class ApiClient(implicit ec: ExecutionContext) {
     }
   }
 
+  object oneTimeExpenses {
+    def list(): Future[List[OneTimeExpense]] = {
+      val request = interpreter.toRequest(Endpoints.client.oneTimeExpenses.list, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def create(dto: CreateOneTimeExpense): Future[OneTimeExpense] = {
+      val request = interpreter.toRequest(Endpoints.client.oneTimeExpenses.create, Some(baseUri))
+      backend.send(request(dto)).map(handleResponse)
+    }
+
+    def update(id: OneTimeExpenseId, dto: UpdateOneTimeExpense): Future[OneTimeExpense] = {
+      val request = interpreter.toRequest(Endpoints.client.oneTimeExpenses.update, Some(baseUri))
+      backend.send(request((id, dto))).map(handleResponse)
+    }
+
+    def delete(id: OneTimeExpenseId): Future[Unit] = {
+      val request = interpreter.toRequest(Endpoints.client.oneTimeExpenses.delete, Some(baseUri))
+      backend.send(request(id)).map(handleResponse)
+    }
+  }
+
   object exchangeRates {
     def getAll(): Future[List[ExchangeRate]] = {
       val request = interpreter.toRequest(Endpoints.client.exchangeRates.getAll, Some(baseUri))

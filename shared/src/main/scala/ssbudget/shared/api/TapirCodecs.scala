@@ -16,4 +16,5 @@ object TapirCodecs {
   given Codec[String, ExpenseRecordId, CodecFormat.TextPlain]      = stringIdCodec(ExpenseRecordId.apply, _.value)
   given Codec[String, SavingsAccountId, CodecFormat.TextPlain]     = stringIdCodec(SavingsAccountId.apply, _.value)
   given Codec[String, SavingsTransactionId, CodecFormat.TextPlain] = stringIdCodec(SavingsTransactionId.apply, _.value)
+  given Codec[String, OneTimeExpenseId, CodecFormat.TextPlain]     = stringIdCodec(OneTimeExpenseId.apply, _.value)
 }

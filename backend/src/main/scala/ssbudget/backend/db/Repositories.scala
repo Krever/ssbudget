@@ -17,6 +17,7 @@ final case class Repositories(
     sessions: SessionRepository,
     passkeyCredentials: PasskeyCredentialRepository,
     currencySettings: CurrencySettingsRepository,
+    oneTimeExpenses: OneTimeExpenseRepository,
 )
 
 object Repositories {
@@ -34,6 +35,7 @@ object Repositories {
       sessions = new SessionRepositoryImpl(xa),
       passkeyCredentials = new PasskeyCredentialRepositoryImpl(xa),
       currencySettings = new CurrencySettingsRepositoryImpl(xa),
+      oneTimeExpenses = new OneTimeExpenseRepositoryImpl(xa),
     )
   }
 }

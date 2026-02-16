@@ -108,6 +108,14 @@ object InMemoryDataService extends DataService {
     ),
   )
 
+  private val oneTimeExpensesVar: Var[List[OneTimeExpense]] = Var(
+    List(
+      OneTimeExpense(OneTimeExpenseId("ote-1"), "New Laptop", 450000, Currency.PLN, tenDaysAgo.plus(1, ChronoUnit.DAYS)),
+      OneTimeExpense(OneTimeExpenseId("ote-2"), "Car Repair", 120000, Currency.PLN, tenDaysAgo.plus(5, ChronoUnit.DAYS)),
+      OneTimeExpense(OneTimeExpenseId("ote-3"), "Concert Tickets", 30000, Currency.EUR, sixtyDaysAgo.plus(10, ChronoUnit.DAYS)),
+    ),
+  )
+
   private val currencySettingsVar: Var[List[CurrencySetting]] = Var(
     List(
       CurrencySetting(Currency.PLN, "Polish Zloty", isPrimary = true, now),
@@ -123,6 +131,7 @@ object InMemoryDataService extends DataService {
   override def exchangeRates: Signal[Map[Currency, Double]]          = exchangeRatesVar.signal
   override def savingsAccounts: Signal[List[SavingsAccount]]         = savingsAccountsVar.signal
   override def savingsTransactions: Signal[List[SavingsTransaction]] = savingsTransactionsVar.signal
+  override def oneTimeExpenses: Signal[List[OneTimeExpense]]         = oneTimeExpensesVar.signal
   override def currencySettings: Signal[List[CurrencySetting]]       = currencySettingsVar.signal
   override def availableCurrencies: Signal[List[(String, String)]]   = Val(Currency.knownCurrencies)
   override def enabledCurrencies: Signal[List[Currency]]             = currencySettingsVar.signal.map(_.map(_.code))
@@ -463,6 +472,28 @@ object InMemoryDataService extends DataService {
       }
       savingsTransactionsVar.update(_.filterNot(_.id == id))
     }
+    Future.successful(())
+  }
+
+  override def addOneTimeExpense(name: String, amountCents: Long, currency: Currency, date: Option[Instant]): Future[Unit] = {
+    val newId   = OneTimeExpenseId(s"ote-${System.currentTimeMillis()}")
+    val expense = OneTimeExpense(newId, name, amountCents, currency, date.getOrElse(Instant.now()))
+    oneTimeExpensesVar.update(_ :+ expense)
+    Future.successful(())
+  }
+
+  override def updateOneTimeExpense(id: OneTimeExpenseId, name: String, amountCents: Long, currency: Currency, date: Instant): Future[Unit] = {
+    oneTimeExpensesVar.update { exps =>
+      exps.map { e =>
+        if e.id == id then e.copy(name = name, amountCents = amountCents, currency = currency, date = date)
+        else e
+      }
+    }
+    Future.successful(())
+  }
+
+  override def deleteOneTimeExpense(id: OneTimeExpenseId): Future[Unit] = {
+    oneTimeExpensesVar.update(_.filterNot(_.id == id))
     Future.successful(())
   }
 

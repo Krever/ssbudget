@@ -12,6 +12,17 @@ object Formatting {
   // without the scala-java-time-tzdb dependency
   private val zone               = ZoneId.of("UTC")
 
+  private val isoDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+
+  def formatIso(instant: Instant): String = {
+    val localDate = instant.atZone(zone).toLocalDate
+    isoDateFormatter.format(localDate)
+  }
+
+  def formatIsoToday: String = {
+    isoDateFormatter.format(LocalDate.now(zone))
+  }
+
   def formatMoneyShort(cents: Long): String = {
     val amount = cents / 100.0
     f"$amount%,.0f"

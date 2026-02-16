@@ -3,9 +3,11 @@ package ssbudget.frontend.pages
 import com.raquo.laminar.api.L.*
 import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.DataService
-import ssbudget.frontend.util.MoneyFormatter
+import ssbudget.frontend.util.{Formatting, MoneyFormatter}
+import ssbudget.frontend.{Page, Router}
 import ssbudget.shared.model.*
 
+import java.time.Instant
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -24,6 +26,10 @@ object BudgetPage {
   private val savingToAccountId  = Var[Option[SavingsAccountId]](None)
   private val expandedSavingsIds = Var[Set[SavingsAccountId]](Set.empty)
 
+  // One-time expenses state
+  private val addingOneTime    = Var(false)
+  private val editingOneTimeId = Var[Option[OneTimeExpenseId]](None)
+
   def apply(): HtmlElement = {
     div(
       cls := "container-fluid mt-3",
@@ -33,7 +39,8 @@ object BudgetPage {
         div(cls := "col-lg-6", plannedItemsCard()),
         div(cls := "col-lg-6", estimatedExpensesCard()),
       ),
-      div(cls := "row g-3", div(cls := "col-12", plannedSavingsCard())),
+      div(cls := "row g-3 mb-3", div(cls := "col-12", plannedSavingsCard())),
+      div(cls := "row g-3", div(cls := "col-12", oneTimeExpensesCard())),
     )
   }
 
@@ -209,6 +216,217 @@ object BudgetPage {
         span(cls := "font-monospace text-warning", MoneyFormatter.formatChild(dataService.remainingSavingsTarget)),
       ),
     )
+  }
+
+  private def oneTimeExpensesCard(): HtmlElement = {
+    div(
+      cls := "card",
+      div(
+        cls := "card-header py-2 d-flex justify-content-between align-items-center",
+        span("One-Time Expenses"),
+        div(
+          cls := "d-flex align-items-center gap-2",
+          button(cls := "btn btn-sm btn-outline-primary", "+ Add", onClick --> { _ => addingOneTime.set(true) }),
+          a(
+            cls      := "btn btn-sm btn-outline-secondary",
+            href     := Router.absoluteUrlForPage(Page.OneTimeExpenses),
+            Router.linkTo(Page.OneTimeExpenses),
+            "View All",
+          ),
+        ),
+      ),
+      div(
+        cls := "card-body p-0",
+        table(
+          cls := "table table-sm table-hover mb-0",
+          thead(tr(th("Date"), th("Name"), th(cls := "text-end", "Amount"), th("Cur"), th("Actions"))),
+          tbody(
+            child <-- addingOneTime.signal
+              .combineWith(dataService.primaryCurrency)
+              .combineWith(dataService.enabledCurrencies)
+              .map { case (isAdding, primary, currencies) =>
+                if isAdding then oneTimeAddRow(primary, currencies)
+                else emptyNode
+              },
+            children <-- dataService.oneTimeExpenses
+              .combineWith(dataService.currentPeriod)
+              .combineWith(editingOneTimeId.signal)
+              .map { case (expenses, periodOpt, editId) =>
+                val periodExpenses = periodOpt match {
+                  case Some(period) =>
+                    expenses.filter { e =>
+                      !e.date.isBefore(period.startDate) &&
+                      period.endDate.forall(end => e.date.isBefore(end))
+                    }
+                  case None         => List.empty
+                }
+                periodExpenses.sortBy(_.date)(Ordering[Instant].reverse).map { expense =>
+                  if editId.contains(expense.id) then oneTimeEditRow(expense)
+                  else oneTimeRow(expense)
+                }
+              },
+          ),
+        ),
+      ),
+    )
+  }
+
+  private def oneTimeRow(expense: OneTimeExpense): HtmlElement = {
+    tr(
+      td(cls := "text-muted small", Formatting.formatDate(expense.date)),
+      td(expense.name),
+      td(cls := "text-end font-monospace", MoneyFormatter.format(expense.amountCents, expense.currency)),
+      td(span(cls := "badge text-bg-success", expense.currency.code)),
+      td(
+        div(
+          cls := "btn-group btn-group-sm",
+          button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingOneTimeId.set(Some(expense.id)) }),
+          Loading.actionButton("Del", () => dataService.deleteOneTimeExpense(expense.id), "btn btn-outline-danger btn-sm"),
+        ),
+      ),
+    )
+  }
+
+  private def oneTimeEditRow(expense: OneTimeExpense): HtmlElement = {
+    var nameRef: org.scalajs.dom.html.Input   = null
+    var amountRef: org.scalajs.dom.html.Input = null
+    var dateRef: org.scalajs.dom.html.Input   = null
+    val currencyValue                         = Var(expense.currency)
+
+    tr(
+      cls := "table-warning",
+      td(
+        input(
+          cls          := "form-control form-control-sm",
+          tpe          := "date",
+          defaultValue := Formatting.formatIso(expense.date),
+          onMountCallback(ctx => dateRef = ctx.thisNode.ref.asInstanceOf[org.scalajs.dom.html.Input]),
+        ),
+      ),
+      td(
+        input(
+          cls          := "form-control form-control-sm",
+          tpe          := "text",
+          defaultValue := expense.name,
+          onMountCallback(ctx => nameRef = ctx.thisNode.ref.asInstanceOf[org.scalajs.dom.html.Input]),
+        ),
+      ),
+      td(
+        input(
+          cls          := "form-control form-control-sm text-end",
+          tpe          := "number",
+          stepAttr     := "0.01",
+          defaultValue := (expense.amountCents / 100.0).toString,
+          onMountCallback(ctx => amountRef = ctx.thisNode.ref.asInstanceOf[org.scalajs.dom.html.Input]),
+        ),
+      ),
+      td(
+        child <-- dataService.enabledCurrencies.map { currencies =>
+          select(
+            cls := "form-select form-select-sm",
+            currencies.map { curr =>
+              option(value := curr.code, selected := (curr == expense.currency), curr.code)
+            },
+            onChange.mapToValue --> { v => currencyValue.set(Currency(v)) },
+          )
+        },
+      ),
+      td(
+        div(
+          cls := "btn-group btn-group-sm",
+          Loading.actionButton(
+            "Save",
+            () => {
+              val name        = Option(nameRef).map(_.value.trim).getOrElse("")
+              val amountCents = Option(amountRef).flatMap(_.value.toDoubleOption).map(d => (d * 100).toLong).getOrElse(0L)
+              val dateStr     = Option(dateRef).map(_.value.trim).getOrElse("")
+              val date        = parseOneTimeDate(dateStr).getOrElse(expense.date)
+              if name.nonEmpty then {
+                dataService.updateOneTimeExpense(expense.id, name, amountCents, currencyValue.now(), date).map(_ => editingOneTimeId.set(None))
+              } else Future.successful(())
+            },
+            "btn btn-primary btn-sm",
+          ),
+          button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => editingOneTimeId.set(None) }),
+        ),
+      ),
+    )
+  }
+
+  private def oneTimeAddRow(primaryCurrency: Currency, currencies: List[Currency]): HtmlElement = {
+    var nameRef: org.scalajs.dom.html.Input   = null
+    var amountRef: org.scalajs.dom.html.Input = null
+    var dateRef: org.scalajs.dom.html.Input   = null
+    val currencyValue                         = Var(primaryCurrency)
+
+    val addAction = Loading.actionGroup(
+      "Add",
+      () => {
+        val name        = Option(nameRef).map(_.value.trim).getOrElse("")
+        val amountCents = Option(amountRef).flatMap(_.value.toDoubleOption).map(d => (d * 100).toLong).getOrElse(0L)
+        val dateStr     = Option(dateRef).map(_.value.trim).getOrElse("")
+        val date        = parseOneTimeDate(dateStr)
+        if name.nonEmpty && amountCents > 0 then {
+          dataService.addOneTimeExpense(name, amountCents, currencyValue.now(), date).map(_ => addingOneTime.set(false))
+        } else Future.successful(())
+      },
+      "btn btn-success btn-sm",
+    )
+
+    tr(
+      cls := "table-primary",
+      td(
+        input(
+          cls          := "form-control form-control-sm",
+          tpe          := "date",
+          defaultValue := Formatting.formatIsoToday,
+          onMountCallback(ctx => dateRef = ctx.thisNode.ref.asInstanceOf[org.scalajs.dom.html.Input]),
+        ),
+      ),
+      td(
+        input(
+          cls         := "form-control form-control-sm",
+          tpe         := "text",
+          placeholder := "Expense name",
+          onMountCallback(ctx => nameRef = ctx.thisNode.ref.asInstanceOf[org.scalajs.dom.html.Input]),
+          onMountFocus,
+          addAction.onEnter,
+        ),
+      ),
+      td(
+        input(
+          cls         := "form-control form-control-sm text-end",
+          tpe         := "number",
+          stepAttr    := "0.01",
+          placeholder := "Amount",
+          onMountCallback(ctx => amountRef = ctx.thisNode.ref.asInstanceOf[org.scalajs.dom.html.Input]),
+          addAction.onEnter,
+        ),
+      ),
+      td(
+        select(
+          cls := "form-select form-select-sm",
+          currencies.map(curr => option(value := curr.code, selected := (curr == primaryCurrency), curr.code)),
+          onChange.mapToValue --> { v => currencyValue.set(Currency(v)) },
+        ),
+      ),
+      td(
+        div(
+          cls := "btn-group btn-group-sm",
+          addAction.btn,
+          button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => addingOneTime.set(false) }),
+        ),
+      ),
+    )
+  }
+
+  private def parseOneTimeDate(dateStr: String): Option[Instant] = {
+    if dateStr.isEmpty then None
+    else {
+      scala.util.Try {
+        java.time.LocalDate.parse(dateStr).atStartOfDay(java.time.ZoneId.of("UTC")).toInstant
+      }.toOption
+    }
   }
 
   private def savingsTargetRow(

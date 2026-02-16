@@ -32,6 +32,10 @@ final case class UpdateSavingsAccountBalance(newBalance: Long) derives Codec.AsO
 
 final case class CreateSavingsTransaction(accountId: SavingsAccountId, amount: Long, note: Option[String]) derives Codec.AsObject
 
+final case class CreateOneTimeExpense(name: String, amountCents: Long, currency: Currency, date: Option[java.time.Instant]) derives Codec.AsObject
+
+final case class UpdateOneTimeExpense(name: String, amountCents: Long, currency: Currency, date: java.time.Instant) derives Codec.AsObject
+
 // Response DTOs
 final case class IdResponse(id: String) derives Codec.AsObject
 

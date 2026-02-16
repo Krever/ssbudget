@@ -72,6 +72,11 @@ object Routes {
       route(Endpoints.savingsTransactions.listCurrent)(_ => listCurrentPeriodSavingsTransactions(repos)),
       route(Endpoints.savingsTransactions.create)(createSavingsTransaction(repos)),
       route(Endpoints.savingsTransactions.delete)(deleteSavingsTransaction(repos)),
+      // One-time expenses
+      route(Endpoints.oneTimeExpenses.list)(_ => repos.oneTimeExpenses.findAll.map(Right(_))),
+      route(Endpoints.oneTimeExpenses.create)(createOneTimeExpense(repos)),
+      route(Endpoints.oneTimeExpenses.update) { case (id, dto) => updateOneTimeExpense(repos)(id, dto) },
+      route(Endpoints.oneTimeExpenses.delete)(deleteOneTimeExpense(repos)),
       // Exchange rates (all rates to primary currency)
       route(Endpoints.exchangeRates.getAll)(_ => getAllExchangeRates(repos)),
       // Currency settings
@@ -345,6 +350,31 @@ object Routes {
                     IO.pure(Left(s"Savings transaction not found: ${id.value}"))
                 }
     } yield result
+  }
+
+  private def createOneTimeExpense(repos: Repositories)(dto: CreateOneTimeExpense): Result[OneTimeExpense] = {
+    val id      = OneTimeExpenseId(UUID.randomUUID().toString)
+    val date    = dto.date.getOrElse(Instant.now())
+    val expense = OneTimeExpense(id, dto.name, dto.amountCents, dto.currency, date)
+
+    repos.oneTimeExpenses.create(expense).as(Right(expense))
+  }
+
+  private def updateOneTimeExpense(repos: Repositories)(id: OneTimeExpenseId, dto: UpdateOneTimeExpense): Result[OneTimeExpense] = {
+    for {
+      existingOpt <- repos.oneTimeExpenses.findById(id)
+      result      <- existingOpt match {
+                       case Some(_) =>
+                         val updated = OneTimeExpense(id, dto.name, dto.amountCents, dto.currency, dto.date)
+                         repos.oneTimeExpenses.update(updated).as(Right(updated))
+                       case None    =>
+                         IO.pure(Left(s"One-time expense not found: ${id.value}"))
+                     }
+    } yield result
+  }
+
+  private def deleteOneTimeExpense(repos: Repositories)(id: OneTimeExpenseId): Result[Unit] = {
+    repos.oneTimeExpenses.delete(id).as(Right(()))
   }
 
   private def resetDatabase(repos: Repositories): Result[Unit] = {

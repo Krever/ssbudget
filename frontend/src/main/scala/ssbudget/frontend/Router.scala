@@ -11,31 +11,35 @@ object Router
         Route.static(Page.Budget, root / "budget" / endOfSegments),
         Route.static(Page.Accounts, root / "accounts" / endOfSegments),
         Route.static(Page.Periods, root / "periods" / endOfSegments),
+        Route.static(Page.OneTimeExpenses, root / "one-time-expenses" / endOfSegments),
         Route.static(Page.Settings, root / "settings" / endOfSegments),
       ),
       getPageTitle = {
-        case Page.Dashboard => "SSBudget - Dashboard"
-        case Page.Budget    => "SSBudget - Budget"
-        case Page.Accounts  => "SSBudget - Accounts"
-        case Page.Periods   => "SSBudget - Periods"
-        case Page.Settings  => "SSBudget - Settings"
-        case Page.NotFound  => "SSBudget - Not Found"
+        case Page.Dashboard       => "SSBudget - Dashboard"
+        case Page.Budget          => "SSBudget - Budget"
+        case Page.Accounts        => "SSBudget - Accounts"
+        case Page.Periods         => "SSBudget - Periods"
+        case Page.OneTimeExpenses => "SSBudget - One-Time Expenses"
+        case Page.Settings        => "SSBudget - Settings"
+        case Page.NotFound        => "SSBudget - Not Found"
       },
       serializePage = {
-        case Page.Dashboard => "/"
-        case Page.Budget    => "/budget"
-        case Page.Accounts  => "/accounts"
-        case Page.Periods   => "/periods"
-        case Page.Settings  => "/settings"
-        case Page.NotFound  => "/404"
+        case Page.Dashboard       => "/"
+        case Page.Budget          => "/budget"
+        case Page.Accounts        => "/accounts"
+        case Page.Periods         => "/periods"
+        case Page.OneTimeExpenses => "/one-time-expenses"
+        case Page.Settings        => "/settings"
+        case Page.NotFound        => "/404"
       },
       deserializePage = {
-        case "/"         => Page.Dashboard
-        case "/budget"   => Page.Budget
-        case "/accounts" => Page.Accounts
-        case "/periods"  => Page.Periods
-        case "/settings" => Page.Settings
-        case _           => Page.NotFound
+        case "/"                  => Page.Dashboard
+        case "/budget"            => Page.Budget
+        case "/accounts"          => Page.Accounts
+        case "/periods"           => Page.Periods
+        case "/one-time-expenses" => Page.OneTimeExpenses
+        case "/settings"          => Page.Settings
+        case _                    => Page.NotFound
       },
     ) {
 

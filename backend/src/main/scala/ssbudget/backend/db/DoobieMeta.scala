@@ -17,6 +17,7 @@ object DoobieMeta {
   given Meta[BalanceSnapshotId]    = Meta[String].timap(BalanceSnapshotId.apply)(_.value)
   given Meta[SavingsAccountId]     = Meta[String].timap(SavingsAccountId.apply)(_.value)
   given Meta[SavingsTransactionId] = Meta[String].timap(SavingsTransactionId.apply)(_.value)
+  given Meta[OneTimeExpenseId]     = Meta[String].timap(OneTimeExpenseId.apply)(_.value)
 
   // Value types
   given Meta[Currency] = Meta[String].timap(Currency.apply)(_.code)

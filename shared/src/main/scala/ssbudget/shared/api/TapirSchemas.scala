@@ -13,6 +13,7 @@ object TapirSchemas {
   given Schema[ExpenseRecordId]      = Schema.string.map[ExpenseRecordId]((s: String) => Some(ExpenseRecordId(s)))(_.value)
   given Schema[SavingsAccountId]     = Schema.string.map[SavingsAccountId]((s: String) => Some(SavingsAccountId(s)))(_.value)
   given Schema[SavingsTransactionId] = Schema.string.map[SavingsTransactionId]((s: String) => Some(SavingsTransactionId(s)))(_.value)
+  given Schema[OneTimeExpenseId]     = Schema.string.map[OneTimeExpenseId]((s: String) => Some(OneTimeExpenseId(s)))(_.value)
 
   // Enums and value types
   given Schema[Currency]       = Schema.string.map[Currency]((s: String) => Some(Currency(s)))(_.code)
@@ -27,6 +28,7 @@ object TapirSchemas {
   given Schema[Period]               = Schema.derived[Period]
   given Schema[SavingsAccount]       = Schema.derived[SavingsAccount]
   given Schema[SavingsTransaction]   = Schema.derived[SavingsTransaction]
+  given Schema[OneTimeExpense]       = Schema.derived[OneTimeExpense]
   given Schema[ExchangeRate]         = Schema.derived[ExchangeRate]
   given Schema[Money]                = Schema.derived[Money]
 
@@ -43,6 +45,8 @@ object TapirSchemas {
   given Schema[IdResponse]                  = Schema.derived[IdResponse]
   given Schema[AccountResponse]             = Schema.derived[AccountResponse]
   given Schema[SavingsTransactionResponse]  = Schema.derived[SavingsTransactionResponse]
+  given Schema[CreateOneTimeExpense]        = Schema.derived[CreateOneTimeExpense]
+  given Schema[UpdateOneTimeExpense]        = Schema.derived[UpdateOneTimeExpense]
 
   // Currency settings DTOs
   given Schema[CurrencySetting]           = Schema.derived[CurrencySetting]

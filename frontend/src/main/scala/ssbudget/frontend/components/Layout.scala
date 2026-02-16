@@ -20,12 +20,13 @@ object Layout {
 
   private def renderPage(page: Page, apiClient: ApiClient): HtmlElement = {
     page match {
-      case Page.Dashboard => DashboardPage()
-      case Page.Budget    => BudgetPage()
-      case Page.Accounts  => AccountsPage()
-      case Page.Periods   => PeriodsPage()
-      case Page.Settings  => SettingsPage(apiClient)
-      case Page.NotFound  => NotFoundPage()
+      case Page.Dashboard       => DashboardPage()
+      case Page.Budget          => BudgetPage()
+      case Page.Accounts        => AccountsPage()
+      case Page.Periods         => PeriodsPage()
+      case Page.OneTimeExpenses => OneTimeExpensesPage()
+      case Page.Settings        => SettingsPage(apiClient)
+      case Page.NotFound        => NotFoundPage()
     }
   }
 }
