@@ -1,13 +1,14 @@
 package ssbudget.backend.db.repository
 
-import cats.effect.IO
 import ssbudget.shared.model.*
+
+import java.time.Instant
 
 class AccountRepositorySpec extends RepositorySpec {
 
   "create and findById returns the account" in {
     val repo    = new AccountRepositoryImpl(xa)
-    val account = Account(AccountId("acc-1"), "Main Account", Currency.PLN)
+    val account = spendingAccount("acc-1", "Main Account", Currency.PLN, 12345)
 
     for {
       _     <- repo.create(account)
@@ -17,7 +18,6 @@ class AccountRepositorySpec extends RepositorySpec {
 
   "findById returns None for non-existent account" in {
     val repo = new AccountRepositoryImpl(xa)
-
     for {
       found <- repo.findById(AccountId("non-existent"))
     } yield found shouldBe None
@@ -25,9 +25,9 @@ class AccountRepositorySpec extends RepositorySpec {
 
   "findAll returns all accounts ordered by name" in {
     val repo = new AccountRepositoryImpl(xa)
-    val acc1 = Account(AccountId("acc-1"), "Zebra", Currency.PLN)
-    val acc2 = Account(AccountId("acc-2"), "Alpha", Currency.EUR)
-    val acc3 = Account(AccountId("acc-3"), "Beta", Currency.PLN)
+    val acc1 = spendingAccount("acc-1", "Zebra", Currency.PLN)
+    val acc2 = savingsAccount("acc-2", "Alpha", Currency.EUR, 5000, Some(1000))
+    val acc3 = spendingAccount("acc-3", "Beta", Currency.PLN)
 
     for {
       _   <- repo.create(acc1)
@@ -37,10 +37,26 @@ class AccountRepositorySpec extends RepositorySpec {
     } yield all shouldBe List(acc2, acc3, acc1)
   }
 
-  "update modifies account" in {
+  "findByRole returns only accounts of that role" in {
+    val repo = new AccountRepositoryImpl(xa)
+    val acc1 = spendingAccount("acc-1", "Spending", Currency.PLN)
+    val acc2 = savingsAccount("acc-2", "Savings", Currency.PLN, 5000, Some(1000))
+
+    for {
+      _        <- repo.create(acc1)
+      _        <- repo.create(acc2)
+      spending <- repo.findByRole(AccountRole.Spending)
+      savings  <- repo.findByRole(AccountRole.Savings)
+    } yield {
+      spending shouldBe List(acc1)
+      savings shouldBe List(acc2)
+    }
+  }
+
+  "update modifies name, currency and savings target but not balance" in {
     val repo    = new AccountRepositoryImpl(xa)
-    val account = Account(AccountId("acc-1"), "Old Name", Currency.PLN)
-    val updated = account.copy(name = "New Name", currency = Currency.EUR)
+    val account = savingsAccount("acc-1", "Old Name", Currency.PLN, 100000, None)
+    val updated = account.copy(name = "New Name", currency = Currency.EUR, savingsTarget = Some(25000))
 
     for {
       _     <- repo.create(account)
@@ -49,14 +65,69 @@ class AccountRepositorySpec extends RepositorySpec {
     } yield found shouldBe Some(updated)
   }
 
+  "setBalance updates balance + provenance and appends a history snapshot" in {
+    val repo         = new AccountRepositoryImpl(xa)
+    val snapshotRepo = new BalanceSnapshotRepositoryImpl(xa)
+    val account      = spendingAccount("acc-1", "Main", Currency.PLN, 0)
+    val at           = Instant.parse("2024-02-01T00:00:00Z")
+
+    for {
+      _     <- repo.create(account)
+      _     <- repo.setBalance(AccountId("acc-1"), 777, BalanceSource.Bank, at)
+      found <- repo.findById(AccountId("acc-1"))
+      snaps <- snapshotRepo.findByAccount(AccountId("acc-1"))
+    } yield {
+      found.map(_.balanceCents) shouldBe Some(777)
+      found.map(_.balanceSource) shouldBe Some(BalanceSource.Bank)
+      found.flatMap(_.balanceUpdatedAt) shouldBe Some(at)
+      snaps.map(_.amount) shouldBe List(777)
+    }
+  }
+
+  "adjustBalance applies a delta and returns the updated account" in {
+    val repo    = new AccountRepositoryImpl(xa)
+    val account = savingsAccount("acc-1", "Fund", Currency.PLN, 1000, Some(500))
+    val at      = Instant.parse("2024-02-01T00:00:00Z")
+
+    for {
+      updated <- repo.create(account) *> repo.adjustBalance(AccountId("acc-1"), -400, at)
+    } yield updated.map(_.balanceCents) shouldBe Some(600)
+  }
+
+  "setBalanceSource changes only the provenance" in {
+    val repo    = new AccountRepositoryImpl(xa)
+    val account = spendingAccount("acc-1", "Main", Currency.PLN, 5000)
+
+    for {
+      _     <- repo.create(account)
+      _     <- repo.setBalanceSource(AccountId("acc-1"), BalanceSource.Bank)
+      found <- repo.findById(AccountId("acc-1"))
+    } yield {
+      found.map(_.balanceSource) shouldBe Some(BalanceSource.Bank)
+      found.map(_.balanceCents) shouldBe Some(5000)
+    }
+  }
+
   "delete removes account" in {
     val repo    = new AccountRepositoryImpl(xa)
-    val account = Account(AccountId("acc-1"), "Test", Currency.PLN)
+    val account = spendingAccount("acc-1", "Test", Currency.PLN)
 
     for {
       _     <- repo.create(account)
       _     <- repo.delete(AccountId("acc-1"))
       found <- repo.findById(AccountId("acc-1"))
     } yield found shouldBe None
+  }
+
+  "existsWithCurrency reflects any account role" in {
+    val repo = new AccountRepositoryImpl(xa)
+    for {
+      _      <- repo.create(savingsAccount("acc-1", "Fund", Currency.EUR, 0, None))
+      hasEur <- repo.existsWithCurrency(Currency.EUR)
+      hasUsd <- repo.existsWithCurrency(Currency.USD)
+    } yield {
+      hasEur shouldBe true
+      hasUsd shouldBe false
+    }
   }
 }

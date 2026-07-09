@@ -49,8 +49,7 @@ class CurrencyService(repos: Repositories, sttpBackend: SttpBackend[IO, Any]) {
                         val currency = Currency(code)
                         for {
                           accountsUse <- repos.accounts.existsWithCurrency(currency)
-                          savingsUse  <- repos.savingsAccounts.existsWithCurrency(currency)
-                          result      <- if accountsUse || savingsUse then {
+                          result      <- if accountsUse then {
                                            IO.pure(Left(s"Currency $code is in use by accounts and cannot be disabled"))
                                          } else {
                                            repos.currencySettings.delete(code).as(Right(()))

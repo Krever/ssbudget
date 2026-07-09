@@ -76,26 +76,24 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request(())).map(handleResponse)
     }
 
-    def create(dto: CreateAccount): Future[AccountResponse] = {
+    def create(dto: CreateAccount): Future[Account] = {
       val request = interpreter.toRequest(Endpoints.client.accounts.create, Some(baseUri))
       backend.send(request(dto)).map(handleResponse)
+    }
+
+    def update(id: AccountId, dto: UpdateAccount): Future[Account] = {
+      val request = interpreter.toRequest(Endpoints.client.accounts.update, Some(baseUri))
+      backend.send(request((id, dto))).map(handleResponse)
+    }
+
+    def updateBalance(id: AccountId, dto: UpdateAccountBalance): Future[Account] = {
+      val request = interpreter.toRequest(Endpoints.client.accounts.updateBalance, Some(baseUri))
+      backend.send(request((id, dto))).map(handleResponse)
     }
 
     def delete(id: AccountId): Future[Unit] = {
       val request = interpreter.toRequest(Endpoints.client.accounts.delete, Some(baseUri))
       backend.send(request(id)).map(handleResponse)
-    }
-  }
-
-  object balances {
-    def listLatest(): Future[List[BalanceSnapshot]] = {
-      val request = interpreter.toRequest(Endpoints.client.balances.listLatest, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
-    }
-
-    def create(dto: CreateBalanceSnapshot): Future[BalanceSnapshot] = {
-      val request = interpreter.toRequest(Endpoints.client.balances.create, Some(baseUri))
-      backend.send(request(dto)).map(handleResponse)
     }
   }
 
@@ -150,33 +148,6 @@ class ApiClient(implicit ec: ExecutionContext) {
     }
   }
 
-  object savingsAccounts {
-    def list(): Future[List[SavingsAccount]] = {
-      val request = interpreter.toRequest(Endpoints.client.savingsAccounts.list, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
-    }
-
-    def create(dto: CreateSavingsAccount): Future[SavingsAccount] = {
-      val request = interpreter.toRequest(Endpoints.client.savingsAccounts.create, Some(baseUri))
-      backend.send(request(dto)).map(handleResponse)
-    }
-
-    def update(id: SavingsAccountId, dto: UpdateSavingsAccount): Future[SavingsAccount] = {
-      val request = interpreter.toRequest(Endpoints.client.savingsAccounts.update, Some(baseUri))
-      backend.send(request((id, dto))).map(handleResponse)
-    }
-
-    def updateBalance(id: SavingsAccountId, dto: UpdateSavingsAccountBalance): Future[SavingsAccount] = {
-      val request = interpreter.toRequest(Endpoints.client.savingsAccounts.updateBalance, Some(baseUri))
-      backend.send(request((id, dto))).map(handleResponse)
-    }
-
-    def delete(id: SavingsAccountId): Future[Unit] = {
-      val request = interpreter.toRequest(Endpoints.client.savingsAccounts.delete, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
-    }
-  }
-
   object savingsTransactions {
     def listCurrent(): Future[List[SavingsTransaction]] = {
       val request = interpreter.toRequest(Endpoints.client.savingsTransactions.listCurrent, Some(baseUri))
@@ -188,9 +159,66 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request(dto)).map(handleResponse)
     }
 
-    def delete(id: SavingsTransactionId): Future[SavingsAccount] = {
+    def delete(id: SavingsTransactionId): Future[Account] = {
       val request = interpreter.toRequest(Endpoints.client.savingsTransactions.delete, Some(baseUri))
       backend.send(request(id)).map(handleResponse)
+    }
+  }
+
+  object banking {
+    def listAspsps(country: Option[String]): Future[List[Aspsp]] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.listAspsps, Some(baseUri))
+      backend.send(request(country)).map(handleResponse)
+    }
+
+    def connect(req: ConnectBankRequest): Future[ConnectBankResponse] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.connect, Some(baseUri))
+      backend.send(request(req)).map(handleResponse)
+    }
+
+    def callback(code: String, state: String): Future[BankConnectionView] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.callback, Some(baseUri))
+      backend.send(request(BankCallbackRequest(code, state))).map(handleResponse)
+    }
+
+    def connections(): Future[List[BankConnectionView]] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.connections, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def disconnect(id: BankConnectionId): Future[Unit] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.disconnect, Some(baseUri))
+      backend.send(request(id)).map(handleResponse)
+    }
+
+    def linkAccount(linkId: BankAccountLinkId, req: LinkAccountRequest): Future[List[BankConnectionView]] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.linkAccount, Some(baseUri))
+      backend.send(request((linkId, req))).map(handleResponse)
+    }
+
+    def sync(id: BankConnectionId): Future[List[BankConnectionView]] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.sync, Some(baseUri))
+      backend.send(request(id)).map(handleResponse)
+    }
+
+    def listCardGroups(): Future[List[CardGroup]] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.listCardGroups, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def createCardGroup(dto: CreateCardGroup): Future[CardGroup] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.createCardGroup, Some(baseUri))
+      backend.send(request(dto)).map(handleResponse)
+    }
+
+    def deleteCardGroup(id: CardGroupId): Future[Unit] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.deleteCardGroup, Some(baseUri))
+      backend.send(request(id)).map(handleResponse)
+    }
+
+    def linkCardGroup(id: CardGroupId, req: LinkCardGroupRequest): Future[List[CardGroup]] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.linkCardGroup, Some(baseUri))
+      backend.send(request((id, req))).map(handleResponse)
     }
   }
 

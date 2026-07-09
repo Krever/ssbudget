@@ -15,12 +15,26 @@ object DoobieMeta {
   given Meta[PeriodId]             = Meta[String].timap(PeriodId.apply)(_.value)
   given Meta[ExpenseRecordId]      = Meta[String].timap(ExpenseRecordId.apply)(_.value)
   given Meta[BalanceSnapshotId]    = Meta[String].timap(BalanceSnapshotId.apply)(_.value)
-  given Meta[SavingsAccountId]     = Meta[String].timap(SavingsAccountId.apply)(_.value)
   given Meta[SavingsTransactionId] = Meta[String].timap(SavingsTransactionId.apply)(_.value)
   given Meta[OneTimeExpenseId]     = Meta[String].timap(OneTimeExpenseId.apply)(_.value)
+  given Meta[BankConnectionId]     = Meta[String].timap(BankConnectionId.apply)(_.value)
+  given Meta[BankAccountLinkId]    = Meta[String].timap(BankAccountLinkId.apply)(_.value)
+  given Meta[CardGroupId]          = Meta[String].timap(CardGroupId.apply)(_.value)
 
   // Value types
   given Meta[Currency] = Meta[String].timap(Currency.apply)(_.code)
+
+  given Meta[ConnectionStatus] = Meta[String].tiemap(ConnectionStatus.fromString)(ConnectionStatus.asString)
+
+  given Meta[AccountRole]   = Meta[String].tiemap(AccountRole.fromString)(AccountRole.asString)
+  given Meta[BalanceSource] = Meta[String].tiemap(BalanceSource.fromString)(BalanceSource.asString)
+
+  // BankLinkTarget spans two columns: (link_target_kind, link_target_id).
+  given Read[BankLinkTarget] =
+    Read[(String, Option[String])].map { case (kind, id) => BankLinkTarget.fromParts(kind, id) }
+
+  given Write[BankLinkTarget] =
+    Write[(String, Option[String])].contramap(t => (BankLinkTarget.kind(t), BankLinkTarget.idValue(t)))
 
   given Meta[BudgetItemType] = Meta[String].tiemap {
     case "planned_expense"   => BudgetItemType.PlannedExpense.asRight

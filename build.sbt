@@ -78,7 +78,8 @@ lazy val backend = (project in file("backend"))
       "com.yubico"   % "webauthn-server-core" % "2.5.3",
       // Testing
       "org.scalatest" %% "scalatest"                     % "3.2.19" % Test,
-      "org.typelevel" %% "cats-effect-testing-scalatest" % "1.6.0"  % Test
+      "org.typelevel" %% "cats-effect-testing-scalatest" % "1.6.0"  % Test,
+      "org.wiremock"   % "wiremock-standalone"           % "3.9.1"  % Test
     ),
     Compile / run / fork := true
   )

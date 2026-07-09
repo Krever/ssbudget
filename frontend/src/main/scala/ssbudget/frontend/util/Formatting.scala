@@ -8,6 +8,7 @@ object Formatting {
 
   private val dateFormatter      = DateTimeFormatter.ofPattern("MMM d, yyyy")
   private val shortDateFormatter = DateTimeFormatter.ofPattern("MMM d")
+  private val dateTimeFormatter  = DateTimeFormatter.ofPattern("MMM d, HH:mm")
   // Use UTC instead of systemDefault() - systemDefault() fails silently in Scala.js
   // without the scala-java-time-tzdb dependency
   private val zone               = ZoneId.of("UTC")
@@ -40,6 +41,10 @@ object Formatting {
   def formatDateShort(instant: Instant): String = {
     val localDate = instant.atZone(zone).toLocalDate
     shortDateFormatter.format(localDate)
+  }
+
+  def formatDateTime(instant: Instant): String = {
+    dateTimeFormatter.format(instant.atZone(zone))
   }
 
   def daysRemaining(from: Instant, assumedPeriodDays: Int = 30): Int = {

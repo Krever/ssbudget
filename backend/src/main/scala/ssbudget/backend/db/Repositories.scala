@@ -11,13 +11,14 @@ final case class Repositories(
     expenseRecords: ExpenseRecordRepository,
     balanceSnapshots: BalanceSnapshotRepository,
     exchangeRates: ExchangeRateRepository,
-    savingsAccounts: SavingsAccountRepository,
     savingsTransactions: SavingsTransactionRepository,
     authConfig: AuthConfigRepository,
     sessions: SessionRepository,
     passkeyCredentials: PasskeyCredentialRepository,
     currencySettings: CurrencySettingsRepository,
     oneTimeExpenses: OneTimeExpenseRepository,
+    bankConnections: BankConnectionRepository,
+    cardGroups: CardGroupRepository,
 )
 
 object Repositories {
@@ -29,13 +30,14 @@ object Repositories {
       expenseRecords = new ExpenseRecordRepositoryImpl(xa),
       balanceSnapshots = new BalanceSnapshotRepositoryImpl(xa),
       exchangeRates = new ExchangeRateRepositoryImpl(xa),
-      savingsAccounts = new SavingsAccountRepositoryImpl(xa),
       savingsTransactions = new SavingsTransactionRepositoryImpl(xa),
       authConfig = new AuthConfigRepositoryImpl(xa),
       sessions = new SessionRepositoryImpl(xa),
       passkeyCredentials = new PasskeyCredentialRepositoryImpl(xa),
       currencySettings = new CurrencySettingsRepositoryImpl(xa),
       oneTimeExpenses = new OneTimeExpenseRepositoryImpl(xa),
+      bankConnections = new BankConnectionRepositoryImpl(xa),
+      cardGroups = new CardGroupRepositoryImpl(xa),
     )
   }
 }

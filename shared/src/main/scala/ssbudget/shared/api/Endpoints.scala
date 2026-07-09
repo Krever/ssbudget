@@ -26,31 +26,30 @@ object Endpoints {
         .out(jsonBody[List[Account]])
         .errorOut(stringBody)
 
-    val create: Secured[CreateAccount, AccountResponse] =
+    val create: Secured[CreateAccount, Account] =
       secureEndpoint.post
         .in("accounts")
         .in(jsonBody[CreateAccount])
-        .out(jsonBody[AccountResponse])
+        .out(jsonBody[Account])
+        .errorOut(stringBody)
+
+    val update: Secured[(AccountId, UpdateAccount), Account] =
+      secureEndpoint.put
+        .in("accounts" / path[AccountId]("id"))
+        .in(jsonBody[UpdateAccount])
+        .out(jsonBody[Account])
+        .errorOut(stringBody)
+
+    val updateBalance: Secured[(AccountId, UpdateAccountBalance), Account] =
+      secureEndpoint.put
+        .in("accounts" / path[AccountId]("id") / "balance")
+        .in(jsonBody[UpdateAccountBalance])
+        .out(jsonBody[Account])
         .errorOut(stringBody)
 
     val delete: Secured[AccountId, Unit] =
       secureEndpoint.delete
         .in("accounts" / path[AccountId]("id"))
-        .errorOut(stringBody)
-  }
-
-  object balances {
-    val listLatest: Secured[Unit, List[BalanceSnapshot]] =
-      secureEndpoint.get
-        .in("balance-snapshots" / "latest")
-        .out(jsonBody[List[BalanceSnapshot]])
-        .errorOut(stringBody)
-
-    val create: Secured[CreateBalanceSnapshot, BalanceSnapshot] =
-      secureEndpoint.post
-        .in("balance-snapshots")
-        .in(jsonBody[CreateBalanceSnapshot])
-        .out(jsonBody[BalanceSnapshot])
         .errorOut(stringBody)
   }
 
@@ -116,40 +115,6 @@ object Endpoints {
         .errorOut(stringBody)
   }
 
-  object savingsAccounts {
-    val list: Secured[Unit, List[SavingsAccount]] =
-      secureEndpoint.get
-        .in("savings-accounts")
-        .out(jsonBody[List[SavingsAccount]])
-        .errorOut(stringBody)
-
-    val create: Secured[CreateSavingsAccount, SavingsAccount] =
-      secureEndpoint.post
-        .in("savings-accounts")
-        .in(jsonBody[CreateSavingsAccount])
-        .out(jsonBody[SavingsAccount])
-        .errorOut(stringBody)
-
-    val update: Secured[(SavingsAccountId, UpdateSavingsAccount), SavingsAccount] =
-      secureEndpoint.put
-        .in("savings-accounts" / path[SavingsAccountId]("id"))
-        .in(jsonBody[UpdateSavingsAccount])
-        .out(jsonBody[SavingsAccount])
-        .errorOut(stringBody)
-
-    val updateBalance: Secured[(SavingsAccountId, UpdateSavingsAccountBalance), SavingsAccount] =
-      secureEndpoint.put
-        .in("savings-accounts" / path[SavingsAccountId]("id") / "balance")
-        .in(jsonBody[UpdateSavingsAccountBalance])
-        .out(jsonBody[SavingsAccount])
-        .errorOut(stringBody)
-
-    val delete: Secured[SavingsAccountId, Unit] =
-      secureEndpoint.delete
-        .in("savings-accounts" / path[SavingsAccountId]("id"))
-        .errorOut(stringBody)
-  }
-
   object savingsTransactions {
     val listCurrent: Secured[Unit, List[SavingsTransaction]] =
       secureEndpoint.get
@@ -164,10 +129,73 @@ object Endpoints {
         .out(jsonBody[SavingsTransactionResponse])
         .errorOut(stringBody)
 
-    val delete: Secured[SavingsTransactionId, SavingsAccount] =
+    val delete: Secured[SavingsTransactionId, Account] =
       secureEndpoint.delete
         .in("savings-transactions" / path[SavingsTransactionId]("id"))
-        .out(jsonBody[SavingsAccount])
+        .out(jsonBody[Account])
+        .errorOut(stringBody)
+  }
+
+  object banking {
+    val listAspsps: Secured[Option[String], List[Aspsp]] =
+      secureEndpoint.get
+        .in("banking" / "aspsps")
+        .in(query[Option[String]]("country"))
+        .out(jsonBody[List[Aspsp]])
+        .errorOut(stringBody)
+
+    val connect: Secured[ConnectBankRequest, ConnectBankResponse] =
+      secureEndpoint.post
+        .in("banking" / "connect")
+        .in(jsonBody[ConnectBankRequest])
+        .out(jsonBody[ConnectBankResponse])
+        .errorOut(stringBody)
+
+    val callback: Secured[BankCallbackRequest, BankConnectionView] =
+      secureEndpoint.post
+        .in("banking" / "callback")
+        .in(jsonBody[BankCallbackRequest])
+        .out(jsonBody[BankConnectionView])
+        .errorOut(stringBody)
+
+    val connections: Secured[Unit, List[BankConnectionView]] =
+      secureEndpoint.get
+        .in("banking" / "connections")
+        .out(jsonBody[List[BankConnectionView]])
+        .errorOut(stringBody)
+
+    val disconnect: Secured[BankConnectionId, Unit] =
+      secureEndpoint.delete
+        .in("banking" / "connections" / path[BankConnectionId]("id"))
+        .errorOut(stringBody)
+
+    val linkAccount: Secured[(BankAccountLinkId, LinkAccountRequest), List[BankConnectionView]] =
+      secureEndpoint.post
+        .in("banking" / "links" / path[BankAccountLinkId]("linkId") / "account")
+        .in(jsonBody[LinkAccountRequest])
+        .out(jsonBody[List[BankConnectionView]])
+        .errorOut(stringBody)
+
+    val sync: Secured[BankConnectionId, List[BankConnectionView]] =
+      secureEndpoint.post
+        .in("banking" / "connections" / path[BankConnectionId]("id") / "sync")
+        .out(jsonBody[List[BankConnectionView]])
+        .errorOut(stringBody)
+
+    val listCardGroups: Secured[Unit, List[CardGroup]] =
+      secureEndpoint.get.in("banking" / "card-groups").out(jsonBody[List[CardGroup]]).errorOut(stringBody)
+
+    val createCardGroup: Secured[CreateCardGroup, CardGroup] =
+      secureEndpoint.post.in("banking" / "card-groups").in(jsonBody[CreateCardGroup]).out(jsonBody[CardGroup]).errorOut(stringBody)
+
+    val deleteCardGroup: Secured[CardGroupId, Unit] =
+      secureEndpoint.delete.in("banking" / "card-groups" / path[CardGroupId]("id")).errorOut(stringBody)
+
+    val linkCardGroup: Secured[(CardGroupId, LinkCardGroupRequest), List[CardGroup]] =
+      secureEndpoint.post
+        .in("banking" / "card-groups" / path[CardGroupId]("id") / "account")
+        .in(jsonBody[LinkCardGroupRequest])
+        .out(jsonBody[List[CardGroup]])
         .errorOut(stringBody)
   }
 
@@ -265,9 +293,9 @@ object Endpoints {
   val all: List[AnyEndpoint] = List(
     accounts.list,
     accounts.create,
+    accounts.update,
+    accounts.updateBalance,
     accounts.delete,
-    balances.listLatest,
-    balances.create,
     budgetItems.list,
     budgetItems.create,
     budgetItems.update,
@@ -277,11 +305,6 @@ object Endpoints {
     expenseRecords.unpay,
     periods.list,
     periods.startNew,
-    savingsAccounts.list,
-    savingsAccounts.create,
-    savingsAccounts.update,
-    savingsAccounts.updateBalance,
-    savingsAccounts.delete,
     savingsTransactions.listCurrent,
     savingsTransactions.create,
     savingsTransactions.delete,
@@ -295,6 +318,17 @@ object Endpoints {
     currencies.disable,
     currencies.setPrimary,
     currencies.refreshRates,
+    banking.listAspsps,
+    banking.connect,
+    banking.callback,
+    banking.connections,
+    banking.disconnect,
+    banking.linkAccount,
+    banking.sync,
+    banking.listCardGroups,
+    banking.createCardGroup,
+    banking.deleteCardGroup,
+    banking.linkCardGroup,
     test.reset,
   )
 
@@ -308,19 +342,25 @@ object Endpoints {
       val list: Client[Unit, List[Account]] =
         baseEndpoint.get.in("accounts").out(jsonBody[List[Account]]).errorOut(stringBody)
 
-      val create: Client[CreateAccount, AccountResponse] =
-        baseEndpoint.post.in("accounts").in(jsonBody[CreateAccount]).out(jsonBody[AccountResponse]).errorOut(stringBody)
+      val create: Client[CreateAccount, Account] =
+        baseEndpoint.post.in("accounts").in(jsonBody[CreateAccount]).out(jsonBody[Account]).errorOut(stringBody)
+
+      val update: Client[(AccountId, UpdateAccount), Account] =
+        baseEndpoint.put
+          .in("accounts" / path[AccountId]("id"))
+          .in(jsonBody[UpdateAccount])
+          .out(jsonBody[Account])
+          .errorOut(stringBody)
+
+      val updateBalance: Client[(AccountId, UpdateAccountBalance), Account] =
+        baseEndpoint.put
+          .in("accounts" / path[AccountId]("id") / "balance")
+          .in(jsonBody[UpdateAccountBalance])
+          .out(jsonBody[Account])
+          .errorOut(stringBody)
 
       val delete: Client[AccountId, Unit] =
         baseEndpoint.delete.in("accounts" / path[AccountId]("id")).errorOut(stringBody)
-    }
-
-    object balances {
-      val listLatest: Client[Unit, List[BalanceSnapshot]] =
-        baseEndpoint.get.in("balance-snapshots" / "latest").out(jsonBody[List[BalanceSnapshot]]).errorOut(stringBody)
-
-      val create: Client[CreateBalanceSnapshot, BalanceSnapshot] =
-        baseEndpoint.post.in("balance-snapshots").in(jsonBody[CreateBalanceSnapshot]).out(jsonBody[BalanceSnapshot]).errorOut(stringBody)
     }
 
     object budgetItems {
@@ -364,31 +404,6 @@ object Endpoints {
         baseEndpoint.post.in("periods" / "start").out(jsonBody[Period]).errorOut(stringBody)
     }
 
-    object savingsAccounts {
-      val list: Client[Unit, List[SavingsAccount]] =
-        baseEndpoint.get.in("savings-accounts").out(jsonBody[List[SavingsAccount]]).errorOut(stringBody)
-
-      val create: Client[CreateSavingsAccount, SavingsAccount] =
-        baseEndpoint.post.in("savings-accounts").in(jsonBody[CreateSavingsAccount]).out(jsonBody[SavingsAccount]).errorOut(stringBody)
-
-      val update: Client[(SavingsAccountId, UpdateSavingsAccount), SavingsAccount] =
-        baseEndpoint.put
-          .in("savings-accounts" / path[SavingsAccountId]("id"))
-          .in(jsonBody[UpdateSavingsAccount])
-          .out(jsonBody[SavingsAccount])
-          .errorOut(stringBody)
-
-      val updateBalance: Client[(SavingsAccountId, UpdateSavingsAccountBalance), SavingsAccount] =
-        baseEndpoint.put
-          .in("savings-accounts" / path[SavingsAccountId]("id") / "balance")
-          .in(jsonBody[UpdateSavingsAccountBalance])
-          .out(jsonBody[SavingsAccount])
-          .errorOut(stringBody)
-
-      val delete: Client[SavingsAccountId, Unit] =
-        baseEndpoint.delete.in("savings-accounts" / path[SavingsAccountId]("id")).errorOut(stringBody)
-    }
-
     object savingsTransactions {
       val listCurrent: Client[Unit, List[SavingsTransaction]] =
         baseEndpoint.get.in("savings-transactions" / "current").out(jsonBody[List[SavingsTransaction]]).errorOut(stringBody)
@@ -400,8 +415,58 @@ object Endpoints {
           .out(jsonBody[SavingsTransactionResponse])
           .errorOut(stringBody)
 
-      val delete: Client[SavingsTransactionId, SavingsAccount] =
-        baseEndpoint.delete.in("savings-transactions" / path[SavingsTransactionId]("id")).out(jsonBody[SavingsAccount]).errorOut(stringBody)
+      val delete: Client[SavingsTransactionId, Account] =
+        baseEndpoint.delete.in("savings-transactions" / path[SavingsTransactionId]("id")).out(jsonBody[Account]).errorOut(stringBody)
+    }
+
+    object banking {
+      val listAspsps: Client[Option[String], List[Aspsp]] =
+        baseEndpoint.get
+          .in("banking" / "aspsps")
+          .in(query[Option[String]]("country"))
+          .out(jsonBody[List[Aspsp]])
+          .errorOut(stringBody)
+
+      val connect: Client[ConnectBankRequest, ConnectBankResponse] =
+        baseEndpoint.post.in("banking" / "connect").in(jsonBody[ConnectBankRequest]).out(jsonBody[ConnectBankResponse]).errorOut(stringBody)
+
+      val callback: Client[BankCallbackRequest, BankConnectionView] =
+        baseEndpoint.post.in("banking" / "callback").in(jsonBody[BankCallbackRequest]).out(jsonBody[BankConnectionView]).errorOut(stringBody)
+
+      val connections: Client[Unit, List[BankConnectionView]] =
+        baseEndpoint.get.in("banking" / "connections").out(jsonBody[List[BankConnectionView]]).errorOut(stringBody)
+
+      val disconnect: Client[BankConnectionId, Unit] =
+        baseEndpoint.delete.in("banking" / "connections" / path[BankConnectionId]("id")).errorOut(stringBody)
+
+      val linkAccount: Client[(BankAccountLinkId, LinkAccountRequest), List[BankConnectionView]] =
+        baseEndpoint.post
+          .in("banking" / "links" / path[BankAccountLinkId]("linkId") / "account")
+          .in(jsonBody[LinkAccountRequest])
+          .out(jsonBody[List[BankConnectionView]])
+          .errorOut(stringBody)
+
+      val sync: Client[BankConnectionId, List[BankConnectionView]] =
+        baseEndpoint.post
+          .in("banking" / "connections" / path[BankConnectionId]("id") / "sync")
+          .out(jsonBody[List[BankConnectionView]])
+          .errorOut(stringBody)
+
+      val listCardGroups: Client[Unit, List[CardGroup]] =
+        baseEndpoint.get.in("banking" / "card-groups").out(jsonBody[List[CardGroup]]).errorOut(stringBody)
+
+      val createCardGroup: Client[CreateCardGroup, CardGroup] =
+        baseEndpoint.post.in("banking" / "card-groups").in(jsonBody[CreateCardGroup]).out(jsonBody[CardGroup]).errorOut(stringBody)
+
+      val deleteCardGroup: Client[CardGroupId, Unit] =
+        baseEndpoint.delete.in("banking" / "card-groups" / path[CardGroupId]("id")).errorOut(stringBody)
+
+      val linkCardGroup: Client[(CardGroupId, LinkCardGroupRequest), List[CardGroup]] =
+        baseEndpoint.post
+          .in("banking" / "card-groups" / path[CardGroupId]("id") / "account")
+          .in(jsonBody[LinkCardGroupRequest])
+          .out(jsonBody[List[CardGroup]])
+          .errorOut(stringBody)
     }
 
     object oneTimeExpenses {

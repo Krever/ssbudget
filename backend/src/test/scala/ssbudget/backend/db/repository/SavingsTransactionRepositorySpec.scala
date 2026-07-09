@@ -12,12 +12,12 @@ class SavingsTransactionRepositorySpec extends RepositorySpec {
 
   private def createPrerequisites(): Unit = {
     // Create savings account first (foreign key)
-    val accountRepo = new SavingsAccountRepositoryImpl(xa)
+    val accountRepo = new AccountRepositoryImpl(xa)
     val periodRepo  = new PeriodRepositoryImpl(xa)
 
     (for {
-      _ <- accountRepo.create(SavingsAccount(SavingsAccountId("sav-1"), "Fund 1", Currency.PLN, 0, None))
-      _ <- accountRepo.create(SavingsAccount(SavingsAccountId("sav-2"), "Fund 2", Currency.EUR, 0, None))
+      _ <- accountRepo.create(savingsAccount("sav-1", "Fund 1", Currency.PLN, 0, None))
+      _ <- accountRepo.create(savingsAccount("sav-2", "Fund 2", Currency.EUR, 0, None))
       _ <- periodRepo.create(Period(PeriodId("period-1"), now, None))
       _ <- periodRepo.create(Period(PeriodId("period-2"), yesterday, Some(now)))
     } yield ()).unsafeRunSync()
@@ -28,7 +28,7 @@ class SavingsTransactionRepositorySpec extends RepositorySpec {
     val repo = new SavingsTransactionRepositoryImpl(xa)
     val txn  = SavingsTransaction(
       SavingsTransactionId("txn-1"),
-      SavingsAccountId("sav-1"),
+      AccountId("sav-1"),
       PeriodId("period-1"),
       50000,
       Some("Initial deposit"),
@@ -53,23 +53,23 @@ class SavingsTransactionRepositorySpec extends RepositorySpec {
   "findByAccountId returns transactions for account ordered by created_at desc" in {
     createPrerequisites()
     val repo = new SavingsTransactionRepositoryImpl(xa)
-    val txn1 = SavingsTransaction(SavingsTransactionId("txn-1"), SavingsAccountId("sav-1"), PeriodId("period-1"), 50000, None, yesterday)
-    val txn2 = SavingsTransaction(SavingsTransactionId("txn-2"), SavingsAccountId("sav-1"), PeriodId("period-1"), -10000, Some("Withdrawal"), now)
-    val txn3 = SavingsTransaction(SavingsTransactionId("txn-3"), SavingsAccountId("sav-2"), PeriodId("period-1"), 25000, None, now)
+    val txn1 = SavingsTransaction(SavingsTransactionId("txn-1"), AccountId("sav-1"), PeriodId("period-1"), 50000, None, yesterday)
+    val txn2 = SavingsTransaction(SavingsTransactionId("txn-2"), AccountId("sav-1"), PeriodId("period-1"), -10000, Some("Withdrawal"), now)
+    val txn3 = SavingsTransaction(SavingsTransactionId("txn-3"), AccountId("sav-2"), PeriodId("period-1"), 25000, None, now)
 
     for {
       _      <- repo.create(txn1)
       _      <- repo.create(txn2)
       _      <- repo.create(txn3)
-      result <- repo.findByAccountId(SavingsAccountId("sav-1"))
+      result <- repo.findByAccountId(AccountId("sav-1"))
     } yield result shouldBe List(txn2, txn1) // Newest first
   }
 
   "findByPeriodId returns transactions for period" in {
     createPrerequisites()
     val repo = new SavingsTransactionRepositoryImpl(xa)
-    val txn1 = SavingsTransaction(SavingsTransactionId("txn-1"), SavingsAccountId("sav-1"), PeriodId("period-1"), 50000, None, now)
-    val txn2 = SavingsTransaction(SavingsTransactionId("txn-2"), SavingsAccountId("sav-1"), PeriodId("period-2"), 30000, None, yesterday)
+    val txn1 = SavingsTransaction(SavingsTransactionId("txn-1"), AccountId("sav-1"), PeriodId("period-1"), 50000, None, now)
+    val txn2 = SavingsTransaction(SavingsTransactionId("txn-2"), AccountId("sav-1"), PeriodId("period-2"), 30000, None, yesterday)
 
     for {
       _      <- repo.create(txn1)
@@ -81,24 +81,24 @@ class SavingsTransactionRepositorySpec extends RepositorySpec {
   "findByAccountAndPeriod returns matching transactions" in {
     createPrerequisites()
     val repo = new SavingsTransactionRepositoryImpl(xa)
-    val txn1 = SavingsTransaction(SavingsTransactionId("txn-1"), SavingsAccountId("sav-1"), PeriodId("period-1"), 50000, None, yesterday)
-    val txn2 = SavingsTransaction(SavingsTransactionId("txn-2"), SavingsAccountId("sav-1"), PeriodId("period-1"), -10000, None, now)
-    val txn3 = SavingsTransaction(SavingsTransactionId("txn-3"), SavingsAccountId("sav-1"), PeriodId("period-2"), 30000, None, now)
-    val txn4 = SavingsTransaction(SavingsTransactionId("txn-4"), SavingsAccountId("sav-2"), PeriodId("period-1"), 25000, None, now)
+    val txn1 = SavingsTransaction(SavingsTransactionId("txn-1"), AccountId("sav-1"), PeriodId("period-1"), 50000, None, yesterday)
+    val txn2 = SavingsTransaction(SavingsTransactionId("txn-2"), AccountId("sav-1"), PeriodId("period-1"), -10000, None, now)
+    val txn3 = SavingsTransaction(SavingsTransactionId("txn-3"), AccountId("sav-1"), PeriodId("period-2"), 30000, None, now)
+    val txn4 = SavingsTransaction(SavingsTransactionId("txn-4"), AccountId("sav-2"), PeriodId("period-1"), 25000, None, now)
 
     for {
       _      <- repo.create(txn1)
       _      <- repo.create(txn2)
       _      <- repo.create(txn3)
       _      <- repo.create(txn4)
-      result <- repo.findByAccountAndPeriod(SavingsAccountId("sav-1"), PeriodId("period-1"))
+      result <- repo.findByAccountAndPeriod(AccountId("sav-1"), PeriodId("period-1"))
     } yield result shouldBe List(txn2, txn1) // Newest first
   }
 
   "update modifies transaction" in {
     createPrerequisites()
     val repo    = new SavingsTransactionRepositoryImpl(xa)
-    val txn     = SavingsTransaction(SavingsTransactionId("txn-1"), SavingsAccountId("sav-1"), PeriodId("period-1"), 50000, None, now)
+    val txn     = SavingsTransaction(SavingsTransactionId("txn-1"), AccountId("sav-1"), PeriodId("period-1"), 50000, None, now)
     val updated = txn.copy(amount = 60000, note = Some("Updated note"))
 
     for {
@@ -111,7 +111,7 @@ class SavingsTransactionRepositorySpec extends RepositorySpec {
   "delete removes transaction" in {
     createPrerequisites()
     val repo = new SavingsTransactionRepositoryImpl(xa)
-    val txn  = SavingsTransaction(SavingsTransactionId("txn-1"), SavingsAccountId("sav-1"), PeriodId("period-1"), 50000, None, now)
+    val txn  = SavingsTransaction(SavingsTransactionId("txn-1"), AccountId("sav-1"), PeriodId("period-1"), 50000, None, now)
 
     for {
       _     <- repo.create(txn)
@@ -123,17 +123,17 @@ class SavingsTransactionRepositorySpec extends RepositorySpec {
   "deleteByAccountId removes all transactions for account" in {
     createPrerequisites()
     val repo = new SavingsTransactionRepositoryImpl(xa)
-    val txn1 = SavingsTransaction(SavingsTransactionId("txn-1"), SavingsAccountId("sav-1"), PeriodId("period-1"), 50000, None, now)
-    val txn2 = SavingsTransaction(SavingsTransactionId("txn-2"), SavingsAccountId("sav-1"), PeriodId("period-2"), 30000, None, yesterday)
-    val txn3 = SavingsTransaction(SavingsTransactionId("txn-3"), SavingsAccountId("sav-2"), PeriodId("period-1"), 25000, None, now)
+    val txn1 = SavingsTransaction(SavingsTransactionId("txn-1"), AccountId("sav-1"), PeriodId("period-1"), 50000, None, now)
+    val txn2 = SavingsTransaction(SavingsTransactionId("txn-2"), AccountId("sav-1"), PeriodId("period-2"), 30000, None, yesterday)
+    val txn3 = SavingsTransaction(SavingsTransactionId("txn-3"), AccountId("sav-2"), PeriodId("period-1"), 25000, None, now)
 
     for {
       _       <- repo.create(txn1)
       _       <- repo.create(txn2)
       _       <- repo.create(txn3)
-      _       <- repo.deleteByAccountId(SavingsAccountId("sav-1"))
-      acc1Txn <- repo.findByAccountId(SavingsAccountId("sav-1"))
-      acc2Txn <- repo.findByAccountId(SavingsAccountId("sav-2"))
+      _       <- repo.deleteByAccountId(AccountId("sav-1"))
+      acc1Txn <- repo.findByAccountId(AccountId("sav-1"))
+      acc2Txn <- repo.findByAccountId(AccountId("sav-2"))
     } yield {
       acc1Txn shouldBe empty
       acc2Txn shouldBe List(txn3)
@@ -144,7 +144,7 @@ class SavingsTransactionRepositorySpec extends RepositorySpec {
     createPrerequisites()
     val repo = new SavingsTransactionRepositoryImpl(xa)
     val txn  =
-      SavingsTransaction(SavingsTransactionId("txn-1"), SavingsAccountId("sav-1"), PeriodId("period-1"), -25000, Some("Emergency withdrawal"), now)
+      SavingsTransaction(SavingsTransactionId("txn-1"), AccountId("sav-1"), PeriodId("period-1"), -25000, Some("Emergency withdrawal"), now)
 
     for {
       _     <- repo.create(txn)

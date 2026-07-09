@@ -4,9 +4,17 @@ import io.circe.Codec
 import ssbudget.shared.model.*
 
 // Request DTOs
-final case class CreateAccount(name: String, currency: Currency) derives Codec.AsObject
+final case class CreateAccount(
+    name: String,
+    currency: Currency,
+    role: AccountRole,
+    savingsTarget: Option[Long], // only meaningful for Savings accounts
+) derives Codec.AsObject
 
-final case class CreateBalanceSnapshot(accountId: AccountId, amountCents: Long) derives Codec.AsObject
+final case class UpdateAccount(name: String, currency: Currency, savingsTarget: Option[Long]) derives Codec.AsObject
+
+/** Set an account's balance directly. Rejected server-side unless the account's balanceSource is Manual. */
+final case class UpdateAccountBalance(newBalanceCents: Long) derives Codec.AsObject
 
 final case class CreateBudgetItem(
     name: String,
@@ -24,13 +32,7 @@ final case class UpdateBudgetItem(
 
 final case class PayBudgetItem(amountCents: Long) derives Codec.AsObject
 
-final case class CreateSavingsAccount(name: String, currency: Currency, plannedMonthly: Option[Long]) derives Codec.AsObject
-
-final case class UpdateSavingsAccount(name: String, currency: Currency, plannedMonthly: Option[Long]) derives Codec.AsObject
-
-final case class UpdateSavingsAccountBalance(newBalance: Long) derives Codec.AsObject
-
-final case class CreateSavingsTransaction(accountId: SavingsAccountId, amount: Long, note: Option[String]) derives Codec.AsObject
+final case class CreateSavingsTransaction(accountId: AccountId, amount: Long, note: Option[String]) derives Codec.AsObject
 
 final case class CreateOneTimeExpense(name: String, amountCents: Long, currency: Currency, date: Option[java.time.Instant]) derives Codec.AsObject
 
@@ -39,11 +41,9 @@ final case class UpdateOneTimeExpense(name: String, amountCents: Long, currency:
 // Response DTOs
 final case class IdResponse(id: String) derives Codec.AsObject
 
-final case class AccountResponse(account: Account, balance: BalanceSnapshot) derives Codec.AsObject
-
 final case class SavingsTransactionResponse(
     transaction: SavingsTransaction,
-    updatedAccount: SavingsAccount,
+    updatedAccount: Account,
 ) derives Codec.AsObject
 
 // Currency settings DTOs

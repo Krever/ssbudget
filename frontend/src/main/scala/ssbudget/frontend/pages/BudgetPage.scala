@@ -20,11 +20,11 @@ object BudgetPage {
   private val addingPlanned   = Var(false)
   private val addingEstimated = Var(false)
   private val addingIncome    = Var(false)
-  private val showOnlyPending = Var(false)
+  private val showOnlyPending = Var(true)
 
   // Savings state
-  private val savingToAccountId  = Var[Option[SavingsAccountId]](None)
-  private val expandedSavingsIds = Var[Set[SavingsAccountId]](Set.empty)
+  private val savingToAccountId  = Var[Option[AccountId]](None)
+  private val expandedSavingsIds = Var[Set[AccountId]](Set.empty)
 
   // One-time expenses state
   private val addingOneTime    = Var(false)
@@ -191,14 +191,14 @@ object BudgetPage {
               .combineWith(expandedSavingsIds.signal)
               .map { case (accounts, txns, savingToId, expandedIds) =>
                 // Show accounts with targets first, then accounts without targets
-                val (withTargets, withoutTargets) = accounts.partition(_.plannedMonthly.isDefined)
+                val (withTargets, withoutTargets) = accounts.partition(_.savingsTarget.isDefined)
                 val sortedAccounts                = withTargets ++ withoutTargets
                 sortedAccounts.flatMap { account =>
                   val periodTxns      = txns.filter(_.accountId == account.id)
                   val periodTotal     = periodTxns.map(_.amount).sum
                   val isExpanded      = expandedIds.contains(account.id)
                   val mainRow         = savingsTargetRow(account, periodTotal, periodTxns, savingToId, isExpanded)
-                  val suggestedAmount = account.plannedMonthly.map(_ - periodTotal).getOrElse(0L)
+                  val suggestedAmount = account.savingsTarget.map(_ - periodTotal).getOrElse(0L)
                   val txnRows         = if isExpanded then {
                     periodTxns.map(txn => savingsTransactionRow(txn, account.currency)) :+
                       (if savingToId.contains(account.id) then addSavingsTransactionRow(account, suggestedAmount)
@@ -433,16 +433,16 @@ object BudgetPage {
   }
 
   private def savingsTargetRow(
-      account: SavingsAccount,
+      account: Account,
       periodContribution: Long,
       periodTxns: List[SavingsTransaction],
-      savingToId: Option[SavingsAccountId],
+      savingToId: Option[AccountId],
       isExpanded: Boolean,
   ): HtmlElement = {
     val currency = account.currency
     val savedEl  = MoneyFormatter.format(periodContribution, currency)
 
-    val (targetEl, remainingEl, progressClass) = account.plannedMonthly match {
+    val (targetEl, remainingEl, progressClass) = account.savingsTarget match {
       case Some(target) =>
         val remaining = math.max(0L, target - periodContribution)
         val cls       = if periodContribution >= target then "text-success" else "text-warning"
@@ -492,7 +492,7 @@ object BudgetPage {
     )
   }
 
-  private def addTransactionButton(account: SavingsAccount): HtmlElement = {
+  private def addTransactionButton(account: Account): HtmlElement = {
     tr(
       cls := "table-light",
       td(colSpan := 4, cls := "ps-4"),
@@ -506,7 +506,7 @@ object BudgetPage {
     )
   }
 
-  private def addSavingsTransactionRow(account: SavingsAccount, suggestedAmount: Long): HtmlElement = {
+  private def addSavingsTransactionRow(account: Account, suggestedAmount: Long): HtmlElement = {
     var amountRef: org.scalajs.dom.html.Input = null
     var noteRef: org.scalajs.dom.html.Input   = null
 

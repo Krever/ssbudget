@@ -1,9 +1,9 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
-import ssbudget.frontend.components.Loading
-import ssbudget.frontend.services.DataService
+import ssbudget.frontend.components.{Badges, Loading}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
+import ssbudget.frontend.services.DataService
 import ssbudget.shared.model.*
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -12,12 +12,10 @@ object AccountsPage {
 
   private val dataService = DataService.instance
 
-  // Bank accounts state
+  // Editing state (unified account ids)
   private val editingAccountId = Var[Option[AccountId]](None)
   private val addingAccount    = Var(false)
-
-  // Savings accounts state
-  private val editingSavingsId = Var[Option[SavingsAccountId]](None)
+  private val editingSavingsId = Var[Option[AccountId]](None)
   private val addingSavings    = Var(false)
 
   def apply(): HtmlElement = {
@@ -32,7 +30,7 @@ object AccountsPage {
     )
   }
 
-  // ============ Bank Accounts ============
+  // ============ Spending Accounts ============
 
   private def bankAccountsCard(): HtmlElement = {
     div(
@@ -50,14 +48,10 @@ object AccountsPage {
             tr(th("Account"), th("Currency"), th("Balance"), th("Last Updated"), th("Actions")),
           ),
           tbody(
-            children <-- dataService.accounts
-              .combineWith(dataService.balanceSnapshots)
+            children <-- dataService.spendingAccounts
               .combineWith(editingAccountId.signal)
-              .map { case (accounts, snapshots, editingId) =>
-                accounts.map { account =>
-                  val snapshot = snapshots.find(_.accountId == account.id)
-                  accountRow(account, snapshot, editingId)
-                }
+              .map { case (accounts, editingId) =>
+                accounts.map(account => accountRow(account, editingId))
               },
             child <-- addingAccount.signal
               .combineWith(dataService.enabledCurrencies)
@@ -89,22 +83,23 @@ object AccountsPage {
     )
   }
 
-  private def accountRow(
-      account: Account,
-      snapshotOpt: Option[BalanceSnapshot],
-      editingId: Option[AccountId],
-  ): HtmlElement = {
+  private def accountRow(account: Account, editingId: Option[AccountId]): HtmlElement = {
     if editingId.contains(account.id) then editAccountRow(account)
     else {
-      val balanceEl = snapshotOpt.fold[HtmlElement](span("-"))(s => MoneyFormatter.format(s.amount, s.currency))
-      val dateStr   = snapshotOpt.fold("-")(s => Formatting.formatDate(s.recordedAt))
+      val balanceEl = MoneyFormatter.format(account.balanceCents, account.currency)
+      val dateStr   = account.balanceUpdatedAt.fold("-")(Formatting.formatDate)
+      val actions   =
+        if account.isManual then td(
+          button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingAccountId.set(Some(account.id)) }),
+        )
+        else td(cls := "text-muted small", "bank-driven")
 
       tr(
-        td(account.name),
+        td(account.name, Badges.source(account.balanceSource)),
         td(span(cls := "badge text-bg-secondary", account.currency.code)),
         td(cls := "font-monospace", balanceEl),
         td(cls := "text-muted small", dateStr),
-        td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingAccountId.set(Some(account.id)) })),
+        actions,
       )
     }
   }
@@ -112,6 +107,18 @@ object AccountsPage {
   private def editAccountRow(account: Account): HtmlElement = {
     var nameRef: org.scalajs.dom.html.Input = null
     val currencyValue                       = Var(account.currency)
+
+    val saveAction = Loading.actionGroup(
+      "Save",
+      () => {
+        val name = Option(nameRef).map(_.value.trim).getOrElse("")
+        if name.nonEmpty then dataService
+          .updateAccount(account.id, name, currencyValue.now(), account.savingsTarget)
+          .map(_ => editingAccountId.set(None))
+        else scala.concurrent.Future.successful(())
+      },
+      "btn btn-primary btn-sm",
+    )
 
     tr(
       cls := "table-warning",
@@ -122,6 +129,7 @@ object AccountsPage {
           defaultValue := account.name,
           onMountCallback(ctx => nameRef = ctx.thisNode.ref),
           onMountFocus,
+          saveAction.onEnter,
         ),
       ),
       td(
@@ -135,18 +143,11 @@ object AccountsPage {
           )
         },
       ),
-      td(colSpan := 3, cls := "text-muted small", "Balance is edited from Dashboard"),
+      td(colSpan := 2, cls := "text-muted small", "Balance is edited from Dashboard"),
       td(
         div(
           cls := "btn-group btn-group-sm",
-          button(
-            tpe      := "button",
-            cls      := "btn btn-primary btn-sm",
-            "Save",
-            onClick --> { _ =>
-              editingAccountId.set(None)
-            },
-          ),
+          saveAction.btn,
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => editingAccountId.set(None) }),
           Loading.actionButton(
             "Del",
@@ -194,7 +195,7 @@ object AccountsPage {
           onChange.mapToValue --> { v => currencyValue.set(Currency(v)) },
         ),
       ),
-      td(colSpan := 3, cls := "text-muted small", "Initial balance: 0"),
+      td(colSpan := 2, cls := "text-muted small", "Initial balance: 0"),
       td(
         div(
           cls := "btn-group btn-group-sm",
@@ -245,23 +246,28 @@ object AccountsPage {
     )
   }
 
-  private def savingsRow(account: SavingsAccount, editingId: Option[SavingsAccountId]): HtmlElement = {
+  private def savingsRow(account: Account, editingId: Option[AccountId]): HtmlElement = {
     if editingId.contains(account.id) then editSavingsRow(account)
     else {
-      val balanceEl = MoneyFormatter.format(account.currentBalance, account.currency)
-      val targetEl  = account.plannedMonthly.fold[HtmlElement](span("-"))(t => MoneyFormatter.format(t, account.currency))
+      val balanceEl = MoneyFormatter.format(account.balanceCents, account.currency)
+      val targetEl  = account.savingsTarget.fold[HtmlElement](span("-"))(t => MoneyFormatter.format(t, account.currency))
+      val actions   =
+        if account.isManual then td(
+          button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingSavingsId.set(Some(account.id)) }),
+        )
+        else td(cls := "text-muted small", "bank-driven")
 
       tr(
-        td(account.name),
+        td(account.name, Badges.source(account.balanceSource)),
         td(span(cls := "badge text-bg-success", account.currency.code)),
         td(cls := "font-monospace", balanceEl),
         td(cls := "font-monospace text-muted", targetEl),
-        td(button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingSavingsId.set(Some(account.id)) })),
+        actions,
       )
     }
   }
 
-  private def editSavingsRow(account: SavingsAccount): HtmlElement = {
+  private def editSavingsRow(account: Account): HtmlElement = {
     var nameRef: org.scalajs.dom.html.Input   = null
     var targetRef: org.scalajs.dom.html.Input = null
     val currencyValue                         = Var(account.currency)
@@ -273,7 +279,7 @@ object AccountsPage {
         val targetTxt = Option(targetRef).map(_.value.trim).getOrElse("")
         if name.nonEmpty then {
           val targetCents = if targetTxt.isEmpty then None else Some((targetTxt.toDoubleOption.getOrElse(0.0) * 100).toLong)
-          dataService.updateSavingsAccount(account.id, name, currencyValue.now(), targetCents).map(_ => editingSavingsId.set(None))
+          dataService.updateAccount(account.id, name, currencyValue.now(), targetCents).map(_ => editingSavingsId.set(None))
         } else {
           scala.concurrent.Future.successful(())
         }
@@ -311,7 +317,7 @@ object AccountsPage {
           tpe          := "number",
           stepAttr     := "0.01",
           placeholder  := "No target",
-          defaultValue := account.plannedMonthly.fold("")(t => (t / 100.0).toString),
+          defaultValue := account.savingsTarget.fold("")(t => (t / 100.0).toString),
           onMountCallback(ctx => targetRef = ctx.thisNode.ref),
           saveAction.onEnter,
         ),
@@ -323,7 +329,7 @@ object AccountsPage {
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => editingSavingsId.set(None) }),
           Loading.actionButton(
             "Del",
-            () => dataService.deleteSavingsAccount(account.id).map(_ => editingSavingsId.set(None)),
+            () => dataService.deleteAccount(account.id).map(_ => editingSavingsId.set(None)),
             "btn btn-danger btn-sm",
           ),
         ),

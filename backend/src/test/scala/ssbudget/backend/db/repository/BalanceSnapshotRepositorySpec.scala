@@ -8,7 +8,7 @@ import java.time.Instant
 class BalanceSnapshotRepositorySpec extends RepositorySpec {
 
   private def setupAccount(accountRepo: AccountRepository): IO[Unit] = {
-    val account = Account(AccountId("acc-1"), "Main", Currency.PLN)
+    val account = spendingAccount("acc-1", "Main", Currency.PLN)
     accountRepo.create(account)
   }
 
@@ -72,8 +72,8 @@ class BalanceSnapshotRepositorySpec extends RepositorySpec {
     val accountRepo  = new AccountRepositoryImpl(xa)
     val snapshotRepo = new BalanceSnapshotRepositoryImpl(xa)
 
-    val acc1 = Account(AccountId("acc-1"), "Main", Currency.PLN)
-    val acc2 = Account(AccountId("acc-2"), "Savings", Currency.EUR)
+    val acc1 = spendingAccount("acc-1", "Main", Currency.PLN)
+    val acc2 = spendingAccount("acc-2", "Savings", Currency.EUR)
 
     val snap1a = BalanceSnapshot(BalanceSnapshotId("snap-1a"), AccountId("acc-1"), 100L, Currency.PLN, Instant.parse("2024-01-10T10:00:00Z"))
     val snap1b = BalanceSnapshot(BalanceSnapshotId("snap-1b"), AccountId("acc-1"), 200L, Currency.PLN, Instant.parse("2024-01-15T10:00:00Z"))
@@ -110,8 +110,8 @@ class BalanceSnapshotRepositorySpec extends RepositorySpec {
     val accountRepo  = new AccountRepositoryImpl(xa)
     val snapshotRepo = new BalanceSnapshotRepositoryImpl(xa)
 
-    val acc1 = Account(AccountId("acc-1"), "Main", Currency.PLN)
-    val acc2 = Account(AccountId("acc-2"), "Savings", Currency.EUR)
+    val acc1 = spendingAccount("acc-1", "Main", Currency.PLN)
+    val acc2 = spendingAccount("acc-2", "Savings", Currency.EUR)
 
     val snap1a = BalanceSnapshot(BalanceSnapshotId("snap-1a"), AccountId("acc-1"), 100L, Currency.PLN, Instant.parse("2024-01-10T10:00:00Z"))
     val snap1b = BalanceSnapshot(BalanceSnapshotId("snap-1b"), AccountId("acc-1"), 200L, Currency.PLN, Instant.parse("2024-01-15T10:00:00Z"))

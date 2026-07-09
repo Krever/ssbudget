@@ -9,12 +9,12 @@ import ssbudget.shared.model.*
 trait SavingsTransactionRepository {
   def create(transaction: SavingsTransaction): IO[Unit]
   def findById(id: SavingsTransactionId): IO[Option[SavingsTransaction]]
-  def findByAccountId(accountId: SavingsAccountId): IO[List[SavingsTransaction]]
+  def findByAccountId(accountId: AccountId): IO[List[SavingsTransaction]]
   def findByPeriodId(periodId: PeriodId): IO[List[SavingsTransaction]]
-  def findByAccountAndPeriod(accountId: SavingsAccountId, periodId: PeriodId): IO[List[SavingsTransaction]]
+  def findByAccountAndPeriod(accountId: AccountId, periodId: PeriodId): IO[List[SavingsTransaction]]
   def update(transaction: SavingsTransaction): IO[Unit]
   def delete(id: SavingsTransactionId): IO[Unit]
-  def deleteByAccountId(accountId: SavingsAccountId): IO[Unit]
+  def deleteByAccountId(accountId: AccountId): IO[Unit]
 }
 
 class SavingsTransactionRepositoryImpl(xa: Transactor[IO]) extends SavingsTransactionRepository {
@@ -34,7 +34,7 @@ class SavingsTransactionRepositoryImpl(xa: Transactor[IO]) extends SavingsTransa
     """.query[SavingsTransaction].option.transact(xa)
   }
 
-  override def findByAccountId(accountId: SavingsAccountId): IO[List[SavingsTransaction]] = {
+  override def findByAccountId(accountId: AccountId): IO[List[SavingsTransaction]] = {
     sql"""
       SELECT id, account_id, period_id, amount, note, created_at
       FROM savings_transactions WHERE account_id = $accountId
@@ -50,7 +50,7 @@ class SavingsTransactionRepositoryImpl(xa: Transactor[IO]) extends SavingsTransa
     """.query[SavingsTransaction].to[List].transact(xa)
   }
 
-  override def findByAccountAndPeriod(accountId: SavingsAccountId, periodId: PeriodId): IO[List[SavingsTransaction]] = {
+  override def findByAccountAndPeriod(accountId: AccountId, periodId: PeriodId): IO[List[SavingsTransaction]] = {
     sql"""
       SELECT id, account_id, period_id, amount, note, created_at
       FROM savings_transactions WHERE account_id = $accountId AND period_id = $periodId
@@ -73,7 +73,7 @@ class SavingsTransactionRepositoryImpl(xa: Transactor[IO]) extends SavingsTransa
     """.update.run.transact(xa).void
   }
 
-  override def deleteByAccountId(accountId: SavingsAccountId): IO[Unit] = {
+  override def deleteByAccountId(accountId: AccountId): IO[Unit] = {
     sql"""
       DELETE FROM savings_transactions WHERE account_id = $accountId
     """.update.run.transact(xa).void

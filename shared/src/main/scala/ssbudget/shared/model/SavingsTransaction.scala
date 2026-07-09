@@ -11,7 +11,7 @@ object SavingsTransactionId extends StringId[SavingsTransactionId]
 
 final case class SavingsTransaction(
     id: SavingsTransactionId,
-    accountId: SavingsAccountId,
+    accountId: AccountId, // references a savings-role Account
     periodId: PeriodId,
     amount: Long,         // positive = inflow, negative = outflow
     note: Option[String], // optional context

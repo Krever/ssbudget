@@ -10,6 +10,7 @@ import sttp.client3.httpclient.cats.HttpClientCatsBackend
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 
 import ssbudget.backend.auth.{PasswordService, SessionService, WebAuthnService}
+import ssbudget.backend.banking.{BankingService, EnableBankingClient, EnableBankingConfig, EnableBankingJwt}
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.service.CurrencyService
 import ssbudget.shared.api.HealthEndpoint
@@ -45,10 +46,18 @@ object ServerBuilder {
     for {
       sttpBackend     <- HttpClientCatsBackend.resource[IO]()
       webAuthnService <- Resource.eval(WebAuthnService(repos.passkeyCredentials, defaultRpId, defaultRpName, rpOrigins))
+      ebConfigOpt     <- Resource.eval(EnableBankingConfig.fromEnv)
+      ebClientOpt     <- ebConfigOpt.traverse { cfg =>
+                           Resource.eval(EnableBankingJwt.create(cfg).map(jwt => new EnableBankingClient(cfg, jwt, sttpBackend)))
+                         }
+      _               <- Resource.eval(
+                           IO.println(if ebClientOpt.isDefined then "Enable Banking integration: configured" else "Enable Banking integration: not configured"),
+                         )
       server          <- {
         val passwordService = PasswordService()
         val sessionService  = SessionService(repos.sessions)
         val currencyService = new CurrencyService(repos, sttpBackend)
+        val bankingService  = new BankingService(repos, ebClientOpt)
 
         val authRoutes = AuthRoutes.make(
           repos.authConfig,
@@ -60,7 +69,7 @@ object ServerBuilder {
         )
 
         // Routes now handle their own auth via Tapir's serverSecurityLogic
-        val dataRoutes = Routes.make(repos, xa, dbPath, sessionService, currencyService, testMode)
+        val dataRoutes = Routes.make(repos, xa, dbPath, sessionService, currencyService, bankingService, testMode)
 
         // Static file routes for production (serves frontend build)
         val staticRoutes = StaticRoutes.make(staticDir)

@@ -52,3 +52,8 @@ bugs.md
 spec.md
 
 frontend/dist
+
+### Secrets & local dev (Enable Banking key, dev TLS certs) ###
+*.pem
+frontend/.certs/
+frontend/.vite/

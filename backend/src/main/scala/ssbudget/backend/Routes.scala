@@ -10,6 +10,7 @@ import sttp.tapir.*
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 import ssbudget.backend.auth.SessionService
+import ssbudget.backend.banking.BankingService
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.service.CurrencyService
 import ssbudget.shared.api.*
@@ -32,6 +33,7 @@ object Routes {
       dbPath: String,
       sessionService: SessionService,
       currencyService: CurrencyService,
+      bankingService: BankingService,
       testMode: Boolean = false,
   ): HttpRoutes[IO] = {
     val interpreter = Http4sServerInterpreter[IO]()
@@ -43,13 +45,12 @@ object Routes {
       ep.serverSecurityLogic(validateSession).serverLogic(_ => h)
 
     val routes = List(
-      // Accounts
+      // Accounts (spending + savings, unified)
       route(Endpoints.accounts.list)(_ => repos.accounts.findAll.map(Right(_))),
       route(Endpoints.accounts.create)(createAccount(repos)),
+      route(Endpoints.accounts.update) { case (id, dto) => updateAccount(repos)(id, dto) },
+      route(Endpoints.accounts.updateBalance) { case (id, dto) => updateAccountBalance(repos)(id, dto) },
       route(Endpoints.accounts.delete)(deleteAccount(repos)),
-      // Balances
-      route(Endpoints.balances.listLatest)(_ => repos.balanceSnapshots.findAllLatest.map(Right(_))),
-      route(Endpoints.balances.create)(createBalanceSnapshot(repos)),
       // Budget items
       route(Endpoints.budgetItems.list)(_ => repos.expenseDefinitions.findAll.map(Right(_))),
       route(Endpoints.budgetItems.create)(createBudgetItem(repos)),
@@ -62,12 +63,6 @@ object Routes {
       // Periods
       route(Endpoints.periods.list)(_ => repos.periods.findAll.map(Right(_))),
       route(Endpoints.periods.startNew)(_ => startNewPeriod(repos)),
-      // Savings accounts
-      route(Endpoints.savingsAccounts.list)(_ => repos.savingsAccounts.findAll.map(Right(_))),
-      route(Endpoints.savingsAccounts.create)(createSavingsAccount(repos)),
-      route(Endpoints.savingsAccounts.update) { case (id, dto) => updateSavingsAccount(repos)(id, dto) },
-      route(Endpoints.savingsAccounts.updateBalance) { case (id, dto) => updateSavingsAccountBalance(repos)(id, dto) },
-      route(Endpoints.savingsAccounts.delete)(deleteSavingsAccount(repos)),
       // Savings transactions
       route(Endpoints.savingsTransactions.listCurrent)(_ => listCurrentPeriodSavingsTransactions(repos)),
       route(Endpoints.savingsTransactions.create)(createSavingsTransaction(repos)),
@@ -85,6 +80,18 @@ object Routes {
       route(Endpoints.currencies.disable)(code => currencyService.disableCurrency(code)),
       route(Endpoints.currencies.setPrimary)(dto => currencyService.setPrimaryCurrency(dto.code)),
       route(Endpoints.currencies.refreshRates)(_ => currencyService.refreshRates()),
+      // Banking (Enable Banking integration)
+      route(Endpoints.banking.listAspsps)(country => bankingService.listAspsps(country)),
+      route(Endpoints.banking.connect)(req => bankingService.connect(req)),
+      route(Endpoints.banking.callback)(req => bankingService.callback(req)),
+      route(Endpoints.banking.connections)(_ => bankingService.listConnections.map(Right(_))),
+      route(Endpoints.banking.disconnect)(id => bankingService.disconnect(id)),
+      route(Endpoints.banking.linkAccount) { case (linkId, req) => bankingService.linkAccount(linkId, req) },
+      route(Endpoints.banking.sync)(id => bankingService.sync(id)),
+      route(Endpoints.banking.listCardGroups)(_ => bankingService.listCardGroups.map(Right(_))),
+      route(Endpoints.banking.createCardGroup)(dto => bankingService.createCardGroup(dto)),
+      route(Endpoints.banking.deleteCardGroup)(id => bankingService.deleteCardGroup(id)),
+      route(Endpoints.banking.linkCardGroup) { case (id, req) => bankingService.linkCardGroup(id, req) },
       // Database import/export
       route(Endpoints.database.download)(_ => exportDatabase(dbPath)),
       route(Endpoints.database.`import`)(bytes => importDatabase(xa, dbPath, bytes)),
@@ -107,40 +114,55 @@ object Routes {
     } yield Right(txns)
   }
 
-  private def createAccount(repos: Repositories)(dto: CreateAccount): Result[AccountResponse] = {
-    val accountId  = AccountId(UUID.randomUUID().toString)
-    val snapshotId = BalanceSnapshotId(UUID.randomUUID().toString)
-    val now        = Instant.now()
+  private def createAccount(repos: Repositories)(dto: CreateAccount): Result[Account] = {
+    val accountId = AccountId(UUID.randomUUID().toString)
+    val now       = Instant.now()
+    val account   = Account(accountId, dto.name, dto.currency, dto.role, 0L, dto.savingsTarget, BalanceSource.Manual, Some(now))
+    repos.accounts.create(account).as(Right(account))
+  }
 
-    val account  = Account(accountId, dto.name, dto.currency)
-    val snapshot = BalanceSnapshot(snapshotId, accountId, 0L, dto.currency, now)
-
+  private def updateAccount(repos: Repositories)(id: AccountId, dto: UpdateAccount): Result[Account] = {
     for {
-      _ <- repos.accounts.create(account)
-      _ <- repos.balanceSnapshots.create(snapshot)
-    } yield Right(AccountResponse(account, snapshot))
+      existingOpt <- repos.accounts.findById(id)
+      result      <- existingOpt match {
+                       case Some(existing) =>
+                         val updated = existing.copy(name = dto.name, currency = dto.currency, savingsTarget = dto.savingsTarget)
+                         repos.accounts.update(updated).as(Right(updated))
+                       case None           => IO.pure(Left(s"Account not found: ${id.value}"))
+                     }
+    } yield result
+  }
+
+  private def updateAccountBalance(repos: Repositories)(id: AccountId, dto: UpdateAccountBalance): Result[Account] = {
+    for {
+      existingOpt <- repos.accounts.findById(id)
+      result      <- existingOpt match {
+                       case None                                 =>
+                         IO.pure(Left(s"Account not found: ${id.value}"))
+                       case Some(existing) if !existing.isManual =>
+                         IO.pure(Left("This account's balance is driven by a bank sync and cannot be edited manually"))
+                       case Some(existing)                       =>
+                         val now = Instant.now()
+                         repos.accounts
+                           .setBalance(id, dto.newBalanceCents, BalanceSource.Manual, now)
+                           .as(Right(existing.copy(balanceCents = dto.newBalanceCents, balanceUpdatedAt = Some(now))))
+                     }
+    } yield result
   }
 
   private def deleteAccount(repos: Repositories)(id: AccountId): Result[Unit] = {
     for {
-      // Delete related balance snapshots first
-      _ <- repos.balanceSnapshots.deleteByAccountId(id)
-      _ <- repos.accounts.delete(id)
-    } yield Right(())
-  }
-
-  private def createBalanceSnapshot(repos: Repositories)(dto: CreateBalanceSnapshot): Result[BalanceSnapshot] = {
-    for {
-      accountOpt <- repos.accounts.findById(dto.accountId)
-      result     <- accountOpt match {
-                      case Some(account) =>
-                        val snapshotId = BalanceSnapshotId(UUID.randomUUID().toString)
-                        val now        = Instant.now()
-                        val snapshot   = BalanceSnapshot(snapshotId, dto.accountId, dto.amountCents, account.currency, now)
-                        repos.balanceSnapshots.create(snapshot).as(Right(snapshot))
-                      case None          =>
-                        IO.pure(Left(s"Account not found: ${dto.accountId.value}"))
-                    }
+      accOpt <- repos.accounts.findById(id)
+      result <- accOpt match {
+                  case Some(a) if !a.isManual =>
+                    IO.pure(Left("This account's balance is driven by a bank link or card group; unlink it first, then delete."))
+                  case _                      =>
+                    for {
+                      _ <- repos.balanceSnapshots.deleteByAccountId(id)
+                      _ <- repos.savingsTransactions.deleteByAccountId(id)
+                      _ <- repos.accounts.delete(id)
+                    } yield Right(())
+                }
     } yield result
   }
 
@@ -259,93 +281,39 @@ object Routes {
     } yield Right(newPeriod)
   }
 
-  private def createSavingsAccount(repos: Repositories)(dto: CreateSavingsAccount): Result[SavingsAccount] = {
-    val accountId = SavingsAccountId(UUID.randomUUID().toString)
-    val account   = SavingsAccount(accountId, dto.name, dto.currency, 0L, dto.plannedMonthly)
-
-    repos.savingsAccounts.create(account).as(Right(account))
-  }
-
-  private def updateSavingsAccount(repos: Repositories)(id: SavingsAccountId, dto: UpdateSavingsAccount): Result[SavingsAccount] = {
-    for {
-      existingOpt <- repos.savingsAccounts.findById(id)
-      result      <- existingOpt match {
-                       case Some(existing) =>
-                         val updated = existing.copy(name = dto.name, currency = dto.currency, plannedMonthly = dto.plannedMonthly)
-                         repos.savingsAccounts.update(updated).as(Right(updated))
-                       case None           =>
-                         IO.pure(Left(s"Savings account not found: ${id.value}"))
-                     }
-    } yield result
-  }
-
-  private def updateSavingsAccountBalance(repos: Repositories)(id: SavingsAccountId, dto: UpdateSavingsAccountBalance): Result[SavingsAccount] = {
-    for {
-      existingOpt <- repos.savingsAccounts.findById(id)
-      result      <- existingOpt match {
-                       case Some(existing) =>
-                         val updated = existing.copy(currentBalance = dto.newBalance)
-                         repos.savingsAccounts.updateBalance(id, dto.newBalance).as(Right(updated))
-                       case None           =>
-                         IO.pure(Left(s"Savings account not found: ${id.value}"))
-                     }
-    } yield result
-  }
-
-  private def deleteSavingsAccount(repos: Repositories)(id: SavingsAccountId): Result[Unit] = {
-    for {
-      // Delete related transactions first
-      _ <- repos.savingsTransactions.deleteByAccountId(id)
-      _ <- repos.savingsAccounts.delete(id)
-    } yield Right(())
-  }
-
   private def createSavingsTransaction(repos: Repositories)(dto: CreateSavingsTransaction): Result[SavingsTransactionResponse] = {
     for {
       currentPeriod <- repos.periods.findCurrent
-      accountOpt    <- repos.savingsAccounts.findById(dto.accountId)
+      accountOpt    <- repos.accounts.findById(dto.accountId)
       result        <- (currentPeriod, accountOpt) match {
-                         case (Some(period), Some(account)) =>
+                         case (Some(period), Some(account)) if account.role == AccountRole.Savings =>
                            val txnId = SavingsTransactionId(UUID.randomUUID().toString)
                            val now   = Instant.now()
                            val txn   = SavingsTransaction(txnId, dto.accountId, period.id, dto.amount, dto.note, now)
-
-                           // Update account balance
-                           val newBalance     = account.currentBalance + dto.amount
-                           val updatedAccount = account.copy(currentBalance = newBalance)
-
                            for {
-                             _ <- repos.savingsTransactions.create(txn)
-                             _ <- repos.savingsAccounts.updateBalance(dto.accountId, newBalance)
-                           } yield Right(SavingsTransactionResponse(txn, updatedAccount))
-                         case (None, _)                     =>
+                             _       <- repos.savingsTransactions.create(txn)
+                             updated <- repos.accounts.adjustBalance(dto.accountId, dto.amount, now)
+                           } yield updated.toRight("Failed to update account balance").map(SavingsTransactionResponse(txn, _))
+                         case (Some(_), Some(_))                                                   =>
+                           IO.pure(Left(s"Account is not a savings account: ${dto.accountId.value}"))
+                         case (None, _)                                                            =>
                            IO.pure(Left("No current period found"))
-                         case (_, None)                     =>
+                         case (_, None)                                                            =>
                            IO.pure(Left(s"Savings account not found: ${dto.accountId.value}"))
                        }
     } yield result
   }
 
-  private def deleteSavingsTransaction(repos: Repositories)(id: SavingsTransactionId): Result[SavingsAccount] = {
+  private def deleteSavingsTransaction(repos: Repositories)(id: SavingsTransactionId): Result[Account] = {
     for {
       txnOpt <- repos.savingsTransactions.findById(id)
       result <- txnOpt match {
                   case Some(txn) =>
+                    val now = Instant.now()
                     for {
-                      accountOpt <- repos.savingsAccounts.findById(txn.accountId)
-                      account    <- accountOpt match {
-                                      case Some(acc) =>
-                                        // Reverse the balance change
-                                        val newBalance     = acc.currentBalance - txn.amount
-                                        val updatedAccount = acc.copy(currentBalance = newBalance)
-                                        for {
-                                          _ <- repos.savingsTransactions.delete(id)
-                                          _ <- repos.savingsAccounts.updateBalance(txn.accountId, newBalance)
-                                        } yield updatedAccount
-                                      case None      =>
-                                        IO.raiseError(new Exception(s"Account not found: ${txn.accountId.value}"))
-                                    }
-                    } yield Right(account)
+                      _       <- repos.savingsTransactions.delete(id)
+                      updated <- repos.accounts.adjustBalance(txn.accountId, -txn.amount, now)
+                    } yield updated.toRight(s"Account not found: ${txn.accountId.value}")
                   case None      =>
                     IO.pure(Left(s"Savings transaction not found: ${id.value}"))
                 }

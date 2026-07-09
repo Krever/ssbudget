@@ -2,8 +2,8 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
-import ssbudget.frontend.components.Loading
-import ssbudget.frontend.services.DataService
+import ssbudget.frontend.components.{Badges, Loading}
+import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.shared.model.*
 
@@ -15,11 +15,25 @@ import scala.concurrent.ExecutionContext.Implicits.global
 object DashboardPage {
 
   private val dataService = DataService.instance
+  private val api         = new ApiClient()
 
-  private val isEditingBalances     = Var(false)
-  private val editedBalances        = Var(Map.empty[AccountId, Long])
-  private val editedSavingsBalances = Var(Map.empty[SavingsAccountId, Long])
-  private val copyButtonText        = Var("Copy Summary")
+  private val isEditingBalances = Var(false)
+  private val editedBalances    = Var(Map.empty[AccountId, Long])
+  private val copyButtonText    = Var("Copy Summary")
+  private val syncingBanks      = Var(false)
+
+  /** When the balance was last driven by a bank sync (max over externally-sourced accounts). */
+  private val lastSyncedAt: Signal[Option[Instant]] =
+    dataService.accounts.map(_.filterNot(_.isManual).flatMap(_.balanceUpdatedAt).maxOption)
+
+  private def syncBanks(): Unit = {
+    syncingBanks.set(true)
+    api.banking
+      .connections()
+      .flatMap(conns => Future.traverse(conns)(c => api.banking.sync(c.connection.id)))
+      .flatMap(_ => dataService.initialize())
+      .onComplete(_ => syncingBanks.set(false))
+  }
 
   def apply(): HtmlElement = {
     div(
@@ -148,32 +162,47 @@ object DashboardPage {
       cls := "card",
       div(
         cls := "card-header py-2 d-flex justify-content-between align-items-center",
-        span("Accounts"),
-        child <-- isEditingBalances.signal.map { isEditing =>
-          if isEditing then div(
-            cls   := "btn-group btn-group-sm",
-            Loading.actionButton(
-              "Save All",
-              () => saveAllBalances(),
-              "btn btn-success btn-sm py-0",
-            ),
-            button(
-              cls := "btn btn-secondary btn-sm py-0",
-              "Cancel",
-              onClick --> { _ =>
-                isEditingBalances.set(false)
-                editedBalances.set(Map.empty)
-                editedSavingsBalances.set(Map.empty)
-              },
-            ),
-          )
-          else
-            button(
-              cls := "btn btn-sm btn-outline-primary py-0",
-              "Edit Balances",
-              onClick --> { _ => startEditingBalances() },
+        div(
+          cls := "d-flex align-items-baseline gap-2",
+          span("Accounts"),
+          child.maybe <-- lastSyncedAt.map(_.map(t => small(cls := "text-muted", s"synced ${Formatting.formatDateTime(t)}"))),
+        ),
+        div(
+          cls := "btn-group btn-group-sm",
+          button(
+            cls := "btn btn-outline-primary py-0",
+            disabled <-- syncingBanks.signal,
+            child <-- syncingBanks.signal.map { syncing =>
+              if syncing then span(span(cls := "spinner-border spinner-border-sm me-1"), "Syncing...")
+              else span("Sync banks")
+            },
+            onClick --> { _ => syncBanks() },
+          ),
+          child <-- isEditingBalances.signal.map { isEditing =>
+            if isEditing then div(
+              cls   := "btn-group btn-group-sm",
+              Loading.actionButton(
+                "Save All",
+                () => saveAllBalances(),
+                "btn btn-success btn-sm py-0",
+              ),
+              button(
+                cls := "btn btn-secondary btn-sm py-0",
+                "Cancel",
+                onClick --> { _ =>
+                  isEditingBalances.set(false)
+                  editedBalances.set(Map.empty)
+                },
+              ),
             )
-        },
+            else
+              button(
+                cls := "btn btn-sm btn-outline-primary py-0",
+                "Edit Balances",
+                onClick --> { _ => startEditingBalances() },
+              )
+          },
+        ),
       ),
       div(
         cls := "card-body p-0",
@@ -181,12 +210,11 @@ object DashboardPage {
           cls := "table table-sm table-hover mb-0",
           thead(tr(th("Account"), th(cls := "text-end", "Balance"))),
           tbody(
-            // Bank accounts
-            children <-- dataService.accounts
-              .combineWith(dataService.balanceSnapshots)
+            // Spending accounts
+            children <-- dataService.spendingAccounts
               .combineWith(isEditingBalances.signal)
-              .map { case (accounts, snapshots, isEditing) =>
-                accounts.map(account => bankAccountQuickRow(account, snapshots.find(_.accountId == account.id), isEditing))
+              .map { case (accounts, isEditing) =>
+                accounts.map(account => accountQuickRow(account, isEditing))
               },
             // Separator
             tr(cls := "table-secondary", td(colSpan := 2, cls := "py-1 small text-muted", "— Savings —")),
@@ -194,7 +222,7 @@ object DashboardPage {
             children <-- dataService.savingsAccounts
               .combineWith(isEditingBalances.signal)
               .map { case (accounts, isEditing) =>
-                accounts.map(account => savingsAccountQuickRow(account, isEditing))
+                accounts.map(account => accountQuickRow(account, isEditing))
               },
           ),
         ),
@@ -207,12 +235,16 @@ object DashboardPage {
     )
   }
 
-  private def bankAccountQuickRow(account: Account, balanceOpt: Option[BalanceSnapshot], isEditing: Boolean): HtmlElement = {
-    val currentAmount = balanceOpt.map(_.amount).getOrElse(0L)
+  private def accountQuickRow(account: Account, isEditing: Boolean): HtmlElement = {
+    val nameCell    = td(account.name, Badges.source(account.balanceSource))
+    val balanceView = MoneyFormatter.format(account.balanceCents, account.currency)
 
-    if isEditing then tr(
+    if isEditing && !account.isManual then
+    // Bank/card-driven balance: not manually editable, updated via Sync banks.
+    tr(nameCell, td(cls := "text-end font-monospace text-muted", balanceView))
+    else if isEditing then tr(
       cls := "table-info",
-      td(account.name),
+      nameCell,
       td(
         div(
           cls := "input-group input-group-sm",
@@ -220,54 +252,22 @@ object DashboardPage {
             cls          := "form-control form-control-sm text-end",
             tpe          := "number",
             stepAttr     := "0.01",
-            defaultValue := (currentAmount / 100.0).toString,
+            defaultValue := (account.balanceCents / 100.0).toString,
             onInput.mapToValue --> { v => v.toDoubleOption.foreach(d => editedBalances.update(_.updated(account.id, (d * 100).toLong))) },
           ),
           span(cls       := "input-group-text py-0", account.currency.code),
         ),
       ),
     )
-    else
-      tr(
-        td(account.name),
-        td(cls := "text-end font-monospace", balanceOpt.fold[HtmlElement](span("-"))(b => MoneyFormatter.format(b.amount, b.currency))),
-      )
-  }
-
-  private def savingsAccountQuickRow(account: SavingsAccount, isEditing: Boolean): HtmlElement = {
-    if isEditing then tr(
-      cls := "table-info",
-      td(account.name),
-      td(
-        div(
-          cls := "input-group input-group-sm",
-          input(
-            cls          := "form-control form-control-sm text-end",
-            tpe          := "number",
-            stepAttr     := "0.01",
-            defaultValue := (account.currentBalance / 100.0).toString,
-            onInput.mapToValue --> { v => v.toDoubleOption.foreach(d => editedSavingsBalances.update(_.updated(account.id, (d * 100).toLong))) },
-          ),
-          span(cls       := "input-group-text py-0", account.currency.code),
-        ),
-      ),
-    )
-    else tr(td(account.name), td(cls := "text-end font-monospace", MoneyFormatter.format(account.currentBalance, account.currency)))
+    else tr(nameCell, td(cls := "text-end font-monospace", balanceView))
   }
 
   private def startEditingBalances(): Unit = {
     import com.raquo.airstream.ownership.OneTimeOwner
     given owner: OneTimeOwner = new OneTimeOwner(() => ())
 
-    val accounts        = dataService.accounts.observe.now()
-    val snapshots       = dataService.balanceSnapshots.observe.now()
-    val savingsAccounts = dataService.savingsAccounts.observe.now()
-
-    val initialBankBalances    = accounts.map(acc => acc.id -> snapshots.find(_.accountId == acc.id).map(_.amount).getOrElse(0L)).toMap
-    val initialSavingsBalances = savingsAccounts.map(acc => acc.id -> acc.currentBalance).toMap
-
-    editedBalances.set(initialBankBalances)
-    editedSavingsBalances.set(initialSavingsBalances)
+    val accounts = dataService.accounts.observe.now()
+    editedBalances.set(accounts.map(acc => acc.id -> acc.balanceCents).toMap)
     isEditingBalances.set(true)
   }
 
@@ -275,19 +275,17 @@ object DashboardPage {
     import com.raquo.airstream.ownership.OneTimeOwner
     given owner: OneTimeOwner = new OneTimeOwner(() => ())
 
-    val accounts    = dataService.accounts.observe.now()
-    val edited      = editedBalances.now()
-    val bankFutures = accounts.flatMap(acc => edited.get(acc.id).map(amount => dataService.updateAccountBalance(acc.id, amount)))
+    val accounts = dataService.accounts.observe.now()
+    val edited   = editedBalances.now()
+    // Only manual-source accounts are editable; bank/card-group balances are driven by Sync.
+    val futures  =
+      accounts
+        .filter(_.isManual)
+        .flatMap(acc => edited.get(acc.id).map(amount => dataService.updateAccountBalance(acc.id, amount)))
 
-    val savingsAccounts = dataService.savingsAccounts.observe.now()
-    val editedSavings   = editedSavingsBalances.now()
-    val savingsFutures  =
-      savingsAccounts.flatMap(acc => editedSavings.get(acc.id).map(amount => dataService.updateSavingsAccountBalance(acc.id, amount)))
-
-    Future.sequence(bankFutures ++ savingsFutures).map { _ =>
+    Future.sequence(futures).map { _ =>
       isEditingBalances.set(false)
       editedBalances.set(Map.empty)
-      editedSavingsBalances.set(Map.empty)
     }
   }
 
