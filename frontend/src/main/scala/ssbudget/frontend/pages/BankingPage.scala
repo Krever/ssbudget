@@ -13,6 +13,7 @@ import ssbudget.shared.api.{
   ImportTransactionsRequest,
   LinkAccountRequest,
   LinkCardGroupRequest,
+  SyncAllResult,
 }
 import ssbudget.shared.model.{
   Account,
@@ -47,6 +48,7 @@ object BankingPage {
     val connectingVar  = Var(false)
     val syncingVar     = Var(Set.empty[String]) // connection ids currently syncing
     val importingVar   = Var(Set.empty[String]) // connection ids currently importing transactions
+    val syncingAllVar  = Var(false)             // the one-shot "sync all banks" action is running
 
     def loadConnections(): Unit =
       apiClient.banking.connections().onComplete {
@@ -171,6 +173,23 @@ object BankingPage {
       }
     }
 
+    def syncAll(): Unit = {
+      syncingAllVar.set(true)
+      errorVar.set(None)
+      successVar.set(None)
+      apiClient.banking.syncAll().onComplete {
+        case Success(r: SyncAllResult) =>
+          syncingAllVar.set(false)
+          connectionsVar.set(r.connections)
+          loadAccounts()
+          successVar.set(Some(s"Synced ${r.synced} bank(s); imported ${r.imported} new transaction(s). Refresh the app to see updated balances."))
+          if r.errors.nonEmpty then errorVar.set(Some("Some banks had issues: " + r.errors.mkString("; ")))
+        case Failure(ex)               =>
+          syncingAllVar.set(false)
+          errorVar.set(Some(s"Sync all failed: ${ex.getMessage}"))
+      }
+    }
+
     def importTx(id: BankConnectionId, monthsBack: Option[Int]): Unit = {
       importingVar.update(_ + id.value)
       errorVar.set(None)
@@ -195,7 +214,19 @@ object BankingPage {
         loadAccounts()
         loadAspsps()
       },
-      h2(cls := "mb-4", "Bank Connections"),
+      div(
+        cls := "d-flex justify-content-between align-items-center mb-4",
+        h2(cls := "mb-0", "Bank Connections"),
+        button(
+          cls  := "btn btn-primary",
+          disabled <-- syncingAllVar.signal.combineWith(connectionsVar.signal).map { case (busy, conns) => busy || conns.isEmpty },
+          onClick --> { _ => syncAll() },
+          child <-- syncingAllVar.signal.map { busy =>
+            if busy then span(span(cls := "spinner-border spinner-border-sm me-1"), "Syncing all…")
+            else span("↻ Sync all banks")
+          },
+        ),
+      ),
       child.maybe <-- errorVar.signal.map(_.map { error =>
         div(
           cls := "alert alert-danger alert-dismissible",

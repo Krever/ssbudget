@@ -117,6 +117,25 @@ class BankTransactionRepositorySpec extends RepositorySpec {
     }
   }
 
+  "setNote sets and clears a note, and the note survives a re-import (upsert)" in {
+    val repo = new BankTransactionRepositoryImpl(xa)
+    for {
+      _             <- repo.insertNew(tx("t-1", "uid-1", "r-1", amountCents = -1000))
+      _             <- repo.setNote(BankTransactionId("t-1"), Some("dinner with friends"))
+      withNote      <- repo.findById(BankTransactionId("t-1"))
+      // same (uid, dedupKey) → upsert refreshes bank fields but must preserve the user's note
+      _             <- repo.insertNew(tx("t-1-again", "uid-1", "r-1", amountCents = -2500))
+      afterReimport <- repo.findById(BankTransactionId("t-1"))
+      _             <- repo.setNote(BankTransactionId("t-1"), None)
+      cleared       <- repo.findById(BankTransactionId("t-1"))
+    } yield {
+      withNote.flatMap(_.note) shouldBe Some("dinner with friends")
+      afterReimport.flatMap(_.note) shouldBe Some("dinner with friends") // note preserved across re-import
+      afterReimport.map(_.amountCents) shouldBe Some(-2500)              // bank-derived field refreshed
+      cleared.flatMap(_.note) shouldBe None
+    }
+  }
+
   "applyCategoryUpdates batch-updates category and source" in {
     val repo    = new BankTransactionRepositoryImpl(xa)
     val catRepo = new CategoryRepositoryImpl(xa)
@@ -283,7 +302,7 @@ class BankTransactionRepositorySpec extends RepositorySpec {
     }
   }
 
-  "monthlySpendByCategory breaks spend down per YYYY-MM (so a doubled month can be medianed away)" in {
+  "monthlySpendByCategory breaks spend down per YYYY-MM (powers the per-category monthly average + analytics)" in {
     val repo    = new BankTransactionRepositoryImpl(xa)
     val catRepo = new CategoryRepositoryImpl(xa)
     for {
@@ -304,7 +323,7 @@ class BankTransactionRepositorySpec extends RepositorySpec {
       rows <- repo.monthlySpendByCategory(Instant.parse("2026-04-01T00:00:00Z"), Instant.parse("2026-07-01T00:00:00Z"))
     } yield {
       rows.map(r => (r._3, r._4)).sortBy(_._1) shouldBe List(("2026-04", 1500L), ("2026-05", 3000L), ("2026-06", 1500L))
-      // The mean would be (1500+3000+1500)/3 = 2000; the median of the three months is 1500 — the true monthly figure.
+      // Two May payments collapse into one bucket (3000); the mean over the Apr–Jun active span is (1500+3000+1500)/3 = 2000.
     }
   }
 

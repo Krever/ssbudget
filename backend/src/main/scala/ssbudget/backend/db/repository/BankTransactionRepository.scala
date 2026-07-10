@@ -73,6 +73,9 @@ trait BankTransactionRepository {
     */
   def setCategory(id: BankTransactionId, categoryId: Option[CategoryId]): IO[Unit]
   def clearCategory(categoryId: CategoryId): IO[Unit]
+
+  /** Set (or clear, when None) a transaction's free-text note. */
+  def setNote(id: BankTransactionId, note: Option[String]): IO[Unit]
   def deleteByConnection(connectionId: BankConnectionId): IO[Unit]
 
   /** Apply the rule engine's decisions in one transaction: each tuple sets a row's (category_id, category_source). Only changed rows should be
@@ -89,7 +92,7 @@ trait BankTransactionRepository {
 class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionRepository {
 
   private val columns =
-    fr"id, connection_id, eb_account_uid, entry_reference, dedup_key, amount_cents, currency, status, booked_at, counterparty_name, counterparty_account, remittance, bank_transaction_code, category_id, raw_json, imported_at, is_internal, category_source"
+    fr"id, connection_id, eb_account_uid, entry_reference, dedup_key, amount_cents, currency, status, booked_at, counterparty_name, counterparty_account, remittance, bank_transaction_code, category_id, raw_json, imported_at, is_internal, category_source, note"
 
   override def insertNew(tx: BankTransaction): IO[Boolean] = {
     val program = for {
@@ -99,10 +102,10 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
       _       <- sql"""
         INSERT INTO bank_transactions
           (id, connection_id, eb_account_uid, entry_reference, dedup_key, amount_cents, currency, status, booked_at,
-           counterparty_name, counterparty_account, remittance, bank_transaction_code, category_id, raw_json, imported_at, is_internal, category_source)
+           counterparty_name, counterparty_account, remittance, bank_transaction_code, category_id, raw_json, imported_at, is_internal, category_source, note)
         VALUES (${tx.id}, ${tx.connectionId}, ${tx.ebAccountUid}, ${tx.entryReference}, ${tx.dedupKey}, ${tx.amountCents}, ${tx.currency},
                 ${tx.status}, ${tx.bookedAt}, ${tx.counterpartyName}, ${tx.counterpartyAccount}, ${tx.remittance},
-                ${tx.bankTransactionCode}, ${tx.categoryId}, ${tx.rawJson}, ${tx.importedAt}, ${tx.internal}, ${tx.categorySource})
+                ${tx.bankTransactionCode}, ${tx.categoryId}, ${tx.rawJson}, ${tx.importedAt}, ${tx.internal}, ${tx.categorySource}, ${tx.note})
         ON CONFLICT(eb_account_uid, dedup_key) DO UPDATE SET
           connection_id = excluded.connection_id, entry_reference = excluded.entry_reference, amount_cents = excluded.amount_cents,
           currency = excluded.currency, status = excluded.status, booked_at = excluded.booked_at,
@@ -210,6 +213,9 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
 
   override def clearCategory(categoryId: CategoryId): IO[Unit] =
     sql"UPDATE bank_transactions SET category_id = NULL, category_source = NULL WHERE category_id = $categoryId".update.run.transact(xa).void
+
+  override def setNote(id: BankTransactionId, note: Option[String]): IO[Unit] =
+    sql"UPDATE bank_transactions SET note = $note WHERE id = $id".update.run.transact(xa).void
 
   override def applyCategoryUpdates(updates: List[(BankTransactionId, Option[CategoryId], Option[CategorySource])]): IO[Unit] =
     if updates.isEmpty then IO.unit

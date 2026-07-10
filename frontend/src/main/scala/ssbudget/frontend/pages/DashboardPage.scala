@@ -28,9 +28,9 @@ object DashboardPage {
 
   private def syncBanks(): Unit = {
     syncingBanks.set(true)
+    // One call syncs balances AND imports transactions across all connections (resilient to a single bank failing).
     api.banking
-      .connections()
-      .flatMap(conns => Future.traverse(conns)(c => api.banking.sync(c.connection.id)))
+      .syncAll()
       .flatMap(_ => dataService.initialize())
       .onComplete(_ => syncingBanks.set(false))
   }

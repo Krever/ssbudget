@@ -36,21 +36,22 @@ final case class BankTransaction(
     id: BankTransactionId,
     connectionId: BankConnectionId,
     ebAccountUid: String,
-    entryReference: Option[String],        // the bank's own transaction id, when present
-    dedupKey: String,                      // entryReference if present, else a stable hash of the salient fields
-    amountCents: Long,                     // signed: negative = debit/outflow, positive = credit/inflow
+    entryReference: Option[String],         // the bank's own transaction id, when present
+    dedupKey: String,                       // entryReference if present, else a stable hash of the salient fields
+    amountCents: Long,                      // signed: negative = debit/outflow, positive = credit/inflow
     currency: Currency,
     status: TransactionStatus,
-    bookedAt: Instant,                     // booking date (falls back to value/transaction date) — drives period assignment + display
+    bookedAt: Instant,                      // booking date (falls back to value/transaction date) — drives period assignment + display
     counterpartyName: Option[String],
     counterpartyAccount: Option[String],
-    remittance: Option[String],            // remittance_information, joined
+    remittance: Option[String],             // remittance_information, joined
     bankTransactionCode: Option[String],
-    categoryId: Option[CategoryId],        // None = uncategorized
-    rawJson: String,                       // full Enable Banking payload, always retained
+    categoryId: Option[CategoryId],         // None = uncategorized
+    rawJson: String,                        // full Enable Banking payload, always retained
     importedAt: Instant,
-    internal: Boolean,                     // true when this is a transfer between the user's own accounts (built-in rule)
+    internal: Boolean,                      // true when this is a transfer between the user's own accounts (built-in rule)
     categorySource: Option[CategorySource], // who set categoryId (Manual wins over Rule); None when uncategorized
+    note: Option[String] = None,            // user's free-text comment; preserved across re-imports
 ) derives Codec.AsObject {
   def money: Money       = Money(amountCents, currency)
   def isOutflow: Boolean = amountCents < 0

@@ -91,6 +91,7 @@ object Routes {
       route(Endpoints.banking.disconnect)(id => bankingService.disconnect(id)),
       route(Endpoints.banking.linkAccount) { case (linkId, req) => bankingService.linkAccount(linkId, req) },
       route(Endpoints.banking.sync)(id => bankingService.sync(id)),
+      route(Endpoints.banking.syncAll)(_ => syncAllConnections(repos, bankingService, importService)),
       route(Endpoints.banking.listCardGroups)(_ => bankingService.listCardGroups.map(Right(_))),
       route(Endpoints.banking.createCardGroup)(dto => bankingService.createCardGroup(dto)),
       route(Endpoints.banking.deleteCardGroup)(id => bankingService.deleteCardGroup(id)),
@@ -102,6 +103,7 @@ object Routes {
       },
       route(Endpoints.transactions.months)(_ => repos.bankTransactions.distinctMonths().map(Right(_))),
       route(Endpoints.transactions.setCategory) { case (id, dto) => setTransactionCategory(repos)(id, dto) },
+      route(Endpoints.transactions.setNote) { case (id, dto) => setTransactionNote(repos)(id, dto) },
       // Categories
       route(Endpoints.categories.list)(_ => repos.categories.findAll.map(Right(_))),
       route(Endpoints.categories.summaries)(_ => categorySummaries(repos)),
@@ -423,6 +425,38 @@ object Routes {
     }
   }
 
+  /** One-shot "sync everything": for each authorized connection, sync balances then import transactions (incremental). Resilient — a connection that
+    * fails (e.g. expired consent) is recorded in `errors` and the rest still complete. Runs connections sequentially to be gentle on the bank APIs.
+    * Balance sync and import are attempted independently so one failing doesn't suppress the other.
+    */
+  private def syncAllConnections(
+      repos: Repositories,
+      bankingService: BankingService,
+      importService: TransactionImportService,
+  ): Result[SyncAllResult] =
+    for {
+      conns    <- repos.bankConnections.findAll
+      active    = conns.filter(_.sessionId.isDefined) // skip connections still pending authorization
+      outcomes <- active.traverse { conn =>
+                    for {
+                      syncE <- bankingService.sync(conn.id).handleError(t => Left(t.getMessage))
+                      impE  <- importService.importTransactions(conn.id, ImportTransactionsRequest(None)).handleError(t => Left(t.getMessage))
+                    } yield {
+                      val errs = List(
+                        syncE.left.toOption.map(e => s"${conn.aspspName}: balance sync — $e"),
+                        impE.left.toOption.map(e => s"${conn.aspspName}: import — $e"),
+                      ).flatten
+                      (impE.toOption, errs)
+                    }
+                  }
+      views    <- bankingService.listConnections
+    } yield {
+      val imports = outcomes.flatMap(_._1)
+      val errors  = outcomes.flatMap(_._2)
+      val synced  = outcomes.count(_._2.isEmpty)
+      Right(SyncAllResult(views, imports.map(_.totalImported).sum, imports.map(_.totalSkipped).sum, synced, errors))
+    }
+
   /** Live rule preview: run the shared matcher over all stored transactions server-side (the browser no longer holds them). */
   private def previewRule(repos: Repositories)(req: RulePreviewRequest): Result[RulePreviewResponse] =
     repos.bankTransactions.list(None, None, None).map { all =>
@@ -449,6 +483,17 @@ object Routes {
     } yield result
   }
 
+  private def setTransactionNote(repos: Repositories)(id: BankTransactionId, dto: SetNoteRequest): Result[BankTransaction] =
+    for {
+      txOpt  <- repos.bankTransactions.findById(id)
+      result <- txOpt match {
+                  case None     => IO.pure(Left(s"Transaction not found: ${id.value}"))
+                  case Some(tx) =>
+                    val cleaned = dto.note.map(_.trim).filter(_.nonEmpty) // blank note clears it
+                    repos.bankTransactions.setNote(id, cleaned).as(Right(tx.copy(note = cleaned)))
+                }
+    } yield result
+
   private def createCategory(repos: Repositories)(dto: CreateCategory): Result[Category] = {
     val category = Category(CategoryId(UUID.randomUUID().toString), dto.name, dto.color, dto.monthlyBudget)
     repos.categories.create(category).as(Right(category))
@@ -466,19 +511,31 @@ object Routes {
     } yield result
   }
 
-  /** Median of the (zero-filled) values, rounded down for the even case. Robust to a single outlier month. */
-  private def median(values: List[Long]): Long =
-    if values.isEmpty then 0L
+  /** Month index (year*12 + month) for a "YYYY-MM" bucket, so we can count how many calendar months a range spans. */
+  private def monthIndex(ym: String): Int =
+    ym.split("-") match {
+      case Array(y, m) => y.toInt * 12 + m.toInt
+      case _           => 0
+    }
+
+  /** Mean monthly spend over the category's ACTIVE span: total spend divided by the number of calendar months from its first to its last
+    * month-with-spend (inclusive). `monthMap` holds only months that actually had spend (primary-currency cents), so its min/max keys are the active
+    * span — empty months before the first / after the last are NOT counted (a recently-started or long-dormant category isn't diluted by leading or
+    * trailing zeros), while interior gap months are counted as zero (amortised).
+    */
+  private def monthlyMean(monthMap: Map[String, Long]): Long =
+    if monthMap.isEmpty then 0L
     else {
-      val sorted = values.sorted
-      val n      = sorted.length
-      if n % 2 == 1 then sorted(n / 2) else (sorted(n / 2 - 1) + sorted(n / 2)) / 2
+      val idxs = monthMap.keys.map(monthIndex)
+      val span = idxs.max - idxs.min + 1
+      if span <= 0 then 0L else monthMap.values.sum / span
     }
 
   /** Per-category spend stats, all converted to the primary currency at the latest rates (so a category with mixed-currency transactions is counted
     * in full, not just its dominant currency):
-    *   - `avgMonthlyCents` = MEDIAN of the last 3 full calendar months' spend (each month zero-filled). Using the median instead of the mean keeps a
-    *     month that happens to contain two payments of a monthly bill (or a payment that slipped from an adjacent month) from inflating the budget.
+    *   - `avgMonthlyCents` = MEAN monthly spend over the category's active span (see [[monthlyMean]]): total completed-month spend divided by the
+    *     number of months from its first to its last month-with-spend. The in-progress current month is excluded (a partial month would deflate the
+    *     mean), and empty leading/trailing months don't count.
     *   - `currentPeriodSpentCents` = spend since the current period started.
     *   - `currency` = the primary currency.
     */
@@ -493,10 +550,9 @@ object Routes {
       now          = java.time.LocalDate.now(java.time.ZoneOffset.UTC)
       firstOfMonth = now.withDayOfMonth(1)
       currentMonth = firstOfMonth.atStartOfDay(java.time.ZoneOffset.UTC).toInstant
-      windowStart  = firstOfMonth.minusMonths(3).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
-      windowMonths = (1 to 3).map(i => firstOfMonth.minusMonths(i)).map(d => f"${d.getYear}-${d.getMonthValue}%02d").toList
       periodStart  = periodOpt.map(_.startDate).getOrElse(currentMonth)
-      avgRows     <- repos.bankTransactions.monthlySpendByCategory(windowStart, currentMonth)
+      // All completed-month spend (the in-progress current month is excluded by the `< currentMonth` upper bound), per (cat, currency, YYYY-MM).
+      histRows    <- repos.bankTransactions.monthlySpendByCategory(java.time.Instant.EPOCH, currentMonth)
       curRows     <- repos.bankTransactions.spendByCategoryBetween(periodStart, None)
     } yield {
       val rateMap                                     = rateList.flatten.map(r => r.fromCurrency -> r).toMap
@@ -504,21 +560,20 @@ object Routes {
       def toPrimary(cents: Long, cur: Currency): Long =
         if cur == primary then cents else rateMap.get(cur).map(_.convert(Money(cents, cur)).amountCents).getOrElse(cents)
 
-      // category -> (YYYY-MM -> primary-currency spend, summed across currencies)
-      val avgByCatMonth = avgRows
+      // category -> (YYYY-MM -> primary-currency spend, summed across currencies); only months that had spend are present.
+      val byCatMonth = histRows
         .groupBy(_._1)
         .view
         .mapValues(rows => rows.groupBy(_._3).view.mapValues(_.map { case (_, cur, _, cents) => toPrimary(cents, cur) }.sum).toMap)
         .toMap
-      val curByCat      = curRows
+      val curByCat   = curRows
         .groupBy(_._1)
         .view
         .mapValues(_.map { case (_, cur, cents) => toPrimary(cents, cur) }.sum)
         .toMap
       Right(cats.map { cat =>
-        val monthMap = avgByCatMonth.getOrElse(cat.id, Map.empty[String, Long])
-        val monthly  = windowMonths.map(m => monthMap.getOrElse(m, 0L)) // zero-fill months with no spend
-        CategorySummary(cat, avgMonthlyCents = median(monthly), currentPeriodSpentCents = curByCat.getOrElse(cat.id, 0L), currency = primary)
+        val monthMap = byCatMonth.getOrElse(cat.id, Map.empty[String, Long])
+        CategorySummary(cat, avgMonthlyCents = monthlyMean(monthMap), currentPeriodSpentCents = curByCat.getOrElse(cat.id, 0L), currency = primary)
       })
     }
 

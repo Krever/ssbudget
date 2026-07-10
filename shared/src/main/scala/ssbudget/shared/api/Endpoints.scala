@@ -181,6 +181,13 @@ object Endpoints {
         .out(jsonBody[List[BankConnectionView]])
         .errorOut(stringBody)
 
+    /** Sync balances + import transactions (incremental) across all authorized connections in one call. */
+    val syncAll: Secured[Unit, SyncAllResult] =
+      secureEndpoint.post
+        .in("banking" / "sync-all")
+        .out(jsonBody[SyncAllResult])
+        .errorOut(stringBody)
+
     val listCardGroups: Secured[Unit, List[CardGroup]] =
       secureEndpoint.get.in("banking" / "card-groups").out(jsonBody[List[CardGroup]]).errorOut(stringBody)
 
@@ -233,6 +240,13 @@ object Endpoints {
       secureEndpoint.post
         .in("transactions" / path[BankTransactionId]("id") / "category")
         .in(jsonBody[SetCategoryRequest])
+        .out(jsonBody[BankTransaction])
+        .errorOut(stringBody)
+
+    val setNote: Secured[(BankTransactionId, SetNoteRequest), BankTransaction] =
+      secureEndpoint.post
+        .in("transactions" / path[BankTransactionId]("id") / "note")
+        .in(jsonBody[SetNoteRequest])
         .out(jsonBody[BankTransaction])
         .errorOut(stringBody)
   }
@@ -423,6 +437,7 @@ object Endpoints {
     banking.disconnect,
     banking.linkAccount,
     banking.sync,
+    banking.syncAll,
     banking.listCardGroups,
     banking.createCardGroup,
     banking.deleteCardGroup,
@@ -431,6 +446,7 @@ object Endpoints {
     transactions.list,
     transactions.months,
     transactions.setCategory,
+    transactions.setNote,
     categories.list,
     categories.summaries,
     categories.create,
@@ -569,6 +585,12 @@ object Endpoints {
           .out(jsonBody[List[BankConnectionView]])
           .errorOut(stringBody)
 
+      val syncAll: Client[Unit, SyncAllResult] =
+        baseEndpoint.post
+          .in("banking" / "sync-all")
+          .out(jsonBody[SyncAllResult])
+          .errorOut(stringBody)
+
       val listCardGroups: Client[Unit, List[CardGroup]] =
         baseEndpoint.get.in("banking" / "card-groups").out(jsonBody[List[CardGroup]]).errorOut(stringBody)
 
@@ -617,6 +639,13 @@ object Endpoints {
         baseEndpoint.post
           .in("transactions" / path[BankTransactionId]("id") / "category")
           .in(jsonBody[SetCategoryRequest])
+          .out(jsonBody[BankTransaction])
+          .errorOut(stringBody)
+
+      val setNote: Client[(BankTransactionId, SetNoteRequest), BankTransaction] =
+        baseEndpoint.post
+          .in("transactions" / path[BankTransactionId]("id") / "note")
+          .in(jsonBody[SetNoteRequest])
           .out(jsonBody[BankTransaction])
           .errorOut(stringBody)
     }

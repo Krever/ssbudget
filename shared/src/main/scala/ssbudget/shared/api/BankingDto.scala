@@ -39,6 +39,18 @@ final case class ImportResult(accounts: List[AccountImportResult]) derives Codec
   def totalSkipped: Int  = accounts.map(_.skipped).sum
 }
 
+/** Outcome of the one-shot "sync everything" action: balances synced + transactions imported (incremental) across all authorized connections.
+  * `synced` counts connections that completed cleanly; `errors` holds one human-readable line per connection that had a problem — the rest still
+  * complete, so one expired consent doesn't block the other banks.
+  */
+final case class SyncAllResult(
+    connections: List[BankConnectionView],
+    imported: Int,
+    skipped: Int,
+    synced: Int,
+    errors: List[String],
+) derives Codec.AsObject
+
 /** A page of transactions matching the server-side filters, plus the total number that match (before the display cap) and the net signed sum per
   * currency over the FULL match (`sums`) so the UI can show a reliable total even when `items` is capped.
   */
@@ -47,6 +59,9 @@ final case class TransactionListResponse(items: List[BankTransaction], total: In
 /** Assign (or clear, when None) a transaction's spending category. */
 final case class SetCategoryRequest(categoryId: Option[CategoryId]) derives Codec.AsObject
 
+/** Set (or clear, when None/blank) a transaction's free-text note. */
+final case class SetNoteRequest(note: Option[String]) derives Codec.AsObject
+
 final case class CreateCategory(name: String, color: Option[String], monthlyBudget: Boolean = false) derives Codec.AsObject
 
 final case class UpdateCategory(name: String, color: Option[String], monthlyBudget: Boolean = false) derives Codec.AsObject
@@ -54,8 +69,9 @@ final case class UpdateCategory(name: String, color: Option[String], monthlyBudg
 /** Spending stats for a category, computed server-side from bank transactions (the browser no longer holds them). All amounts are converted to the
   * primary currency at the latest rates, so a category with mixed-currency transactions is counted in full.
   *
-  *   - `avgMonthlyCents`: MEDIAN monthly outflow over the last 3 full calendar months (the budget when `category.monthlyBudget`); median, not mean,
-  *     so a month that happens to hold two payments of a monthly bill doesn't inflate it.
+  *   - `avgMonthlyCents`: MEAN monthly outflow over the category's active span — total completed-month spend divided by the number of months from its
+  *     first to its last month-with-spend (the budget when `category.monthlyBudget`). The in-progress current month is excluded and empty
+  *     leading/trailing months don't count, so a recently-started or dormant category isn't diluted by zeros.
   *   - `currentPeriodSpentCents`: outflow since the current budget period started.
   *   - `currency`: the primary currency (all category spend is converted to it).
   */

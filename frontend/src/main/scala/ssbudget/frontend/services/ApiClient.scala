@@ -201,6 +201,11 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request(id)).map(handleResponse)
     }
 
+    def syncAll(): Future[SyncAllResult] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.syncAll, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
     def listCardGroups(): Future[List[CardGroup]] = {
       val request = interpreter.toRequest(Endpoints.client.banking.listCardGroups, Some(baseUri))
       backend.send(request(())).map(handleResponse)
@@ -248,6 +253,11 @@ class ApiClient(implicit ec: ExecutionContext) {
 
     def setCategory(id: BankTransactionId, req: SetCategoryRequest): Future[BankTransaction] = {
       val request = interpreter.toRequest(Endpoints.client.transactions.setCategory, Some(baseUri))
+      backend.send(request((id, req))).map(handleResponse)
+    }
+
+    def setNote(id: BankTransactionId, req: SetNoteRequest): Future[BankTransaction] = {
+      val request = interpreter.toRequest(Endpoints.client.transactions.setNote, Some(baseUri))
       backend.send(request((id, req))).map(handleResponse)
     }
   }

@@ -6,7 +6,16 @@ import org.scalajs.dom
 import ssbudget.frontend.components.{CategoryCombobox, RuleModal}
 import ssbudget.frontend.services.ApiClient
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
-import ssbudget.shared.api.{BankConnectionView, CategorySummary, CreateCategory, ImportRulesRequest, RulesExport, SetCategoryRequest, UpdateCategory}
+import ssbudget.shared.api.{
+  BankConnectionView,
+  CategorySummary,
+  CreateCategory,
+  ImportRulesRequest,
+  RulesExport,
+  SetCategoryRequest,
+  SetNoteRequest,
+  UpdateCategory,
+}
 import ssbudget.shared.model.{BankTransaction, Category, CategoryId, ClassificationRule, ClassificationRuleId, Money, TransactionStatus}
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -98,6 +107,12 @@ object TransactionsPage {
         case Failure(ex)      => errorVar.set(Some(s"Failed to set category: ${ex.getMessage}"))
       }
 
+    def setNote(txId: ssbudget.shared.model.BankTransactionId, note: Option[String]): Unit =
+      apiClient.transactions.setNote(txId, SetNoteRequest(note)).onComplete {
+        case Success(updated) => txVar.update(_.map(t => if t.id == updated.id then updated else t))
+        case Failure(ex)      => errorVar.set(Some(s"Failed to save note: ${ex.getMessage}"))
+      }
+
     div(
       cls := "container-fluid mt-3",
       onMountCallback { _ =>
@@ -137,6 +152,7 @@ object TransactionsPage {
         sortAsc,
         loadingVar.signal,
         setCategory,
+        setNote,
         tx => ruleModalState.set(Some(RuleModal.fromTransaction(tx))),
         apiClient,
         () => { loadCategories(); loadSummaries() },
@@ -241,6 +257,7 @@ object TransactionsPage {
       sortAsc: Var[Boolean],
       loading: Signal[Boolean],
       setCategory: (ssbudget.shared.model.BankTransactionId, Option[CategoryId]) => Unit,
+      setNote: (ssbudget.shared.model.BankTransactionId, Option[String]) => Unit,
       onCreateRule: BankTransaction => Unit,
       apiClient: ApiClient,
       onCategoryCreated: () => Unit,
@@ -284,7 +301,7 @@ object TransactionsPage {
             children <-- txs
               .combineWith(conns)
               .map { case (ts, cs) =>
-                ts.map(t => transactionRow(t, cats, cs, setCategory, onCreateRule, apiClient, onCategoryCreated))
+                ts.map(t => transactionRow(t, cats, cs, setCategory, setNote, onCreateRule, apiClient, onCategoryCreated))
               },
           ),
         ),
@@ -314,6 +331,7 @@ object TransactionsPage {
       cats: Signal[List[Category]],
       conns: List[BankConnectionView],
       setCategory: (ssbudget.shared.model.BankTransactionId, Option[CategoryId]) => Unit,
+      setNote: (ssbudget.shared.model.BankTransactionId, Option[String]) => Unit,
       onCreateRule: BankTransaction => Unit,
       apiClient: ApiClient,
       onCategoryCreated: () => Unit,
@@ -325,12 +343,56 @@ object TransactionsPage {
       case TransactionStatus.Pending => span(cls := "badge text-bg-warning", "pending")
     }
 
+    // Inline-editable note. The row is rebuilt whenever the tx list changes, so a save (which updates the row in place) closes the editor and
+    // re-renders with the fresh note; `editingNote`/`draft` are fresh per rebuild.
+    val editingNote        = Var(false)
+    val draft              = Var(t.note.getOrElse(""))
+    def commitNote(): Unit = {
+      val cleaned = Some(draft.now().trim).filter(_.nonEmpty)
+      editingNote.set(false)
+      if cleaned != t.note then setNote(t.id, cleaned) // skip a no-op write (also makes Escape-then-blur harmless)
+    }
+    val noteBlock          = child <-- editingNote.signal.map {
+      case true  =>
+        input(
+          cls         := "form-control form-control-sm mt-1",
+          placeholder := "Note…",
+          controlled(value <-- draft.signal, onInput.mapToValue --> draft.writer),
+          onMountFocus,
+          onBlur --> { _ => commitNote() },
+          onKeyDown --> { e =>
+            if e.key == "Enter" then commitNote()
+            else if e.key == "Escape" then { draft.set(t.note.getOrElse("")); editingNote.set(false) }
+          },
+        )
+      case false =>
+        t.note match {
+          case Some(n) =>
+            div(
+              cls       := "small fst-italic text-body-secondary",
+              styleAttr := "cursor:pointer",
+              title     := "Click to edit note",
+              onClick --> { _ => editingNote.set(true) },
+              "💬 ",
+              n,
+            )
+          case None    =>
+            a(
+              cls  := "small text-muted",
+              href := "#",
+              onClick.preventDefault --> { _ => editingNote.set(true) },
+              "＋ note",
+            )
+        }
+    }
+
     tr(
       td(cls      := "text-muted small text-nowrap", Formatting.formatDate(t.bookedAt)),
       td(cls      := "small", accountLabel(conns, t.ebAccountUid)),
       td(
         div(description, if t.internal then span(cls := "badge text-bg-light text-muted ms-2", "internal") else emptyNode),
         t.remittance.filter(r => !t.counterpartyName.contains(r)).map(r => small(cls := "text-muted d-block", r)).getOrElse(emptyNode),
+        noteBlock,
       ),
       td(cls      := s"text-end font-monospace $amountCls", MoneyFormatter.formatSimple(t.amountCents, t.currency)),
       td(statusBadge),
