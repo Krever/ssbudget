@@ -7,7 +7,7 @@ import ssbudget.frontend.components.{CategoryCombobox, RuleModal}
 import ssbudget.frontend.services.ApiClient
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.shared.api.{BankConnectionView, CategorySummary, CreateCategory, ImportRulesRequest, RulesExport, SetCategoryRequest, UpdateCategory}
-import ssbudget.shared.model.{BankTransaction, Category, CategoryId, ClassificationRule, ClassificationRuleId, TransactionStatus}
+import ssbudget.shared.model.{BankTransaction, Category, CategoryId, ClassificationRule, ClassificationRuleId, Money, TransactionStatus}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.scalajs.js
@@ -18,6 +18,7 @@ object TransactionsPage {
   def apply(apiClient: ApiClient): HtmlElement = {
     val txVar          = Var(List.empty[BankTransaction]) // current page (server-capped)
     val totalVar       = Var(0)                           // total matching the filters, before the cap
+    val sumsVar        = Var(List.empty[Money])           // net sum per currency over the FULL match (not just the page)
     val catsVar        = Var(List.empty[Category])
     val summariesVar   = Var(List.empty[CategorySummary])
     val rulesVar       = Var(List.empty[ClassificationRule])
@@ -77,7 +78,7 @@ object TransactionsPage {
           limit = None,                          // server applies its display cap
         )
         .onComplete {
-          case Success(r)  => txVar.set(r.items); totalVar.set(r.total); loadingVar.set(false)
+          case Success(r)  => txVar.set(r.items); totalVar.set(r.total); sumsVar.set(r.sums); loadingVar.set(false)
           case Failure(ex) => errorVar.set(Some(s"Failed to load transactions: ${ex.getMessage}")); loadingVar.set(false)
         }
     }
@@ -129,6 +130,7 @@ object TransactionsPage {
       transactionsTable(
         txVar.signal,
         totalVar.signal,
+        sumsVar.signal,
         catsVar.signal,
         connsVar.signal,
         sortBy,
@@ -210,6 +212,7 @@ object TransactionsPage {
           value <-- monthFilter.signal,
           onChange.mapToValue --> monthFilter.writer,
           option(value := "all", "All months"),
+          option(value := "current-period", "Current period"),
           children <-- months.map(_.map(m => option(value := m, m))),
         ),
       ),
@@ -231,6 +234,7 @@ object TransactionsPage {
   private def transactionsTable(
       txs: Signal[List[BankTransaction]],
       total: Signal[Int],
+      sums: Signal[List[Money]],
       cats: Signal[List[Category]],
       conns: Signal[List[BankConnectionView]],
       sortBy: Var[String],
@@ -286,11 +290,21 @@ object TransactionsPage {
         ),
       ),
       div(
-        cls := "card-footer py-2 d-flex justify-content-between text-muted small",
-        child.text <-- txs.combineWith(total).map { case (ts, tot) =>
-          if ts.size < tot then s"showing ${ts.size} of $tot — narrow the filters to see more"
-          else s"${ts.size} transactions"
-        },
+        cls := "card-footer py-2 d-flex justify-content-between align-items-center small",
+        span(
+          cls := "text-muted",
+          child.text <-- txs.combineWith(total).map { case (ts, tot) =>
+            if ts.size < tot then s"showing ${ts.size} of $tot — narrow the filters to see more"
+            else s"${ts.size} transactions"
+          },
+        ),
+        // Net sum over ALL matching rows (not just the shown page), per currency.
+        span(
+          cls := "fw-semibold",
+          child.text <-- sums.map { ss =>
+            if ss.isEmpty then "" else "Sum: " + ss.map(m => MoneyFormatter.formatSimple(m.amountCents, m.currency)).mkString("   ")
+          },
+        ),
       ),
     )
   }

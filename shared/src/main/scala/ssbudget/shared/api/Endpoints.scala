@@ -287,6 +287,16 @@ object Endpoints {
       secureEndpoint.post.in("rules" / "import").in(jsonBody[ImportRulesRequest]).out(jsonBody[ImportRulesResult]).errorOut(stringBody)
   }
 
+  object analytics {
+    // `months` = window size in calendar months for the per-category breakdown (default applied server-side).
+    val overview: Secured[Option[Int], AnalyticsResponse] =
+      secureEndpoint.get
+        .in("analytics" / "overview")
+        .in(query[Option[Int]]("months"))
+        .out(jsonBody[AnalyticsResponse])
+        .errorOut(stringBody)
+  }
+
   object oneTimeExpenses {
     val list: Secured[Unit, List[OneTimeExpense]] =
       secureEndpoint.get
@@ -435,6 +445,7 @@ object Endpoints {
     rules.preview,
     rules.exportRules,
     rules.importRules,
+    analytics.overview,
     test.reset,
   )
 
@@ -658,6 +669,15 @@ object Endpoints {
 
       val importRules: Client[ImportRulesRequest, ImportRulesResult] =
         baseEndpoint.post.in("rules" / "import").in(jsonBody[ImportRulesRequest]).out(jsonBody[ImportRulesResult]).errorOut(stringBody)
+    }
+
+    object analytics {
+      val overview: Client[Option[Int], AnalyticsResponse] =
+        baseEndpoint.get
+          .in("analytics" / "overview")
+          .in(query[Option[Int]]("months"))
+          .out(jsonBody[AnalyticsResponse])
+          .errorOut(stringBody)
     }
 
     object oneTimeExpenses {

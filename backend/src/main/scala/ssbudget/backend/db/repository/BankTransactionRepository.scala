@@ -21,20 +21,26 @@ trait BankTransactionRepository {
   /** Server-side filtered/sorted/capped view for the Transactions page (the browser can't hold thousands of rows).
     *
     *   - `month` filters on the YYYY-MM of `booked_at`.
+    *   - `from`/`to` bound `booked_at` (`>= from`, `< to`) — used for the "current period" filter; combine freely with the other filters.
     *   - `category`: `None`/"all" = no filter; "uncategorized" = no category AND not internal (triage view); otherwise a specific category id.
     *   - `hideInternal` drops own-account transfers.
     *   - `sort` is "amount" (signed cents) or "date" (booked_at); `asc` flips the direction (default newest/largest first).
     *   - `limit` caps the returned rows; `total` is the full match count before the cap.
+    *
+    * Returns `(rows, total, sums)` where `sums` is the net signed `amount_cents` per currency over the FULL match (ignoring the cap), so the UI can
+    * show a reliable total even when rows are truncated.
     */
   def query(
       accountUid: Option[String],
       month: Option[String],
+      from: Option[Instant],
+      to: Option[Instant],
       category: Option[String],
       hideInternal: Boolean,
       sort: String,
       asc: Boolean,
       limit: Option[Int],
-  ): IO[(List[BankTransaction], Int)]
+  ): IO[(List[BankTransaction], Int, List[(Currency, Long)])]
 
   /** Distinct YYYY-MM buckets present in the data, newest first — for the month filter dropdown. */
   def distinctMonths(): IO[List[String]]
@@ -46,6 +52,19 @@ trait BankTransactionRepository {
     * to contain two payments of a monthly bill) rather than a skewable mean.
     */
   def monthlySpendByCategory(from: Instant, to: Instant): IO[List[(CategoryId, Currency, String, Long)]]
+
+  /** Import/categorization health counts across all stored transactions, as a tuple of (total, internal, categorized, uncategorized, manual, rule)
+    * where categorized/uncategorized count only non-internal rows and manual/rule reflect `category_source`.
+    */
+  def categorizationCounts(): IO[(Int, Int, Int, Int, Int, Int)]
+
+  /** Outflow (positive cents) per currency for non-internal, uncategorized debits — the still-to-triage backlog, before currency conversion. */
+  def uncategorizedOutflowByCurrency(): IO[List[(Currency, Long)]]
+
+  /** Counterparties with the most uncategorized outflow (non-internal debits without a category), per (counterparty, currency): (name, currency,
+    * count, outflow cents). The actionable list for creating new rules. `limit` caps the (name, currency) rows scanned.
+    */
+  def topUncategorizedCounterparties(limit: Int): IO[List[(Option[String], Currency, Int, Long)]]
 
   /** Most recent booked_at for an account, for incremental imports (None when the account has no transactions yet). */
   def latestBookedAt(ebAccountUid: String): IO[Option[Instant]]
@@ -110,15 +129,19 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
   override def query(
       accountUid: Option[String],
       month: Option[String],
+      from: Option[Instant],
+      to: Option[Instant],
       category: Option[String],
       hideInternal: Boolean,
       sort: String,
       asc: Boolean,
       limit: Option[Int],
-  ): IO[(List[BankTransaction], Int)] = {
+  ): IO[(List[BankTransaction], Int, List[(Currency, Long)])] = {
     val conds    = List(
       accountUid.map(u => fr"eb_account_uid = $u"),
       month.map(m => fr"substr(booked_at, 1, 7) = $m"),
+      from.map(f => fr"booked_at >= $f"),
+      to.map(t => fr"booked_at < $t"),
       category.filterNot(c => c == "all").map {
         case "uncategorized" => fr"category_id IS NULL AND is_internal = 0"
         case cid             => fr"category_id = ${CategoryId(cid)}"
@@ -131,7 +154,9 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
     val limitFr  = limit.fold(Fragment.empty)(n => fr"LIMIT $n")
     val itemsQ   = (fr"SELECT" ++ columns ++ fr"FROM bank_transactions" ++ where ++ orderCol ++ orderDir ++ limitFr).query[BankTransaction].to[List]
     val countQ   = (fr"SELECT COUNT(*) FROM bank_transactions" ++ where).query[Int].unique
-    (itemsQ, countQ).tupled.transact(xa)
+    // Net signed sum per currency over the FULL match (independent of the display cap) — powers the table's total row.
+    val sumsQ    = (fr"SELECT currency, SUM(amount_cents) FROM bank_transactions" ++ where ++ fr"GROUP BY currency").query[(Currency, Long)].to[List]
+    (itemsQ, countQ, sumsQ).tupled.transact(xa)
   }
 
   override def distinctMonths(): IO[List[String]] =
@@ -150,6 +175,30 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
           FROM bank_transactions
           WHERE category_id IS NOT NULL AND is_internal = 0 AND amount_cents < 0 AND booked_at >= $from AND booked_at < $to
           GROUP BY category_id, currency, ym""".query[(CategoryId, Currency, String, Long)].to[List].transact(xa)
+
+  override def categorizationCounts(): IO[(Int, Int, Int, Int, Int, Int)] =
+    sql"""SELECT
+            COUNT(*),
+            COALESCE(SUM(CASE WHEN is_internal = 1 THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN is_internal = 0 AND category_id IS NOT NULL THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN is_internal = 0 AND category_id IS NULL THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN category_source = 'manual' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN category_source = 'rule' THEN 1 ELSE 0 END), 0)
+          FROM bank_transactions""".query[(Int, Int, Int, Int, Int, Int)].unique.transact(xa)
+
+  override def uncategorizedOutflowByCurrency(): IO[List[(Currency, Long)]] =
+    sql"""SELECT currency, SUM(-amount_cents)
+          FROM bank_transactions
+          WHERE is_internal = 0 AND category_id IS NULL AND amount_cents < 0
+          GROUP BY currency""".query[(Currency, Long)].to[List].transact(xa)
+
+  override def topUncategorizedCounterparties(limit: Int): IO[List[(Option[String], Currency, Int, Long)]] =
+    sql"""SELECT counterparty_name, currency, COUNT(*), SUM(-amount_cents)
+          FROM bank_transactions
+          WHERE is_internal = 0 AND category_id IS NULL AND amount_cents < 0
+          GROUP BY counterparty_name, currency
+          ORDER BY SUM(-amount_cents) DESC
+          LIMIT $limit""".query[(Option[String], Currency, Int, Long)].to[List].transact(xa)
 
   override def latestBookedAt(ebAccountUid: String): IO[Option[Instant]] =
     sql"SELECT MAX(booked_at) FROM bank_transactions WHERE eb_account_uid = $ebAccountUid".query[Option[Instant]].unique.transact(xa)

@@ -326,6 +326,13 @@ class ApiClient(implicit ec: ExecutionContext) {
     }
   }
 
+  object analytics {
+    def overview(months: Option[Int]): Future[AnalyticsResponse] = {
+      val request = interpreter.toRequest(Endpoints.client.analytics.overview, Some(baseUri))
+      backend.send(request(months)).map(handleResponse)
+    }
+  }
+
   object oneTimeExpenses {
     def list(): Future[List[OneTimeExpense]] = {
       val request = interpreter.toRequest(Endpoints.client.oneTimeExpenses.list, Some(baseUri))

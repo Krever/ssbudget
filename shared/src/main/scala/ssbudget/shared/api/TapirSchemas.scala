@@ -91,6 +91,12 @@ object TapirSchemas {
   given Schema[RulePreviewRequest]        = Schema.derived[RulePreviewRequest]
   given Schema[RulePreviewResponse]       = Schema.derived[RulePreviewResponse]
 
+  // Analytics DTOs
+  given Schema[CategorySpendSeries]       = Schema.derived[CategorySpendSeries]
+  given Schema[CategorizationStats]       = Schema.derived[CategorizationStats]
+  given Schema[UncategorizedCounterparty] = Schema.derived[UncategorizedCounterparty]
+  given Schema[AnalyticsResponse]         = Schema.derived[AnalyticsResponse]
+
   // Currency settings DTOs
   given Schema[CurrencySetting]           = Schema.derived[CurrencySetting]
   given Schema[EnableCurrencyRequest]     = Schema.derived[EnableCurrencyRequest]

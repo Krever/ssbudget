@@ -39,8 +39,10 @@ final case class ImportResult(accounts: List[AccountImportResult]) derives Codec
   def totalSkipped: Int  = accounts.map(_.skipped).sum
 }
 
-/** A page of transactions matching the server-side filters, plus the total number that match (before the display cap). */
-final case class TransactionListResponse(items: List[BankTransaction], total: Int) derives Codec.AsObject
+/** A page of transactions matching the server-side filters, plus the total number that match (before the display cap) and the net signed sum per
+  * currency over the FULL match (`sums`) so the UI can show a reliable total even when `items` is capped.
+  */
+final case class TransactionListResponse(items: List[BankTransaction], total: Int, sums: List[Money]) derives Codec.AsObject
 
 /** Assign (or clear, when None) a transaction's spending category. */
 final case class SetCategoryRequest(categoryId: Option[CategoryId]) derives Codec.AsObject

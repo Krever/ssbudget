@@ -15,6 +15,7 @@ object Router
         Route.static(Page.Banking, root / "banking" / endOfSegments),
         Route.static(Page.BankingCallback, root / "banking" / "callback" / endOfSegments),
         Route.static(Page.Transactions, root / "transactions" / endOfSegments),
+        Route.static(Page.Analytics, root / "analytics" / endOfSegments),
         Route.static(Page.Settings, root / "settings" / endOfSegments),
       ),
       getPageTitle = {
@@ -26,6 +27,7 @@ object Router
         case Page.Banking         => "SSBudget - Bank Connections"
         case Page.BankingCallback => "SSBudget - Connecting..."
         case Page.Transactions    => "SSBudget - Transactions"
+        case Page.Analytics       => "SSBudget - Analytics"
         case Page.Settings        => "SSBudget - Settings"
         case Page.NotFound        => "SSBudget - Not Found"
       },
@@ -38,6 +40,7 @@ object Router
         case Page.Banking         => "/banking"
         case Page.BankingCallback => "/banking/callback"
         case Page.Transactions    => "/transactions"
+        case Page.Analytics       => "/analytics"
         case Page.Settings        => "/settings"
         case Page.NotFound        => "/404"
       },
@@ -50,6 +53,7 @@ object Router
         case "/banking/callback"  => Page.BankingCallback
         case "/banking"           => Page.Banking
         case "/transactions"      => Page.Transactions
+        case "/analytics"         => Page.Analytics
         case "/settings"          => Page.Settings
         case _                    => Page.NotFound
       },

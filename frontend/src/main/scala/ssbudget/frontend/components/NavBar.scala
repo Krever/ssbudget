@@ -43,6 +43,7 @@ object NavBar {
             navItem(Page.OneTimeExpenses, "One-Time", isOpen),
             navItem(Page.Banking, "Banking", isOpen),
             navItem(Page.Transactions, "Transactions", isOpen),
+            navItem(Page.Analytics, "Analytics", isOpen),
           ),
           ul(
             cls := "navbar-nav",

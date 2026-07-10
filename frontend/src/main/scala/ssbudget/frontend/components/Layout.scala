@@ -28,6 +28,7 @@ object Layout {
       case Page.Banking         => BankingPage(apiClient)
       case Page.BankingCallback => BankingCallbackPage(apiClient)
       case Page.Transactions    => TransactionsPage(apiClient)
+      case Page.Analytics       => AnalyticsPage(apiClient)
       case Page.Settings        => SettingsPage(apiClient)
       case Page.NotFound        => NotFoundPage()
     }

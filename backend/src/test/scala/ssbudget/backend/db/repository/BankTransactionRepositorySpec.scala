@@ -214,16 +214,16 @@ class BankTransactionRepositorySpec extends RepositorySpec {
       lastSyncedAt = None,
     )
     for {
-      _                   <- catRepo.create(Category(CategoryId("cat-1"), "Groceries", None))
-      _                   <- connRepo.create(BankConnection(BankConnectionId("conn-1"), "PKO", "PL", Some("s"), ConnectionStatus.Active, None, None, importedAt))
-      _                   <- connRepo.createLink(ownLink)
-      _                   <- repo.insertNew(tx("t-uncat", "uid-1", "r1"))
-      _                   <- repo.insertNew(tx("t-cat", "uid-1", "r2", categoryId = Some(CategoryId("cat-1"))))
-      _                   <- repo.insertNew(tx("t-int", "uid-1", "r3", counterpartyAccount = Some("PL99")))
-      _                   <- repo.markInternalTransfers()
-      (uncat, uncatTotal) <- repo.query(None, None, Some("uncategorized"), hideInternal = false, "date", asc = false, None)
-      (cat, _)            <- repo.query(None, None, Some("cat-1"), hideInternal = false, "date", asc = false, None)
-      (visible, _)        <- repo.query(None, None, Some("all"), hideInternal = true, "date", asc = false, None)
+      _                      <- catRepo.create(Category(CategoryId("cat-1"), "Groceries", None))
+      _                      <- connRepo.create(BankConnection(BankConnectionId("conn-1"), "PKO", "PL", Some("s"), ConnectionStatus.Active, None, None, importedAt))
+      _                      <- connRepo.createLink(ownLink)
+      _                      <- repo.insertNew(tx("t-uncat", "uid-1", "r1"))
+      _                      <- repo.insertNew(tx("t-cat", "uid-1", "r2", categoryId = Some(CategoryId("cat-1"))))
+      _                      <- repo.insertNew(tx("t-int", "uid-1", "r3", counterpartyAccount = Some("PL99")))
+      _                      <- repo.markInternalTransfers()
+      (uncat, uncatTotal, _) <- repo.query(None, None, None, None, Some("uncategorized"), hideInternal = false, "date", asc = false, None)
+      (cat, _, _)            <- repo.query(None, None, None, None, Some("cat-1"), hideInternal = false, "date", asc = false, None)
+      (visible, _, _)        <- repo.query(None, None, None, None, Some("all"), hideInternal = true, "date", asc = false, None)
     } yield {
       uncat.map(_.id.value) shouldBe List("t-uncat")                 // categorized + internal both excluded from the triage view
       uncatTotal shouldBe 1
@@ -238,16 +238,19 @@ class BankTransactionRepositorySpec extends RepositorySpec {
     val jan2 = Instant.parse("2026-01-20T00:00:00Z")
     val feb  = Instant.parse("2026-02-10T00:00:00Z")
     for {
-      _                   <- repo.insertNew(tx("t-a", "uid-1", "ra", amountCents = -500, bookedAt = jan1))
-      _                   <- repo.insertNew(tx("t-b", "uid-1", "rb", amountCents = -9000, bookedAt = jan2))
-      _                   <- repo.insertNew(tx("t-c", "uid-1", "rc", amountCents = -1000, bookedAt = feb))
-      (janRows, janTotal) <- repo.query(None, Some("2026-01"), Some("all"), hideInternal = false, "date", asc = false, None)
-      (capped, total)     <- repo.query(None, None, Some("all"), hideInternal = false, "amount", asc = true, Some(2))
+      _                      <- repo.insertNew(tx("t-a", "uid-1", "ra", amountCents = -500, bookedAt = jan1))
+      _                      <- repo.insertNew(tx("t-b", "uid-1", "rb", amountCents = -9000, bookedAt = jan2))
+      _                      <- repo.insertNew(tx("t-c", "uid-1", "rc", amountCents = -1000, bookedAt = feb))
+      (janRows, janTotal, _) <- repo.query(None, Some("2026-01"), None, None, Some("all"), hideInternal = false, "date", asc = false, None)
+      (capped, total, sums)  <- repo.query(None, None, None, None, Some("all"), hideInternal = false, "amount", asc = true, Some(2))
+      (windowRows, _, _)     <- repo.query(None, None, Some(jan2), Some(feb), Some("all"), hideInternal = false, "date", asc = false, None)
     } yield {
       janRows.map(_.id.value) shouldBe List("t-b", "t-a") // date desc within January
       janTotal shouldBe 2
       capped.map(_.id.value) shouldBe List("t-b", "t-c")  // amount asc (most negative first), capped to 2
       total shouldBe 3                                    // total reflects all matches, before the cap
+      sums.map(_._2).sum shouldBe -10500                  // net sum is over ALL matches, not just the 2 returned rows
+      windowRows.map(_.id.value) shouldBe List("t-b")     // [jan2, feb): includes jan2, excludes feb
     }
   }
 
