@@ -4,7 +4,16 @@ import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 import ssbudget.frontend.services.ApiClient
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
-import ssbudget.shared.api.{Aspsp, BankConnectionView, ConnectBankRequest, CreateAccount, CreateCardGroup, LinkAccountRequest, LinkCardGroupRequest}
+import ssbudget.shared.api.{
+  Aspsp,
+  BankConnectionView,
+  ConnectBankRequest,
+  CreateAccount,
+  CreateCardGroup,
+  ImportTransactionsRequest,
+  LinkAccountRequest,
+  LinkCardGroupRequest,
+}
 import ssbudget.shared.model.{
   Account,
   AccountId,
@@ -37,6 +46,7 @@ object BankingPage {
     val aspspNameVar   = Var("")
     val connectingVar  = Var(false)
     val syncingVar     = Var(Set.empty[String]) // connection ids currently syncing
+    val importingVar   = Var(Set.empty[String]) // connection ids currently importing transactions
 
     def loadConnections(): Unit =
       apiClient.banking.connections().onComplete {
@@ -161,6 +171,22 @@ object BankingPage {
       }
     }
 
+    def importTx(id: BankConnectionId, monthsBack: Option[Int]): Unit = {
+      importingVar.update(_ + id.value)
+      errorVar.set(None)
+      successVar.set(None)
+      apiClient.banking.importTransactions(id, ImportTransactionsRequest(monthsBack)).onComplete {
+        case Success(res) =>
+          importingVar.update(_ - id.value)
+          successVar.set(
+            Some(s"Imported ${res.totalImported} new transaction(s) (${res.totalSkipped} already had). See the Transactions page."),
+          )
+        case Failure(ex)  =>
+          importingVar.update(_ - id.value)
+          errorVar.set(Some(s"Import failed: ${ex.getMessage}"))
+      }
+    }
+
     div(
       cls := "container py-4",
       onMountCallback { _ =>
@@ -194,8 +220,10 @@ object BankingPage {
             accountsVar.signal,
             cardGroupsVar.signal,
             syncingVar,
+            importingVar,
             disconnect,
             sync,
+            importTx,
             link,
             createAndLink,
           )
@@ -382,15 +410,17 @@ object BankingPage {
       accounts: Signal[List[Account]],
       cardGroups: Signal[List[CardGroup]],
       syncingVar: Var[Set[String]],
+      importingVar: Var[Set[String]],
       disconnect: BankConnectionId => Unit,
       sync: BankConnectionId => Unit,
+      importTx: (BankConnectionId, Option[Int]) => Unit,
       link: (BankAccountLinkId, BankLinkTarget) => Unit,
       createAndLink: (BankAccountLinkId, String, Currency) => Unit,
   ): HtmlElement =
     div(
       child <-- connections.combineWith(accounts).combineWith(cardGroups).map { case (conns, accs, groups) =>
         if conns.isEmpty then p(cls := "text-muted", "No banks connected yet.")
-        else div(conns.map(v => connectionCard(v, accs, groups, syncingVar, disconnect, sync, link, createAndLink)))
+        else div(conns.map(v => connectionCard(v, accs, groups, syncingVar, importingVar, disconnect, sync, importTx, link, createAndLink)))
       },
     )
 
@@ -399,12 +429,15 @@ object BankingPage {
       accounts: List[Account],
       cardGroups: List[CardGroup],
       syncingVar: Var[Set[String]],
+      importingVar: Var[Set[String]],
       disconnect: BankConnectionId => Unit,
       sync: BankConnectionId => Unit,
+      importTx: (BankConnectionId, Option[Int]) => Unit,
       link: (BankAccountLinkId, BankLinkTarget) => Unit,
       createAndLink: (BankAccountLinkId, String, Currency) => Unit,
   ): HtmlElement = {
-    val conn = view.connection
+    val conn      = view.connection
+    val monthsVar = Var("0") // "0" = incremental (new only); otherwise months to backfill
     div(
       cls := "card mb-3",
       div(
@@ -422,17 +455,45 @@ object BankingPage {
               .getOrElse(emptyNode),
           ),
           div(
-            cls := "btn-group btn-group-sm",
-            button(
-              cls      := "btn btn-outline-primary",
-              disabled <-- syncingVar.signal.map(_.contains(conn.id.value)),
-              child <-- syncingVar.signal.map(_.contains(conn.id.value)).map { syncing =>
-                if syncing then span(span(cls := "spinner-border spinner-border-sm me-1"), "Syncing...")
-                else span("Sync balances")
-              },
-              onClick --> { _ => sync(conn.id) },
+            cls := "d-flex flex-column align-items-end gap-2",
+            div(
+              cls       := "btn-group btn-group-sm",
+              button(
+                cls      := "btn btn-outline-primary",
+                disabled <-- syncingVar.signal.map(_.contains(conn.id.value)),
+                child <-- syncingVar.signal.map(_.contains(conn.id.value)).map { syncing =>
+                  if syncing then span(span(cls := "spinner-border spinner-border-sm me-1"), "Syncing...")
+                  else span("Sync balances")
+                },
+                onClick --> { _ => sync(conn.id) },
+              ),
+              button(cls := "btn btn-outline-danger", "Disconnect", onClick --> { _ => disconnect(conn.id) }),
             ),
-            button(cls := "btn btn-outline-danger", "Disconnect", onClick --> { _ => disconnect(conn.id) }),
+            div(
+              cls       := "input-group input-group-sm",
+              styleAttr := "width: auto",
+              select(
+                cls := "form-select form-select-sm",
+                onChange.mapToValue --> monthsVar.writer,
+                option(value := "0", "New only"),
+                option(value := "1", "1 month"),
+                option(value := "3", "3 months"),
+                option(value := "6", "6 months"),
+                option(value := "12", "12 months"),
+              ),
+              button(
+                cls := "btn btn-outline-secondary text-nowrap",
+                disabled <-- importingVar.signal.map(_.contains(conn.id.value)),
+                child <-- importingVar.signal.map(_.contains(conn.id.value)).map { importing =>
+                  if importing then span(span(cls := "spinner-border spinner-border-sm me-1"), "Importing...")
+                  else span("Import tx")
+                },
+                onClick --> { _ =>
+                  val m = monthsVar.now()
+                  importTx(conn.id, if m == "0" then None else Some(m.toInt))
+                },
+              ),
+            ),
           ),
         ),
         if view.accounts.isEmpty then emptyNode

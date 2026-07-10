@@ -10,11 +10,12 @@ import sttp.tapir.*
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 import ssbudget.backend.auth.SessionService
-import ssbudget.backend.banking.BankingService
+import ssbudget.backend.banking.{BankingService, RuleEngineService, TransactionImportService}
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.service.CurrencyService
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
+import ssbudget.shared.rules.RuleMatcher
 
 import java.nio.file.{Files as JFiles, Paths}
 import java.time.Instant
@@ -34,6 +35,8 @@ object Routes {
       sessionService: SessionService,
       currencyService: CurrencyService,
       bankingService: BankingService,
+      importService: TransactionImportService,
+      ruleEngine: RuleEngineService,
       testMode: Boolean = false,
   ): HttpRoutes[IO] = {
     val interpreter = Http4sServerInterpreter[IO]()
@@ -92,6 +95,29 @@ object Routes {
       route(Endpoints.banking.createCardGroup)(dto => bankingService.createCardGroup(dto)),
       route(Endpoints.banking.deleteCardGroup)(id => bankingService.deleteCardGroup(id)),
       route(Endpoints.banking.linkCardGroup) { case (id, req) => bankingService.linkCardGroup(id, req) },
+      route(Endpoints.banking.importTransactions) { case (id, req) => importService.importTransactions(id, req) },
+      // Transactions
+      route(Endpoints.transactions.list) { case (acc, month, cat, hide, sort, asc, limit) =>
+        listTransactions(repos)(acc, month, cat, hide, sort, asc, limit)
+      },
+      route(Endpoints.transactions.months)(_ => repos.bankTransactions.distinctMonths().map(Right(_))),
+      route(Endpoints.transactions.setCategory) { case (id, dto) => setTransactionCategory(repos)(id, dto) },
+      // Categories
+      route(Endpoints.categories.list)(_ => repos.categories.findAll.map(Right(_))),
+      route(Endpoints.categories.summaries)(_ => categorySummaries(repos)),
+      route(Endpoints.categories.create)(createCategory(repos)),
+      route(Endpoints.categories.update) { case (id, dto) => updateCategory(repos)(id, dto) },
+      route(Endpoints.categories.delete)(deleteCategory(repos, ruleEngine)),
+      // Classification rules
+      route(Endpoints.rules.list)(_ => repos.classificationRules.findAll.map(Right(_))),
+      route(Endpoints.rules.create)(createRule(repos, ruleEngine)),
+      route(Endpoints.rules.update) { case (id, dto) => updateRule(repos, ruleEngine)(id, dto) },
+      route(Endpoints.rules.delete)(deleteRule(repos, ruleEngine)),
+      route(Endpoints.rules.reorder)(reorderRules(repos, ruleEngine)),
+      route(Endpoints.rules.apply)(_ => ruleEngine.applyRules().map(n => Right(ApplyRulesResult(n)))),
+      route(Endpoints.rules.preview)(previewRule(repos)),
+      route(Endpoints.rules.exportRules)(_ => exportRules(repos)),
+      route(Endpoints.rules.importRules)(importRules(repos, ruleEngine)),
       // Database import/export
       route(Endpoints.database.download)(_ => exportDatabase(dbPath)),
       route(Endpoints.database.`import`)(bytes => importDatabase(xa, dbPath, bytes)),
@@ -281,7 +307,7 @@ object Routes {
     } yield Right(newPeriod)
   }
 
-  private def createSavingsTransaction(repos: Repositories)(dto: CreateSavingsTransaction): Result[SavingsTransactionResponse] = {
+  private def createSavingsTransaction(repos: Repositories)(dto: CreateSavingsTransaction): Result[SavingsTransaction] = {
     for {
       currentPeriod <- repos.periods.findCurrent
       accountOpt    <- repos.accounts.findById(dto.accountId)
@@ -290,10 +316,8 @@ object Routes {
                            val txnId = SavingsTransactionId(UUID.randomUUID().toString)
                            val now   = Instant.now()
                            val txn   = SavingsTransaction(txnId, dto.accountId, period.id, dto.amount, dto.note, now)
-                           for {
-                             _       <- repos.savingsTransactions.create(txn)
-                             updated <- repos.accounts.adjustBalance(dto.accountId, dto.amount, now)
-                           } yield updated.toRight("Failed to update account balance").map(SavingsTransactionResponse(txn, _))
+                           // Savings transactions are informational only; they never modify the account balance.
+                           repos.savingsTransactions.create(txn).as(Right(txn))
                          case (Some(_), Some(_))                                                   =>
                            IO.pure(Left(s"Account is not a savings account: ${dto.accountId.value}"))
                          case (None, _)                                                            =>
@@ -304,18 +328,12 @@ object Routes {
     } yield result
   }
 
-  private def deleteSavingsTransaction(repos: Repositories)(id: SavingsTransactionId): Result[Account] = {
+  private def deleteSavingsTransaction(repos: Repositories)(id: SavingsTransactionId): Result[Unit] = {
     for {
       txnOpt <- repos.savingsTransactions.findById(id)
       result <- txnOpt match {
-                  case Some(txn) =>
-                    val now = Instant.now()
-                    for {
-                      _       <- repos.savingsTransactions.delete(id)
-                      updated <- repos.accounts.adjustBalance(txn.accountId, -txn.amount, now)
-                    } yield updated.toRight(s"Account not found: ${txn.accountId.value}")
-                  case None      =>
-                    IO.pure(Left(s"Savings transaction not found: ${id.value}"))
+                  case Some(_) => repos.savingsTransactions.delete(id).as(Right(()))
+                  case None    => IO.pure(Left(s"Savings transaction not found: ${id.value}"))
                 }
     } yield result
   }
@@ -365,6 +383,232 @@ object Routes {
                       }
     } yield Right(rates.flatten)
   }
+
+  /** Accepts either a full ISO instant or a bare `yyyy-MM-dd` date (interpreted at UTC start-of-day). */
+  /** Cap the number of rows shipped to the browser; the response carries the true total so the UI can prompt the user to narrow filters. */
+  private val transactionPageCap = 500
+
+  private def listTransactions(repos: Repositories)(
+      accountUid: Option[String],
+      month: Option[String],
+      category: Option[String],
+      hideInternal: Option[Boolean],
+      sort: Option[String],
+      asc: Option[Boolean],
+      limit: Option[Int],
+  ): Result[TransactionListResponse] =
+    repos.bankTransactions
+      .query(
+        accountUid.filter(_.nonEmpty),
+        month.filter(_.nonEmpty),
+        category.filter(_.nonEmpty),
+        hideInternal.getOrElse(false),
+        sort.getOrElse("date"),
+        asc.getOrElse(false),
+        Some(limit.getOrElse(transactionPageCap)),
+      )
+      .map { case (items, total) => Right(TransactionListResponse(items, total)) }
+
+  /** Live rule preview: run the shared matcher over all stored transactions server-side (the browser no longer holds them). */
+  private def previewRule(repos: Repositories)(req: RulePreviewRequest): Result[RulePreviewResponse] =
+    repos.bankTransactions.list(None, None, None).map { all =>
+      val matched = if req.criteria.isEmpty then Nil else all.filter(t => RuleMatcher.matches(req.criteria, t))
+      Right(RulePreviewResponse(matched.size, all.size, matched.take(200)))
+    }
+
+  private def setTransactionCategory(repos: Repositories)(id: BankTransactionId, dto: SetCategoryRequest): Result[BankTransaction] = {
+    for {
+      txOpt    <- repos.bankTransactions.findById(id)
+      catValid <- dto.categoryId match {
+                    case Some(cid) => repos.categories.findById(cid).map(o => Either.cond(o.isDefined, (), "Category not found"))
+                    case None      => IO.pure(Right(()))
+                  }
+      result   <- (txOpt, catValid) match {
+                    case (None, _)            => IO.pure(Left(s"Transaction not found: ${id.value}"))
+                    case (_, Left(err))       => IO.pure(Left(err))
+                    case (Some(tx), Right(_)) =>
+                      val source = dto.categoryId.map(_ => CategorySource.Manual)
+                      repos.bankTransactions
+                        .setCategory(id, dto.categoryId)
+                        .as(Right(tx.copy(categoryId = dto.categoryId, categorySource = source)))
+                  }
+    } yield result
+  }
+
+  private def createCategory(repos: Repositories)(dto: CreateCategory): Result[Category] = {
+    val category = Category(CategoryId(UUID.randomUUID().toString), dto.name, dto.color, dto.monthlyBudget)
+    repos.categories.create(category).as(Right(category))
+  }
+
+  private def updateCategory(repos: Repositories)(id: CategoryId, dto: UpdateCategory): Result[Category] = {
+    for {
+      existingOpt <- repos.categories.findById(id)
+      result      <- existingOpt match {
+                       case Some(_) =>
+                         val updated = Category(id, dto.name, dto.color, dto.monthlyBudget)
+                         repos.categories.update(updated).as(Right(updated))
+                       case None    => IO.pure(Left(s"Category not found: ${id.value}"))
+                     }
+    } yield result
+  }
+
+  /** Median of the (zero-filled) values, rounded down for the even case. Robust to a single outlier month. */
+  private def median(values: List[Long]): Long =
+    if values.isEmpty then 0L
+    else {
+      val sorted = values.sorted
+      val n      = sorted.length
+      if n % 2 == 1 then sorted(n / 2) else (sorted(n / 2 - 1) + sorted(n / 2)) / 2
+    }
+
+  /** Per-category spend stats, all converted to the primary currency at the latest rates (so a category with mixed-currency transactions is counted
+    * in full, not just its dominant currency):
+    *   - `avgMonthlyCents` = MEDIAN of the last 3 full calendar months' spend (each month zero-filled). Using the median instead of the mean keeps a
+    *     month that happens to contain two payments of a monthly bill (or a payment that slipped from an adjacent month) from inflating the budget.
+    *   - `currentPeriodSpentCents` = spend since the current period started.
+    *   - `currency` = the primary currency.
+    */
+  private def categorySummaries(repos: Repositories): Result[List[CategorySummary]] =
+    for {
+      cats        <- repos.categories.findAll
+      periodOpt   <- repos.periods.findCurrent
+      primaryOpt  <- repos.currencySettings.findPrimary
+      enabled     <- repos.currencySettings.findAll
+      primary      = primaryOpt.map(_.code).getOrElse(Currency.PLN)
+      rateList    <- enabled.filterNot(_.code == primary).traverse(s => repos.exchangeRates.findLatest(s.code, primary))
+      now          = java.time.LocalDate.now(java.time.ZoneOffset.UTC)
+      firstOfMonth = now.withDayOfMonth(1)
+      currentMonth = firstOfMonth.atStartOfDay(java.time.ZoneOffset.UTC).toInstant
+      windowStart  = firstOfMonth.minusMonths(3).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
+      windowMonths = (1 to 3).map(i => firstOfMonth.minusMonths(i)).map(d => f"${d.getYear}-${d.getMonthValue}%02d").toList
+      periodStart  = periodOpt.map(_.startDate).getOrElse(currentMonth)
+      avgRows     <- repos.bankTransactions.monthlySpendByCategory(windowStart, currentMonth)
+      curRows     <- repos.bankTransactions.spendByCategoryBetween(periodStart, None)
+    } yield {
+      val rateMap                                     = rateList.flatten.map(r => r.fromCurrency -> r).toMap
+      // Convert cents in any currency to the primary currency; falls back to 1:1 if a rate is missing (rare — currency not enabled).
+      def toPrimary(cents: Long, cur: Currency): Long =
+        if cur == primary then cents else rateMap.get(cur).map(_.convert(Money(cents, cur)).amountCents).getOrElse(cents)
+
+      // category -> (YYYY-MM -> primary-currency spend, summed across currencies)
+      val avgByCatMonth = avgRows
+        .groupBy(_._1)
+        .view
+        .mapValues(rows => rows.groupBy(_._3).view.mapValues(_.map { case (_, cur, _, cents) => toPrimary(cents, cur) }.sum).toMap)
+        .toMap
+      val curByCat      = curRows
+        .groupBy(_._1)
+        .view
+        .mapValues(_.map { case (_, cur, cents) => toPrimary(cents, cur) }.sum)
+        .toMap
+      Right(cats.map { cat =>
+        val monthMap = avgByCatMonth.getOrElse(cat.id, Map.empty[String, Long])
+        val monthly  = windowMonths.map(m => monthMap.getOrElse(m, 0L)) // zero-fill months with no spend
+        CategorySummary(cat, avgMonthlyCents = median(monthly), currentPeriodSpentCents = curByCat.getOrElse(cat.id, 0L), currency = primary)
+      })
+    }
+
+  private def deleteCategory(repos: Repositories, ruleEngine: RuleEngineService)(id: CategoryId): Result[Unit] =
+    // Detach the category from any transactions and drop rules targeting it, delete it, then re-evaluate (rules for it are gone).
+    for {
+      _ <- repos.bankTransactions.clearCategory(id)
+      _ <- repos.classificationRules.deleteByCategory(id)
+      _ <- repos.categories.delete(id)
+      _ <- ruleEngine.applyRules()
+    } yield Right(())
+
+  private def createRule(repos: Repositories, ruleEngine: RuleEngineService)(dto: CreateRuleRequest): Result[ClassificationRule] =
+    if dto.criteria.isEmpty then IO.pure(Left("A rule must have at least one criterion"))
+    else
+      repos.categories.findById(dto.categoryId).flatMap {
+        case None    => IO.pure(Left("Category not found"))
+        case Some(_) =>
+          for {
+            priority <- repos.classificationRules.nextPriority
+            now      <- IO.realTimeInstant
+            rule      = ClassificationRule(ClassificationRuleId(UUID.randomUUID().toString), dto.name, dto.categoryId, priority, dto.criteria, now)
+            _        <- repos.classificationRules.create(rule)
+            _        <- ruleEngine.applyRules()
+          } yield Right(rule)
+      }
+
+  private def updateRule(
+      repos: Repositories,
+      ruleEngine: RuleEngineService,
+  )(id: ClassificationRuleId, dto: UpdateRuleRequest): Result[ClassificationRule] =
+    if dto.criteria.isEmpty then IO.pure(Left("A rule must have at least one criterion"))
+    else
+      for {
+        existingOpt <- repos.classificationRules.findById(id)
+        catOpt      <- repos.categories.findById(dto.categoryId)
+        result      <- (existingOpt, catOpt) match {
+                         case (None, _)                 => IO.pure(Left(s"Rule not found: ${id.value}"))
+                         case (_, None)                 => IO.pure(Left("Category not found"))
+                         case (Some(existing), Some(_)) =>
+                           val updated = existing.copy(name = dto.name, categoryId = dto.categoryId, criteria = dto.criteria)
+                           for {
+                             _ <- repos.classificationRules.update(id, dto.name, dto.categoryId, dto.criteria)
+                             _ <- ruleEngine.applyRules()
+                           } yield Right(updated)
+                       }
+      } yield result
+
+  private def deleteRule(repos: Repositories, ruleEngine: RuleEngineService)(id: ClassificationRuleId): Result[Unit] =
+    for {
+      _ <- repos.classificationRules.delete(id)
+      _ <- ruleEngine.applyRules()
+    } yield Right(())
+
+  private def reorderRules(repos: Repositories, ruleEngine: RuleEngineService)(dto: ReorderRulesRequest): Result[List[ClassificationRule]] =
+    for {
+      _     <- repos.classificationRules.reorder(dto.orderedIds)
+      _     <- ruleEngine.applyRules()
+      rules <- repos.classificationRules.findAll
+    } yield Right(rules)
+
+  /** Export all rules in portable form (category carried by name, order = priority). */
+  private def exportRules(repos: Repositories): Result[RulesExport] =
+    for {
+      rules <- repos.classificationRules.findAll // ordered by priority
+      cats  <- repos.categories.findAll
+    } yield {
+      val nameById = cats.map(c => c.id -> c.name).toMap
+      Right(RulesExport(version = 1, rules = rules.map(r => RuleExport(r.name, nameById.getOrElse(r.categoryId, ""), r.criteria))))
+    }
+
+  /** Import a rules bundle atomically: (optionally) clear existing rules, create any categories referenced by name, then create the rules in order.
+    */
+  private def importRules(repos: Repositories, ruleEngine: RuleEngineService)(req: ImportRulesRequest): Result[ImportRulesResult] =
+    for {
+      _                             <- if req.replace then repos.classificationRules.deleteAll else IO.unit
+      existingCats                  <- repos.categories.findAll
+      base                          <- if req.replace then IO.pure(0) else repos.classificationRules.nextPriority
+      now                           <- IO.realTimeInstant
+      // Resolve each referenced category by name (case-insensitive), creating the ones that don't exist yet.
+      resolved                      <- req.bundle.rules.map(_.categoryName).distinct.foldLeft(IO.pure((existingCats.map(c => c.name.toLowerCase -> c.id).toMap, 0))) {
+                                         (accIO, name) =>
+                                           accIO.flatMap { case (byName, created) =>
+                                             if byName.contains(name.toLowerCase) then IO.pure((byName, created))
+                                             else {
+                                               val cat = Category(CategoryId(UUID.randomUUID().toString), name, None)
+                                               repos.categories.create(cat).as((byName + (name.toLowerCase -> cat.id), created + 1))
+                                             }
+                                           }
+                                       }
+      (catByName, categoriesCreated) = resolved
+      toCreate                       = req.bundle.rules.zipWithIndex.map { case (r, idx) =>
+                                         ClassificationRule(
+                                           ClassificationRuleId(UUID.randomUUID().toString),
+                                           r.name,
+                                           catByName(r.categoryName.toLowerCase),
+                                           base + idx,
+                                           r.criteria,
+                                           now,
+                                         )
+                                       }
+      _                             <- toCreate.traverse_(repos.classificationRules.create)
+      _                             <- ruleEngine.applyRules()
+    } yield Right(ImportRulesResult(toCreate.size, categoriesCreated))
 
   private def exportDatabase(dbPath: String): Result[(String, Array[Byte])] = {
     val path      = Paths.get(dbPath)

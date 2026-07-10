@@ -2,25 +2,27 @@ package ssbudget.backend.banking
 
 import cats.effect.IO
 import cats.syntax.all.*
-import ssbudget.backend.banking.EnableBankingClient.{EbAccountDetails, EbBalance, EbSession}
+import ssbudget.backend.banking.EnableBankingClient.{EbAccountDetails, EbBalance, EbSession, EbTransactionsPage}
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.db.repository.RepositorySpec
 import ssbudget.shared.api.{CreateCardGroup, LinkAccountRequest, LinkCardGroupRequest}
 import ssbudget.shared.model.*
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 
 /** Fake Enable Banking API: returns canned balances/details keyed by account uid, no HTTP. */
 class FakeEnableBankingApi(
     balances: Map[String, EbBalance] = Map.empty,
     details: Map[String, EbAccountDetails] = Map.empty,
 ) extends EnableBankingApi {
-  override def listAspsps(country: Option[String])                                    = IO.pure(Right(Nil))
-  override def startAuthorization(aspspName: String, aspspCountry: String, s: String) = IO.pure(Right("https://bank.example/redirect"))
-  override def createSession(code: String)                                            = IO.pure(Right(EbSession("sess-1", Nil, None)))
-  override def getBalances(accountUid: String)                                        = IO.pure(balances.get(accountUid).toRight(s"no balance for $accountUid"))
-  override def getAccountDetails(accountUid: String)                                  = IO.pure(details.get(accountUid).toRight(s"no details for $accountUid"))
-  override def deleteSession(sessionId: String)                                       = IO.pure(Right(()))
+  override def listAspsps(country: Option[String])                                                                          = IO.pure(Right(Nil))
+  override def startAuthorization(aspspName: String, aspspCountry: String, s: String)                                       = IO.pure(Right("https://bank.example/redirect"))
+  override def createSession(code: String)                                                                                  = IO.pure(Right(EbSession("sess-1", Nil, None)))
+  override def getBalances(accountUid: String)                                                                              = IO.pure(balances.get(accountUid).toRight(s"no balance for $accountUid"))
+  override def getAccountDetails(accountUid: String)                                                                        = IO.pure(details.get(accountUid).toRight(s"no details for $accountUid"))
+  override def getTransactions(accountUid: String, dateFrom: LocalDate, dateTo: LocalDate, continuationKey: Option[String]) =
+    IO.pure(Right(EbTransactionsPage(Nil, None)))
+  override def deleteSession(sessionId: String)                                                                             = IO.pure(Right(()))
 }
 
 class BankingServiceSpec extends RepositorySpec {

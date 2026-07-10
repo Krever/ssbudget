@@ -20,6 +20,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   private val currencySettingsVar: Var[List[CurrencySetting]]       = Var(List.empty)
   private val availableCurrenciesVar: Var[List[(String, String)]]   = Var(List.empty)
   private val oneTimeExpensesVar: Var[List[OneTimeExpense]]         = Var(List.empty)
+  private val categorySummariesVar: Var[List[CategorySummary]]      = Var(List.empty)
 
   // Initialize by fetching all data from individual endpoints
   override def initialize(): Future[Unit] = {
@@ -31,6 +32,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     val exchangeRatesFut    = client.exchangeRates.getAll()
     val currencySettingsFut = client.currencies.getSettings()
     val oneTimeExpensesFut  = client.oneTimeExpenses.list()
+    val categorySummsFut    = client.categories.summaries()
 
     for {
       accounts         <- accountsFut
@@ -41,6 +43,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       exchangeRates    <- exchangeRatesFut
       currencySettings <- currencySettingsFut
       oneTimeExpenses  <- oneTimeExpensesFut
+      categorySumms    <- categorySummsFut
     } yield {
       accountsVar.set(accounts)
       budgetItemsVar.set(budgetItems)
@@ -51,6 +54,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       currencySettingsVar.set(currencySettings.currencies)
       availableCurrenciesVar.set(currencySettings.availableCurrencies.map(c => (c.code, c.name)))
       oneTimeExpensesVar.set(oneTimeExpenses)
+      categorySummariesVar.set(categorySumms)
     }
   }
 
@@ -66,6 +70,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   override def currencySettings: Signal[List[CurrencySetting]]       = currencySettingsVar.signal
   override def availableCurrencies: Signal[List[(String, String)]]   = availableCurrenciesVar.signal
   override def oneTimeExpenses: Signal[List[OneTimeExpense]]         = oneTimeExpensesVar.signal
+  override def categorySummaries: Signal[List[CategorySummary]]      = categorySummariesVar.signal
 
   override def enabledCurrencies: Signal[List[Currency]] =
     currencySettingsVar.signal.map(_.map(_.code))
@@ -137,6 +142,36 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
         math.max(1, daysLeft)
       case None    => 0
     }
+
+  override def periodElapsedFraction: Signal[Double] =
+    currentPeriod.map {
+      case Some(p) =>
+        val zone    = ZoneId.of("UTC")
+        val start   = p.startDate.atZone(zone).toLocalDate
+        val today   = LocalDate.now(zone)
+        val day25   = today.withDayOfMonth(25)
+        val end     = if today.getDayOfMonth < 25 then day25 else day25.plusMonths(1)
+        val total   = ChronoUnit.DAYS.between(start, end).toDouble
+        val elapsed = ChronoUnit.DAYS.between(start, today).toDouble
+        if total <= 0 then 1.0 else math.max(0.0, math.min(1.0, elapsed / total))
+      case None    => 0.0
+    }
+
+  /** Budgeted categories only, in display order (by name). */
+  override def budgetedCategories: Signal[List[CategorySummary]] =
+    categorySummariesVar.signal.map(_.filter(_.category.monthlyBudget).sortBy(_.category.name))
+
+  /** Remaining category-budget spend expected this period: Σ max(0, avg − spentSoFar), in primary currency. Folded into predicted expenses. */
+  override def categoryBudgetsRemaining: Signal[Money] =
+    categorySummariesVar.signal
+      .combineWith(exchangeRatesVar.signal)
+      .combineWith(primaryCurrency)
+      .map { case (summaries, rates, primary) =>
+        val amounts = summaries.filter(_.category.monthlyBudget).map { s =>
+          Money(math.max(0L, s.avgMonthlyCents - s.currentPeriodSpentCents), s.currency)
+        }
+        sumInPrimary(amounts, rates, primary)
+      }
 
   override def unpaidPlannedExpenses: Signal[Money] =
     plannedExpenses
@@ -230,15 +265,17 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     unpaidPlannedExpenses
       .combineWith(scaledEstimatedExpenses)
       .combineWith(remainingSavingsTarget)
-      .map { case (unpaid, scaled, savings) => unpaid + scaled + savings }
+      .combineWith(categoryBudgetsRemaining)
+      .map { case (unpaid, scaled, savings, catBudgets) => unpaid + scaled + savings + catBudgets }
 
   override def freeMoney: Signal[Money] =
     bankAccountBalance
       .combineWith(unpaidPlannedExpenses)
       .combineWith(scaledEstimatedExpenses)
       .combineWith(remainingSavingsTarget)
+      .combineWith(categoryBudgetsRemaining)
       .combineWith(pendingIncome)
-      .map { case (bankBalance, unpaid, scaled, savings, income) => bankBalance - unpaid - scaled - savings + income }
+      .map { case (bankBalance, unpaid, scaled, savings, catBudgets, income) => bankBalance - unpaid - scaled - savings - catBudgets + income }
 
   override def availableNow: Signal[Money] =
     bankAccountBalance
@@ -352,21 +389,14 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     client.accounts.update(id, UpdateAccount(name, currency, savingsTarget)).map(upsertAccount)
 
   override def addSavingsTransaction(accountId: AccountId, amount: Long, note: Option[String]): Future[Unit] = {
-    client.savingsTransactions.create(CreateSavingsTransaction(accountId, amount, note)).map { response =>
-      savingsTransactionsVar.update(_ :+ response.transaction)
-      upsertAccount(response.updatedAccount)
+    client.savingsTransactions.create(CreateSavingsTransaction(accountId, amount, note)).map { txn =>
+      savingsTransactionsVar.update(_ :+ txn)
     }
   }
 
   override def deleteSavingsTransaction(id: SavingsTransactionId): Future[Unit] = {
-    val txnOpt = savingsTransactionsVar.now().find(_.id == id)
-    txnOpt match {
-      case Some(txn) =>
-        client.savingsTransactions.delete(id).map { updatedAccount =>
-          savingsTransactionsVar.update(_.filterNot(_.id == id))
-          upsertAccount(updatedAccount)
-        }
-      case None      => Future.successful(())
+    client.savingsTransactions.delete(id).map { _ =>
+      savingsTransactionsVar.update(_.filterNot(_.id == id))
     }
   }
 

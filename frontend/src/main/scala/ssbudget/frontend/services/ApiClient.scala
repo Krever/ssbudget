@@ -154,12 +154,12 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request(())).map(handleResponse)
     }
 
-    def create(dto: CreateSavingsTransaction): Future[SavingsTransactionResponse] = {
+    def create(dto: CreateSavingsTransaction): Future[SavingsTransaction] = {
       val request = interpreter.toRequest(Endpoints.client.savingsTransactions.create, Some(baseUri))
       backend.send(request(dto)).map(handleResponse)
     }
 
-    def delete(id: SavingsTransactionId): Future[Account] = {
+    def delete(id: SavingsTransactionId): Future[Unit] = {
       val request = interpreter.toRequest(Endpoints.client.savingsTransactions.delete, Some(baseUri))
       backend.send(request(id)).map(handleResponse)
     }
@@ -219,6 +219,110 @@ class ApiClient(implicit ec: ExecutionContext) {
     def linkCardGroup(id: CardGroupId, req: LinkCardGroupRequest): Future[List[CardGroup]] = {
       val request = interpreter.toRequest(Endpoints.client.banking.linkCardGroup, Some(baseUri))
       backend.send(request((id, req))).map(handleResponse)
+    }
+
+    def importTransactions(id: BankConnectionId, req: ImportTransactionsRequest): Future[ImportResult] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.importTransactions, Some(baseUri))
+      backend.send(request((id, req))).map(handleResponse)
+    }
+  }
+
+  object transactions {
+    def query(
+        accountUid: Option[String],
+        month: Option[String],
+        category: Option[String],
+        hideInternal: Boolean,
+        sort: String,
+        asc: Boolean,
+        limit: Option[Int],
+    ): Future[TransactionListResponse] = {
+      val request = interpreter.toRequest(Endpoints.client.transactions.list, Some(baseUri))
+      backend.send(request((accountUid, month, category, Some(hideInternal), Some(sort), Some(asc), limit))).map(handleResponse)
+    }
+
+    def months(): Future[List[String]] = {
+      val request = interpreter.toRequest(Endpoints.client.transactions.months, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def setCategory(id: BankTransactionId, req: SetCategoryRequest): Future[BankTransaction] = {
+      val request = interpreter.toRequest(Endpoints.client.transactions.setCategory, Some(baseUri))
+      backend.send(request((id, req))).map(handleResponse)
+    }
+  }
+
+  object categories {
+    def list(): Future[List[Category]] = {
+      val request = interpreter.toRequest(Endpoints.client.categories.list, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def summaries(): Future[List[CategorySummary]] = {
+      val request = interpreter.toRequest(Endpoints.client.categories.summaries, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def create(dto: CreateCategory): Future[Category] = {
+      val request = interpreter.toRequest(Endpoints.client.categories.create, Some(baseUri))
+      backend.send(request(dto)).map(handleResponse)
+    }
+
+    def update(id: CategoryId, dto: UpdateCategory): Future[Category] = {
+      val request = interpreter.toRequest(Endpoints.client.categories.update, Some(baseUri))
+      backend.send(request((id, dto))).map(handleResponse)
+    }
+
+    def delete(id: CategoryId): Future[Unit] = {
+      val request = interpreter.toRequest(Endpoints.client.categories.delete, Some(baseUri))
+      backend.send(request(id)).map(handleResponse)
+    }
+  }
+
+  object rules {
+    def list(): Future[List[ClassificationRule]] = {
+      val request = interpreter.toRequest(Endpoints.client.rules.list, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def create(dto: CreateRuleRequest): Future[ClassificationRule] = {
+      val request = interpreter.toRequest(Endpoints.client.rules.create, Some(baseUri))
+      backend.send(request(dto)).map(handleResponse)
+    }
+
+    def update(id: ClassificationRuleId, dto: UpdateRuleRequest): Future[ClassificationRule] = {
+      val request = interpreter.toRequest(Endpoints.client.rules.update, Some(baseUri))
+      backend.send(request((id, dto))).map(handleResponse)
+    }
+
+    def delete(id: ClassificationRuleId): Future[Unit] = {
+      val request = interpreter.toRequest(Endpoints.client.rules.delete, Some(baseUri))
+      backend.send(request(id)).map(handleResponse)
+    }
+
+    def reorder(orderedIds: List[ClassificationRuleId]): Future[List[ClassificationRule]] = {
+      val request = interpreter.toRequest(Endpoints.client.rules.reorder, Some(baseUri))
+      backend.send(request(ReorderRulesRequest(orderedIds))).map(handleResponse)
+    }
+
+    def apply(): Future[ApplyRulesResult] = {
+      val request = interpreter.toRequest(Endpoints.client.rules.apply, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def preview(criteria: List[RuleCriterion]): Future[RulePreviewResponse] = {
+      val request = interpreter.toRequest(Endpoints.client.rules.preview, Some(baseUri))
+      backend.send(request(RulePreviewRequest(criteria))).map(handleResponse)
+    }
+
+    def exportRules(): Future[RulesExport] = {
+      val request = interpreter.toRequest(Endpoints.client.rules.exportRules, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def importRules(req: ImportRulesRequest): Future[ImportRulesResult] = {
+      val request = interpreter.toRequest(Endpoints.client.rules.importRules, Some(baseUri))
+      backend.send(request(req)).map(handleResponse)
     }
   }
 

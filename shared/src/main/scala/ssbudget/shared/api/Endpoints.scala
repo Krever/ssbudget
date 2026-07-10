@@ -122,17 +122,16 @@ object Endpoints {
         .out(jsonBody[List[SavingsTransaction]])
         .errorOut(stringBody)
 
-    val create: Secured[CreateSavingsTransaction, SavingsTransactionResponse] =
+    val create: Secured[CreateSavingsTransaction, SavingsTransaction] =
       secureEndpoint.post
         .in("savings-transactions")
         .in(jsonBody[CreateSavingsTransaction])
-        .out(jsonBody[SavingsTransactionResponse])
+        .out(jsonBody[SavingsTransaction])
         .errorOut(stringBody)
 
-    val delete: Secured[SavingsTransactionId, Account] =
+    val delete: Secured[SavingsTransactionId, Unit] =
       secureEndpoint.delete
         .in("savings-transactions" / path[SavingsTransactionId]("id"))
-        .out(jsonBody[Account])
         .errorOut(stringBody)
   }
 
@@ -197,6 +196,95 @@ object Endpoints {
         .in(jsonBody[LinkCardGroupRequest])
         .out(jsonBody[List[CardGroup]])
         .errorOut(stringBody)
+
+    val importTransactions: Secured[(BankConnectionId, ImportTransactionsRequest), ImportResult] =
+      secureEndpoint.post
+        .in("banking" / "connections" / path[BankConnectionId]("id") / "import-transactions")
+        .in(jsonBody[ImportTransactionsRequest])
+        .out(jsonBody[ImportResult])
+        .errorOut(stringBody)
+  }
+
+  object transactions {
+    // Filtering/sorting/capping happen server-side: the browser can't hold thousands of rows. `category` = "all" | "uncategorized" | a categoryId.
+    val list: Secured[
+      (Option[String], Option[String], Option[String], Option[Boolean], Option[String], Option[Boolean], Option[Int]),
+      TransactionListResponse,
+    ] =
+      secureEndpoint.get
+        .in("transactions")
+        .in(query[Option[String]]("accountUid"))
+        .in(query[Option[String]]("month"))
+        .in(query[Option[String]]("category"))
+        .in(query[Option[Boolean]]("hideInternal"))
+        .in(query[Option[String]]("sort"))
+        .in(query[Option[Boolean]]("asc"))
+        .in(query[Option[Int]]("limit"))
+        .out(jsonBody[TransactionListResponse])
+        .errorOut(stringBody)
+
+    val months: Secured[Unit, List[String]] =
+      secureEndpoint.get
+        .in("transactions" / "months")
+        .out(jsonBody[List[String]])
+        .errorOut(stringBody)
+
+    val setCategory: Secured[(BankTransactionId, SetCategoryRequest), BankTransaction] =
+      secureEndpoint.post
+        .in("transactions" / path[BankTransactionId]("id") / "category")
+        .in(jsonBody[SetCategoryRequest])
+        .out(jsonBody[BankTransaction])
+        .errorOut(stringBody)
+  }
+
+  object categories {
+    val list: Secured[Unit, List[Category]] =
+      secureEndpoint.get.in("categories").out(jsonBody[List[Category]]).errorOut(stringBody)
+
+    val summaries: Secured[Unit, List[CategorySummary]] =
+      secureEndpoint.get.in("categories" / "summaries").out(jsonBody[List[CategorySummary]]).errorOut(stringBody)
+
+    val create: Secured[CreateCategory, Category] =
+      secureEndpoint.post.in("categories").in(jsonBody[CreateCategory]).out(jsonBody[Category]).errorOut(stringBody)
+
+    val update: Secured[(CategoryId, UpdateCategory), Category] =
+      secureEndpoint.put.in("categories" / path[CategoryId]("id")).in(jsonBody[UpdateCategory]).out(jsonBody[Category]).errorOut(stringBody)
+
+    val delete: Secured[CategoryId, Unit] =
+      secureEndpoint.delete.in("categories" / path[CategoryId]("id")).errorOut(stringBody)
+  }
+
+  object rules {
+    val list: Secured[Unit, List[ClassificationRule]] =
+      secureEndpoint.get.in("rules").out(jsonBody[List[ClassificationRule]]).errorOut(stringBody)
+
+    val create: Secured[CreateRuleRequest, ClassificationRule] =
+      secureEndpoint.post.in("rules").in(jsonBody[CreateRuleRequest]).out(jsonBody[ClassificationRule]).errorOut(stringBody)
+
+    val update: Secured[(ClassificationRuleId, UpdateRuleRequest), ClassificationRule] =
+      secureEndpoint.put
+        .in("rules" / path[ClassificationRuleId]("id"))
+        .in(jsonBody[UpdateRuleRequest])
+        .out(jsonBody[ClassificationRule])
+        .errorOut(stringBody)
+
+    val delete: Secured[ClassificationRuleId, Unit] =
+      secureEndpoint.delete.in("rules" / path[ClassificationRuleId]("id")).errorOut(stringBody)
+
+    val reorder: Secured[ReorderRulesRequest, List[ClassificationRule]] =
+      secureEndpoint.post.in("rules" / "reorder").in(jsonBody[ReorderRulesRequest]).out(jsonBody[List[ClassificationRule]]).errorOut(stringBody)
+
+    val apply: Secured[Unit, ApplyRulesResult] =
+      secureEndpoint.post.in("rules" / "apply").out(jsonBody[ApplyRulesResult]).errorOut(stringBody)
+
+    val preview: Secured[RulePreviewRequest, RulePreviewResponse] =
+      secureEndpoint.post.in("rules" / "preview").in(jsonBody[RulePreviewRequest]).out(jsonBody[RulePreviewResponse]).errorOut(stringBody)
+
+    val exportRules: Secured[Unit, RulesExport] =
+      secureEndpoint.get.in("rules" / "export").out(jsonBody[RulesExport]).errorOut(stringBody)
+
+    val importRules: Secured[ImportRulesRequest, ImportRulesResult] =
+      secureEndpoint.post.in("rules" / "import").in(jsonBody[ImportRulesRequest]).out(jsonBody[ImportRulesResult]).errorOut(stringBody)
   }
 
   object oneTimeExpenses {
@@ -329,6 +417,24 @@ object Endpoints {
     banking.createCardGroup,
     banking.deleteCardGroup,
     banking.linkCardGroup,
+    banking.importTransactions,
+    transactions.list,
+    transactions.months,
+    transactions.setCategory,
+    categories.list,
+    categories.summaries,
+    categories.create,
+    categories.update,
+    categories.delete,
+    rules.list,
+    rules.create,
+    rules.update,
+    rules.delete,
+    rules.reorder,
+    rules.apply,
+    rules.preview,
+    rules.exportRules,
+    rules.importRules,
     test.reset,
   )
 
@@ -408,15 +514,15 @@ object Endpoints {
       val listCurrent: Client[Unit, List[SavingsTransaction]] =
         baseEndpoint.get.in("savings-transactions" / "current").out(jsonBody[List[SavingsTransaction]]).errorOut(stringBody)
 
-      val create: Client[CreateSavingsTransaction, SavingsTransactionResponse] =
+      val create: Client[CreateSavingsTransaction, SavingsTransaction] =
         baseEndpoint.post
           .in("savings-transactions")
           .in(jsonBody[CreateSavingsTransaction])
-          .out(jsonBody[SavingsTransactionResponse])
+          .out(jsonBody[SavingsTransaction])
           .errorOut(stringBody)
 
-      val delete: Client[SavingsTransactionId, Account] =
-        baseEndpoint.delete.in("savings-transactions" / path[SavingsTransactionId]("id")).out(jsonBody[Account]).errorOut(stringBody)
+      val delete: Client[SavingsTransactionId, Unit] =
+        baseEndpoint.delete.in("savings-transactions" / path[SavingsTransactionId]("id")).errorOut(stringBody)
     }
 
     object banking {
@@ -467,6 +573,91 @@ object Endpoints {
           .in(jsonBody[LinkCardGroupRequest])
           .out(jsonBody[List[CardGroup]])
           .errorOut(stringBody)
+
+      val importTransactions: Client[(BankConnectionId, ImportTransactionsRequest), ImportResult] =
+        baseEndpoint.post
+          .in("banking" / "connections" / path[BankConnectionId]("id") / "import-transactions")
+          .in(jsonBody[ImportTransactionsRequest])
+          .out(jsonBody[ImportResult])
+          .errorOut(stringBody)
+    }
+
+    object transactions {
+      val list: Client[
+        (Option[String], Option[String], Option[String], Option[Boolean], Option[String], Option[Boolean], Option[Int]),
+        TransactionListResponse,
+      ] =
+        baseEndpoint.get
+          .in("transactions")
+          .in(query[Option[String]]("accountUid"))
+          .in(query[Option[String]]("month"))
+          .in(query[Option[String]]("category"))
+          .in(query[Option[Boolean]]("hideInternal"))
+          .in(query[Option[String]]("sort"))
+          .in(query[Option[Boolean]]("asc"))
+          .in(query[Option[Int]]("limit"))
+          .out(jsonBody[TransactionListResponse])
+          .errorOut(stringBody)
+
+      val months: Client[Unit, List[String]] =
+        baseEndpoint.get.in("transactions" / "months").out(jsonBody[List[String]]).errorOut(stringBody)
+
+      val setCategory: Client[(BankTransactionId, SetCategoryRequest), BankTransaction] =
+        baseEndpoint.post
+          .in("transactions" / path[BankTransactionId]("id") / "category")
+          .in(jsonBody[SetCategoryRequest])
+          .out(jsonBody[BankTransaction])
+          .errorOut(stringBody)
+    }
+
+    object categories {
+      val list: Client[Unit, List[Category]] =
+        baseEndpoint.get.in("categories").out(jsonBody[List[Category]]).errorOut(stringBody)
+
+      val summaries: Client[Unit, List[CategorySummary]] =
+        baseEndpoint.get.in("categories" / "summaries").out(jsonBody[List[CategorySummary]]).errorOut(stringBody)
+
+      val create: Client[CreateCategory, Category] =
+        baseEndpoint.post.in("categories").in(jsonBody[CreateCategory]).out(jsonBody[Category]).errorOut(stringBody)
+
+      val update: Client[(CategoryId, UpdateCategory), Category] =
+        baseEndpoint.put.in("categories" / path[CategoryId]("id")).in(jsonBody[UpdateCategory]).out(jsonBody[Category]).errorOut(stringBody)
+
+      val delete: Client[CategoryId, Unit] =
+        baseEndpoint.delete.in("categories" / path[CategoryId]("id")).errorOut(stringBody)
+    }
+
+    object rules {
+      val list: Client[Unit, List[ClassificationRule]] =
+        baseEndpoint.get.in("rules").out(jsonBody[List[ClassificationRule]]).errorOut(stringBody)
+
+      val create: Client[CreateRuleRequest, ClassificationRule] =
+        baseEndpoint.post.in("rules").in(jsonBody[CreateRuleRequest]).out(jsonBody[ClassificationRule]).errorOut(stringBody)
+
+      val update: Client[(ClassificationRuleId, UpdateRuleRequest), ClassificationRule] =
+        baseEndpoint.put
+          .in("rules" / path[ClassificationRuleId]("id"))
+          .in(jsonBody[UpdateRuleRequest])
+          .out(jsonBody[ClassificationRule])
+          .errorOut(stringBody)
+
+      val delete: Client[ClassificationRuleId, Unit] =
+        baseEndpoint.delete.in("rules" / path[ClassificationRuleId]("id")).errorOut(stringBody)
+
+      val reorder: Client[ReorderRulesRequest, List[ClassificationRule]] =
+        baseEndpoint.post.in("rules" / "reorder").in(jsonBody[ReorderRulesRequest]).out(jsonBody[List[ClassificationRule]]).errorOut(stringBody)
+
+      val apply: Client[Unit, ApplyRulesResult] =
+        baseEndpoint.post.in("rules" / "apply").out(jsonBody[ApplyRulesResult]).errorOut(stringBody)
+
+      val preview: Client[RulePreviewRequest, RulePreviewResponse] =
+        baseEndpoint.post.in("rules" / "preview").in(jsonBody[RulePreviewRequest]).out(jsonBody[RulePreviewResponse]).errorOut(stringBody)
+
+      val exportRules: Client[Unit, RulesExport] =
+        baseEndpoint.get.in("rules" / "export").out(jsonBody[RulesExport]).errorOut(stringBody)
+
+      val importRules: Client[ImportRulesRequest, ImportRulesResult] =
+        baseEndpoint.post.in("rules" / "import").in(jsonBody[ImportRulesRequest]).out(jsonBody[ImportRulesResult]).errorOut(stringBody)
     }
 
     object oneTimeExpenses {

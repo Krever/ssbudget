@@ -11,7 +11,7 @@
 #
 # Deploy:
 #   ./build.sh                      # Build everything + Docker image
-#   fly deploy --local-only         # Push local image to fly.io
+#   fly deploy --local-only         # Push local image to fly.io (runs Flyway migrations V6-V8 on startup)
 #
 
 app = 'ssbudget'
@@ -24,6 +24,9 @@ primary_region = 'fra'
   SSBUDGET_PORT = '8080'
   SSBUDGET_RP_NAME = 'SSBudget'
   SSBUDGET_STATIC_DIR = '/opt/docker/static'
+  # Enable Banking: non-secret config. App id + private key are fly secrets (see header).
+  # EB_BASE_URL defaults to https://api.enablebanking.com, so it's omitted.
+  EB_REDIRECT_URL = 'https://ssbudget.fly.dev/banking/callback'
 
 [[mounts]]
   source = 'ssbudget_data'

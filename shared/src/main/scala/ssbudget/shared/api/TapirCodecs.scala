@@ -19,4 +19,7 @@ object TapirCodecs {
   given Codec[String, BankConnectionId, CodecFormat.TextPlain]     = stringIdCodec(BankConnectionId.apply, _.value)
   given Codec[String, BankAccountLinkId, CodecFormat.TextPlain]    = stringIdCodec(BankAccountLinkId.apply, _.value)
   given Codec[String, CardGroupId, CodecFormat.TextPlain]          = stringIdCodec(CardGroupId.apply, _.value)
+  given Codec[String, BankTransactionId, CodecFormat.TextPlain]    = stringIdCodec(BankTransactionId.apply, _.value)
+  given Codec[String, CategoryId, CodecFormat.TextPlain]           = stringIdCodec(CategoryId.apply, _.value)
+  given Codec[String, ClassificationRuleId, CodecFormat.TextPlain] = stringIdCodec(ClassificationRuleId.apply, _.value)
 }

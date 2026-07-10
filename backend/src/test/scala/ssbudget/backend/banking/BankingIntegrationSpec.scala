@@ -15,7 +15,7 @@ import ssbudget.backend.Routes
 import ssbudget.backend.auth.SessionService
 import ssbudget.backend.db.{Database, Repositories}
 import ssbudget.backend.service.CurrencyService
-import ssbudget.shared.api.{BankCallbackRequest, ConnectBankRequest, LinkAccountRequest}
+import ssbudget.shared.api.{BankCallbackRequest, ConnectBankRequest, ImportTransactionsRequest, LinkAccountRequest}
 import ssbudget.shared.model.*
 import sttp.client3.httpclient.cats.HttpClientCatsBackend
 
@@ -28,13 +28,14 @@ import java.util.Base64
   */
 class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAfterAll {
 
-  private var wm: WireMockServer             = scala.compiletime.uninitialized
-  private var dbFile: Path                   = scala.compiletime.uninitialized
-  private var releaseDb: IO[Unit]            = IO.unit
-  private var releaseBackend: IO[Unit]       = IO.unit
-  private var repos: Repositories            = scala.compiletime.uninitialized
-  private var routes: org.http4s.HttpApp[IO] = scala.compiletime.uninitialized
-  private var banking: BankingService        = scala.compiletime.uninitialized
+  private var wm: WireMockServer                      = scala.compiletime.uninitialized
+  private var dbFile: Path                            = scala.compiletime.uninitialized
+  private var releaseDb: IO[Unit]                     = IO.unit
+  private var releaseBackend: IO[Unit]                = IO.unit
+  private var repos: Repositories                     = scala.compiletime.uninitialized
+  private var routes: org.http4s.HttpApp[IO]          = scala.compiletime.uninitialized
+  private var banking: BankingService                 = scala.compiletime.uninitialized
+  private var importService: TransactionImportService = scala.compiletime.uninitialized
 
   private def testPrivateKeyPem(): String = {
     val kp  = KeyPairGenerator.getInstance("RSA")
@@ -66,6 +67,25 @@ class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAft
       get(urlPathEqualTo("/accounts/acc-uid-1/balances"))
         .willReturn(okJson("""{"balances":[{"balance_type":"CLAV","balance_amount":{"amount":"5000.00","currency":"PLN"}}]}""")),
     )
+    wm.stubFor(
+      get(urlPathEqualTo("/accounts/acc-uid-1/transactions")).willReturn(
+        okJson(
+          // tx-1 outgoing to a shop (no creditor IBAN) → external. tx-2 incoming salary → external.
+          // tx-3 incoming FROM our own account PL1 → internal. tx-4 is a BLIK purchase (outgoing) that only carries OUR OWN
+          //   account as debtor_account — the regression guard: it must NOT be flagged internal.
+          """{"transactions":[
+            |  {"entry_reference":"tx-1","transaction_amount":{"amount":"12.34","currency":"PLN"},"credit_debit_indicator":"DBIT",
+            |   "status":"BOOK","booking_date":"2026-01-10","creditor":{"name":"Shop"},"remittance_information":["Groceries"]},
+            |  {"entry_reference":"tx-2","transaction_amount":{"amount":"100.00","currency":"PLN"},"credit_debit_indicator":"CRDT",
+            |   "status":"BOOK","booking_date":"2026-01-11","debtor":{"name":"Employer"}},
+            |  {"entry_reference":"tx-3","transaction_amount":{"amount":"250.00","currency":"PLN"},"credit_debit_indicator":"CRDT",
+            |   "status":"BOOK","booking_date":"2026-01-12","debtor_account":{"iban":"PL1"}},
+            |  {"entry_reference":"tx-4","transaction_amount":{"amount":"30.00","currency":"PLN"},"credit_debit_indicator":"DBIT",
+            |   "status":"BOOK","booking_date":"2026-01-13","creditor":{"name":"BLIK Shop"},"debtor_account":{"iban":"PL1"}}
+            |]}""".stripMargin,
+        ),
+      ),
+    )
 
     val cfg = EnableBankingConfig("test-app", testPrivateKeyPem(), s"http://localhost:${wm.port()}", "https://localhost/cb")
 
@@ -77,10 +97,23 @@ class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAft
 
     repos = Repositories.fromTransactor(xa)
     val jwt             = EnableBankingJwt.create(cfg).unsafeRunSync()
-    banking = new BankingService(repos, Some(new EnableBankingClient(cfg, jwt, sttpBackend)))
+    val ebClient        = new EnableBankingClient(cfg, jwt, sttpBackend)
+    banking = new BankingService(repos, Some(ebClient))
+    val ruleEngine      = new RuleEngineService(repos)
+    importService = new TransactionImportService(repos, Some(ebClient), ruleEngine)
     val currencyService = new CurrencyService(repos, sttpBackend)
     routes = Routes
-      .make(repos, xa, dbFile.toAbsolutePath.toString, SessionService(repos.sessions), currencyService, banking, testMode = true)
+      .make(
+        repos,
+        xa,
+        dbFile.toAbsolutePath.toString,
+        SessionService(repos.sessions),
+        currencyService,
+        banking,
+        importService,
+        ruleEngine,
+        testMode = true,
+      )
       .orNotFound
   }
 
@@ -125,6 +158,18 @@ class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAft
     rejected.status.code shouldBe 400
     rejected.bodyText.compile.string.unsafeRunSync() should include("bank")
     repos.accounts.findById(accountId).unsafeRunSync().map(_.balanceCents) shouldBe Some(500000) // unchanged
+
+    // 5b. Import transactions through the real client (WireMock): parsing, dedup, and the internal-transfer rule end-to-end.
+    val imported = importService.importTransactions(conn.id, ImportTransactionsRequest(Some(1))).unsafeRunSync()
+    imported.map(_.totalImported) shouldBe Right(4)
+    val txs      = repos.bankTransactions.list(Some("acc-uid-1"), None, None).unsafeRunSync()
+    txs.size shouldBe 4
+    txs.find(_.entryReference.contains("tx-3")).map(_.internal) shouldBe Some(true)  // incoming from own account
+    txs.find(_.entryReference.contains("tx-4")).map(_.internal) shouldBe Some(false) // BLIK purchase — not a transfer
+    txs.find(_.entryReference.contains("tx-1")).map(_.internal) shouldBe Some(false) // external shop
+    // Re-import refreshes in place, never duplicates.
+    importService.importTransactions(conn.id, ImportTransactionsRequest(Some(1))).unsafeRunSync().map(_.totalImported) shouldBe Right(0)
+    repos.bankTransactions.list(Some("acc-uid-1"), None, None).unsafeRunSync().size shouldBe 4
 
     // 6. After unlinking, the account is Manual again and editable.
     banking.linkAccount(linkId, LinkAccountRequest(BankLinkTarget.Unlinked)).unsafeRunSync() shouldBe a[Right[?, ?]]

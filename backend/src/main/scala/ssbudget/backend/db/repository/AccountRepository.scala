@@ -22,9 +22,6 @@ trait AccountRepository {
   /** The single balance-write path: set the current balance + provenance and append a history snapshot, atomically. */
   def setBalance(id: AccountId, cents: Long, source: BalanceSource, at: Instant): IO[Unit]
 
-  /** Apply a delta to the balance (used by savings transactions, whose own rows are the history). Returns the updated account. */
-  def adjustBalance(id: AccountId, delta: Long, at: Instant): IO[Option[Account]]
-
   /** Change only the provenance (e.g. reverting to Manual when a bank link is detached). */
   def setBalanceSource(id: AccountId, source: BalanceSource): IO[Unit]
 }
@@ -77,14 +74,6 @@ class AccountRepositoryImpl(xa: Transactor[IO]) extends AccountRepository {
                      VALUES ($snapId, $id, $cents, ${a.currency}, $at)""".update.run
              }
     } yield ()
-    program.transact(xa)
-  }
-
-  override def adjustBalance(id: AccountId, delta: Long, at: Instant): IO[Option[Account]] = {
-    val program = for {
-      _   <- sql"UPDATE accounts SET balance_cents = balance_cents + $delta, balance_updated_at = $at WHERE id = $id".update.run
-      acc <- findByIdC(id)
-    } yield acc
     program.transact(xa)
   }
 

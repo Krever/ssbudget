@@ -10,7 +10,14 @@ import sttp.client3.httpclient.cats.HttpClientCatsBackend
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 
 import ssbudget.backend.auth.{PasswordService, SessionService, WebAuthnService}
-import ssbudget.backend.banking.{BankingService, EnableBankingClient, EnableBankingConfig, EnableBankingJwt}
+import ssbudget.backend.banking.{
+  BankingService,
+  EnableBankingClient,
+  EnableBankingConfig,
+  EnableBankingJwt,
+  RuleEngineService,
+  TransactionImportService,
+}
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.service.CurrencyService
 import ssbudget.shared.api.HealthEndpoint
@@ -53,11 +60,17 @@ object ServerBuilder {
       _               <- Resource.eval(
                            IO.println(if ebClientOpt.isDefined then "Enable Banking integration: configured" else "Enable Banking integration: not configured"),
                          )
+      // Re-apply the built-in transaction rules (internal-transfer detection) then the user-defined categorization rules on every boot,
+      // so rule tweaks take effect on restart without needing a re-import.
+      _               <- Resource.eval(repos.bankTransactions.markInternalTransfers())
+      ruleEngine       = new RuleEngineService(repos)
+      _               <- Resource.eval(ruleEngine.applyRules())
       server          <- {
         val passwordService = PasswordService()
         val sessionService  = SessionService(repos.sessions)
         val currencyService = new CurrencyService(repos, sttpBackend)
         val bankingService  = new BankingService(repos, ebClientOpt)
+        val importService   = new TransactionImportService(repos, ebClientOpt, ruleEngine)
 
         val authRoutes = AuthRoutes.make(
           repos.authConfig,
@@ -69,7 +82,8 @@ object ServerBuilder {
         )
 
         // Routes now handle their own auth via Tapir's serverSecurityLogic
-        val dataRoutes = Routes.make(repos, xa, dbPath, sessionService, currencyService, bankingService, testMode)
+        val dataRoutes =
+          Routes.make(repos, xa, dbPath, sessionService, currencyService, bankingService, importService, ruleEngine, testMode)
 
         // Static file routes for production (serves frontend build)
         val staticRoutes = StaticRoutes.make(staticDir)

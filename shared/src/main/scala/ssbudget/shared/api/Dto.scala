@@ -41,11 +41,6 @@ final case class UpdateOneTimeExpense(name: String, amountCents: Long, currency:
 // Response DTOs
 final case class IdResponse(id: String) derives Codec.AsObject
 
-final case class SavingsTransactionResponse(
-    transaction: SavingsTransaction,
-    updatedAccount: Account,
-) derives Codec.AsObject
-
 // Currency settings DTOs
 final case class EnableCurrencyRequest(code: String) derives Codec.AsObject
 

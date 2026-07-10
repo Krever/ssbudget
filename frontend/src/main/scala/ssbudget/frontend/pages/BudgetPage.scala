@@ -5,6 +5,7 @@ import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.DataService
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
+import ssbudget.shared.api.CategorySummary
 import ssbudget.shared.model.*
 
 import java.time.Instant
@@ -33,12 +34,15 @@ object BudgetPage {
   def apply(): HtmlElement = {
     div(
       cls := "container-fluid mt-3",
+      // Refresh on each visit so changes made elsewhere (e.g. flagging a category as a budget) are reflected without a manual page reload.
+      onMountCallback(_ => { dataService.initialize(); () }),
       h4("Budget"),
       div(
         cls   := "row g-3 mb-3",
         div(cls := "col-lg-6", plannedItemsCard()),
         div(cls := "col-lg-6", estimatedExpensesCard()),
       ),
+      div(cls := "row g-3 mb-3", div(cls := "col-12", categoryBudgetsCard())),
       div(cls := "row g-3 mb-3", div(cls := "col-12", plannedSavingsCard())),
       div(cls := "row g-3", div(cls := "col-12", oneTimeExpensesCard())),
     )
@@ -160,6 +164,61 @@ object BudgetPage {
         cls := "card-footer py-2 d-flex justify-content-between",
         span("Scaled Total"),
         span(cls := "font-monospace", MoneyFormatter.formatChild(dataService.scaledEstimatedExpenses)),
+      ),
+    )
+  }
+
+  /** Categories flagged as monthly budgets: actual spend this period vs the rolling 3-month average, with a pace marker (expected-by-now). */
+  private def categoryBudgetsCard(): HtmlElement =
+    div(
+      cls := "card",
+      div(cls := "card-header py-2", "Category Budgets"),
+      div(
+        cls   := "card-body",
+        children <-- dataService.budgetedCategories.combineWith(dataService.periodElapsedFraction).map { case (cats, elapsed) =>
+          if cats.isEmpty then List(
+            div(cls := "text-muted small", "No category budgets yet. Flag a category as a monthly budget on the Transactions page."),
+          )
+          else cats.map(c => categoryBudgetRow(c, elapsed))
+        },
+      ),
+    )
+
+  private def categoryBudgetRow(s: CategorySummary, elapsed: Double): HtmlElement = {
+    val budget     = s.avgMonthlyCents
+    val spent      = s.currentPeriodSpentCents
+    val fillPct    = if budget <= 0 then (if spent > 0 then 100.0 else 0.0) else math.min(100.0, spent.toDouble / budget * 100.0)
+    val pacePct    = math.max(0.0, math.min(100.0, elapsed * 100.0))
+    val expected   = (budget * elapsed).toLong
+    val overBudget = budget > 0 && spent > budget
+    val overPace   = budget > 0 && spent > expected
+    val barColor   = if overBudget then "bg-danger" else if overPace then "bg-warning" else "bg-success"
+    val paceLabel  =
+      if budget <= 0 then "no budget history yet"
+      else if overBudget then "over budget"
+      else if overPace then "over pace"
+      else "under pace ✓"
+    div(
+      cls := "mb-3",
+      div(
+        cls       := "d-flex justify-content-between",
+        span(cls := "fw-semibold", s.category.name),
+        span(cls := "font-monospace small", s"${MoneyFormatter.formatSimple(spent, s.currency)} / ${MoneyFormatter.formatSimple(budget, s.currency)}"),
+      ),
+      div(
+        cls       := "progress position-relative",
+        styleAttr := "height: 1.1rem",
+        div(cls     := s"progress-bar $barColor", styleAttr := s"width: $fillPct%"),
+        // pace marker: where spending would be if it tracked the period elapsed exactly
+        div(
+          styleAttr := s"position: absolute; top: 0; bottom: 0; left: $pacePct%; width: 2px; background: rgba(0,0,0,0.65)",
+          title     := "expected by now",
+        ),
+      ),
+      div(
+        cls       := "d-flex justify-content-between small text-muted",
+        span(paceLabel),
+        span(if budget > 0 then s"expected ~${MoneyFormatter.formatSimple(expected, s.currency)}" else ""),
       ),
     )
   }

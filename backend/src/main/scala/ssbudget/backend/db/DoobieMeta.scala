@@ -1,8 +1,10 @@
 package ssbudget.backend.db
 
-import cats.implicits.catsSyntaxEitherId
+import cats.implicits.*
 import doobie.*
 import doobie.implicits.*
+import io.circe.parser.decode
+import io.circe.syntax.*
 import ssbudget.shared.model.*
 
 import java.time.Instant
@@ -20,14 +22,23 @@ object DoobieMeta {
   given Meta[BankConnectionId]     = Meta[String].timap(BankConnectionId.apply)(_.value)
   given Meta[BankAccountLinkId]    = Meta[String].timap(BankAccountLinkId.apply)(_.value)
   given Meta[CardGroupId]          = Meta[String].timap(CardGroupId.apply)(_.value)
+  given Meta[BankTransactionId]    = Meta[String].timap(BankTransactionId.apply)(_.value)
+  given Meta[CategoryId]           = Meta[String].timap(CategoryId.apply)(_.value)
+  given Meta[ClassificationRuleId] = Meta[String].timap(ClassificationRuleId.apply)(_.value)
 
   // Value types
   given Meta[Currency] = Meta[String].timap(Currency.apply)(_.code)
 
   given Meta[ConnectionStatus] = Meta[String].tiemap(ConnectionStatus.fromString)(ConnectionStatus.asString)
 
-  given Meta[AccountRole]   = Meta[String].tiemap(AccountRole.fromString)(AccountRole.asString)
-  given Meta[BalanceSource] = Meta[String].tiemap(BalanceSource.fromString)(BalanceSource.asString)
+  given Meta[AccountRole]       = Meta[String].tiemap(AccountRole.fromString)(AccountRole.asString)
+  given Meta[BalanceSource]     = Meta[String].tiemap(BalanceSource.fromString)(BalanceSource.asString)
+  given Meta[TransactionStatus] = Meta[String].tiemap(TransactionStatus.fromString)(TransactionStatus.asString)
+  given Meta[CategorySource]    = Meta[String].tiemap(CategorySource.fromString)(CategorySource.asString)
+
+  // A rule's criteria list is stored as a single JSON column.
+  given Meta[List[RuleCriterion]] =
+    Meta[String].tiemap(s => decode[List[RuleCriterion]](s).leftMap(_.getMessage))(_.asJson.noSpaces)
 
   // BankLinkTarget spans two columns: (link_target_kind, link_target_id).
   given Read[BankLinkTarget] =

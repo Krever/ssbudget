@@ -301,6 +301,7 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
           links      <- repos.bankConnections.findLinksByConnection(id)
           targetAccts = links.flatMap(l => targetAccountId(l.target)).distinct
           _          <- revoke
+          _          <- repos.bankTransactions.deleteByConnection(id)
           _          <- repos.bankConnections.deleteLinksByConnection(id)
           _          <- repos.bankConnections.delete(id)
           _          <- targetAccts.traverse_(reconcileAccountSource)

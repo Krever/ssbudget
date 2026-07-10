@@ -2,6 +2,7 @@ package ssbudget.frontend.services
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
+import ssbudget.shared.api.CategorySummary
 import ssbudget.shared.model.*
 
 import scala.concurrent.Future
@@ -67,6 +68,12 @@ trait DataService {
   def estimatedExpenses: Signal[List[BudgetItemDefinition]]
   def plannedIncomes: Signal[List[BudgetItemDefinition]]
   def currentPeriodRecords: Signal[List[ExpenseRecord]]
+
+  // Category budgets (rolling 3-month average per category, computed server-side)
+  def categorySummaries: Signal[List[CategorySummary]]
+  def budgetedCategories: Signal[List[CategorySummary]] // only categories flagged as monthly budgets
+  def categoryBudgetsRemaining: Signal[Money]           // Σ max(0, avg − spent this period), in primary currency
+  def periodElapsedFraction: Signal[Double]             // 0..1 through the current period (for pace markers)
 
   def unpaidPlannedExpenses: Signal[Money]
   def scaledEstimatedExpenses: Signal[Money]

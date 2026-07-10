@@ -84,16 +84,6 @@ class AccountRepositorySpec extends RepositorySpec {
     }
   }
 
-  "adjustBalance applies a delta and returns the updated account" in {
-    val repo    = new AccountRepositoryImpl(xa)
-    val account = savingsAccount("acc-1", "Fund", Currency.PLN, 1000, Some(500))
-    val at      = Instant.parse("2024-02-01T00:00:00Z")
-
-    for {
-      updated <- repo.create(account) *> repo.adjustBalance(AccountId("acc-1"), -400, at)
-    } yield updated.map(_.balanceCents) shouldBe Some(600)
-  }
-
   "setBalanceSource changes only the provenance" in {
     val repo    = new AccountRepositoryImpl(xa)
     val account = spendingAccount("acc-1", "Main", Currency.PLN, 5000)

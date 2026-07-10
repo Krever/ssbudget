@@ -9,8 +9,15 @@
 #
 # Why one sbt session: two concurrent `sbt` on the same build collide on sbt's
 # boot server socket ("Address already in use" / ServerAlreadyBootingException).
-# So we run the backend as a background job and `~fastLinkJS` in the same sbt,
-# and start Vite FIRST so the plugin's one-shot `sbt --batch` runs on its own.
+# So we run a single watch that both restarts the backend (sbt-revolver `reStart`,
+# a forked JVM) and relinks the frontend (`fastLinkJS`), and start Vite FIRST so
+# the plugin's one-shot `sbt --batch` runs on its own.
+#
+# Backend now auto-restarts on Scala changes (was a one-shot `bgRun` before).
+# Caveat of the single-sbt constraint: one `~` watches BOTH tasks' sources, so a
+# frontend-only edit also bounces the backend (~a few seconds). Acceptable for a
+# small app; the alternative (a 2nd sbt just for the backend) hits the boot-socket
+# collision above.
 #
 # Just run ./dev.sh — no env vars to fiddle with. Ctrl-C stops everything.
 set -euo pipefail
@@ -23,7 +30,7 @@ kill_port() { local p="$1" pids; pids="$(lsof -ti "tcp:$p" 2>/dev/null || true)"
 kill_port 3000
 kill_port 8080
 pkill -f 'frontend/fastLinkJS' 2>/dev/null || true
-pkill -f 'backend/bgRun'       2>/dev/null || true
+pkill -f 'ssbudget.backend.Main' 2>/dev/null || true  # the reStart/bgRun backend fork
 
 # --- Enable Banking config, auto-derived from the .pem in the repo root ----------
 PEM="$(ls "$ROOT"/*.pem 2>/dev/null | grep -v '/localhost' | head -1 || true)"
@@ -76,7 +83,7 @@ for _ in $(seq 1 180); do
   sleep 1
 done
 
-# --- 2) Single sbt session: backend (background job) + Scala.js watch (foreground) ---
-echo "▶ starting backend (:8080) + Scala.js watch — single sbt session (Ctrl-C to stop all)"
-sbt --batch -no-colors "backend/bgRun" "~frontend/fastLinkJS" &
+# --- 2) Single sbt session: one watch that restarts the backend AND relinks the frontend ---
+echo "▶ starting backend (:8080, auto-restart) + Scala.js watch — single sbt session (Ctrl-C to stop all)"
+sbt --batch -no-colors "~ ;backend/reStart ;frontend/fastLinkJS" &
 wait $!

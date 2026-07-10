@@ -1,6 +1,7 @@
 package ssbudget.frontend.services
 
 import com.raquo.laminar.api.L.*
+import ssbudget.shared.api.CategorySummary
 import ssbudget.shared.model.*
 
 import java.time.{Instant, LocalDate, ZoneId}
@@ -272,6 +273,25 @@ object InMemoryDataService extends DataService {
         sumInPrimary(pendingAmounts, rates, primary)
       }
 
+  // Category budgets are not modelled in the in-memory mock; expose empty/zero stubs.
+  override def categorySummaries: Signal[List[CategorySummary]]  = Val(List.empty)
+  override def budgetedCategories: Signal[List[CategorySummary]] = Val(List.empty)
+  override def categoryBudgetsRemaining: Signal[Money]           = primaryCurrency.map(Money.zero)
+
+  override def periodElapsedFraction: Signal[Double] =
+    currentPeriod.map {
+      case Some(p) =>
+        val zone    = ZoneId.of("UTC")
+        val start   = p.startDate.atZone(zone).toLocalDate
+        val today   = LocalDate.now(zone)
+        val day25   = today.withDayOfMonth(25)
+        val end     = if today.getDayOfMonth < 25 then day25 else day25.plusMonths(1)
+        val total   = ChronoUnit.DAYS.between(start, end).toDouble
+        val elapsed = ChronoUnit.DAYS.between(start, today).toDouble
+        if total <= 0 then 1.0 else math.max(0.0, math.min(1.0, elapsed / total))
+      case None    => 0.0
+    }
+
   override def predictedExpenses: Signal[Money] =
     unpaidPlannedExpenses
       .combineWith(scaledEstimatedExpenses)
@@ -423,17 +443,12 @@ object InMemoryDataService extends DataService {
       val txnId = SavingsTransactionId(s"stxn-${System.currentTimeMillis()}")
       val txn   = SavingsTransaction(txnId, accountId, period.id, amount, note, Instant.now())
       savingsTransactionsVar.update(_ :+ txn)
-      accountsVar.update(_.map(a => if a.id == accountId then a.copy(balanceCents = a.balanceCents + amount) else a))
     }
     Future.successful(())
   }
 
   override def deleteSavingsTransaction(id: SavingsTransactionId): Future[Unit] = {
-    val txnOpt = savingsTransactionsVar.now().find(_.id == id)
-    txnOpt.foreach { txn =>
-      accountsVar.update(_.map(a => if a.id == txn.accountId then a.copy(balanceCents = a.balanceCents - txn.amount) else a))
-      savingsTransactionsVar.update(_.filterNot(_.id == id))
-    }
+    savingsTransactionsVar.update(_.filterNot(_.id == id))
     Future.successful(())
   }
 

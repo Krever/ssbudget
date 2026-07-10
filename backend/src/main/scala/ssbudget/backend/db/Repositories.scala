@@ -19,6 +19,9 @@ final case class Repositories(
     oneTimeExpenses: OneTimeExpenseRepository,
     bankConnections: BankConnectionRepository,
     cardGroups: CardGroupRepository,
+    bankTransactions: BankTransactionRepository,
+    categories: CategoryRepository,
+    classificationRules: ClassificationRuleRepository,
 )
 
 object Repositories {
@@ -38,6 +41,9 @@ object Repositories {
       oneTimeExpenses = new OneTimeExpenseRepositoryImpl(xa),
       bankConnections = new BankConnectionRepositoryImpl(xa),
       cardGroups = new CardGroupRepositoryImpl(xa),
+      bankTransactions = new BankTransactionRepositoryImpl(xa),
+      categories = new CategoryRepositoryImpl(xa),
+      classificationRules = new ClassificationRuleRepositoryImpl(xa),
     )
   }
 }

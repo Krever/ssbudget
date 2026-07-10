@@ -22,6 +22,12 @@ trait EnableBankingApi {
   def createSession(code: String): IO[Either[String, EbSession]]
   def getBalances(accountUid: String): IO[Either[String, EbBalance]]
   def getAccountDetails(accountUid: String): IO[Either[String, EbAccountDetails]]
+  def getTransactions(
+      accountUid: String,
+      dateFrom: LocalDate,
+      dateTo: LocalDate,
+      continuationKey: Option[String],
+  ): IO[Either[String, EbTransactionsPage]]
   def deleteSession(sessionId: String): IO[Either[String, Unit]]
 }
 
@@ -61,6 +67,17 @@ class EnableBankingClient(config: EnableBankingConfig, jwt: EnableBankingJwt, ba
   /** GET /accounts/{uid}/details — account name, product, IBAN, currency. */
   def getAccountDetails(accountUid: String): IO[Either[String, EbAccountDetails]] =
     get(Seq("accounts", accountUid, "details"), Map.empty).map(_.flatMap(parseAccountDetails))
+
+  /** GET /accounts/{uid}/transactions — one page of transactions in [dateFrom, dateTo], following `continuation_key` for the next page. */
+  def getTransactions(
+      accountUid: String,
+      dateFrom: LocalDate,
+      dateTo: LocalDate,
+      continuationKey: Option[String],
+  ): IO[Either[String, EbTransactionsPage]] = {
+    val params = Map("date_from" -> dateFrom.toString, "date_to" -> dateTo.toString) ++ continuationKey.map("continuation_key" -> _)
+    get(Seq("accounts", accountUid, "transactions"), params).map(_.flatMap(parseTransactions))
+  }
 
   /** DELETE /sessions/{id} — revoke the consent at the bank. Best-effort. */
   def deleteSession(sessionId: String): IO[Either[String, Unit]] =
@@ -109,6 +126,22 @@ object EnableBankingClient {
   final case class EbBalance(amountCents: Long, currency: String)
 
   final case class EbAccountDetails(name: Option[String], product: Option[String], iban: Option[String], currency: Option[String])
+
+  /** One transaction, best-effort extracted. `amountCents` is signed (debit negative). `raw` is the untouched payload so nothing is ever lost. */
+  final case class EbTransaction(
+      entryReference: Option[String],
+      amountCents: Long,
+      currency: String,
+      status: String, // "booked" | "pending"
+      bookedAt: Option[Instant],
+      counterpartyName: Option[String],
+      counterpartyAccount: Option[String],
+      remittance: Option[String],
+      bankTransactionCode: Option[String],
+      raw: Json,
+  )
+
+  final case class EbTransactionsPage(transactions: List[EbTransaction], continuationKey: Option[String])
 
   // Preferred balance types, best-first (closing available, interim available, closing booked, expected).
   private val balanceTypePreference = List("CLAV", "ITAV", "CLBD", "XPCD")
@@ -194,6 +227,64 @@ object EnableBankingClient {
         currency = c.get[String]("currency").toOption.filter(_.nonEmpty),
       )
     }
+
+  private def parseTransactions(body: String): Either[String, EbTransactionsPage] =
+    decode[Json](body).left.map(e => s"Failed to parse transactions: ${e.getMessage}").map { json =>
+      val c            = json.hcursor
+      val continuation = c.get[String]("continuation_key").toOption.filter(_.nonEmpty)
+      val txs          = c.get[List[Json]]("transactions").getOrElse(Nil).map(parseTransaction)
+      EbTransactionsPage(txs, continuation)
+    }
+
+  /** Total (never throws): unknown/oddly-shaped fields simply come back empty; the full payload is kept in `raw`. */
+  private def parseTransaction(j: Json): EbTransaction = {
+    val c                                             = j.hcursor
+    val amountStr                                     = c
+      .downField("transaction_amount")
+      .get[Json]("amount")
+      .toOption
+      .flatMap(a => a.asString.orElse(a.asNumber.map(_.toString)))
+    val rawCents                                      = amountStr.flatMap(s => Try((BigDecimal(s) * 100).setScale(0, BigDecimal.RoundingMode.HALF_UP).toLongExact).toOption).getOrElse(0L)
+    val indicator                                     = c.get[String]("credit_debit_indicator").toOption
+    val signed                                        = indicator match {
+      case Some("DBIT") => -math.abs(rawCents)
+      case Some("CRDT") => math.abs(rawCents)
+      case _            => rawCents // fall back to whatever sign the amount carried
+    }
+    val currency                                      = c.downField("transaction_amount").get[String]("currency").toOption.getOrElse("")
+    val status                                        = c.get[String]("status").toOption match {
+      case Some("PDNG") => "pending"
+      case _            => "booked"
+    }
+    val bookedAt                                      = List("booking_date", "value_date", "transaction_date").iterator
+      .flatMap(f => c.get[String](f).toOption)
+      .flatMap(parseInstant)
+      .nextOption()
+    // The counterparty is the OTHER party: for an outgoing (DBIT) payment it's the creditor (payee); for an incoming (CRDT) one it's the debtor
+    // (payer). Never fall back to our own side — otherwise an outgoing purchase whose payee has no IBAN (BLIK, card) would surface OUR account as the
+    // counterparty and be misread as an internal transfer.
+    def fld(obj: String, key: String): Option[String] = c.downField(obj).get[String](key).toOption.filter(_.nonEmpty)
+    val (name, acct)                                  = indicator match {
+      case Some("DBIT") => (fld("creditor", "name"), fld("creditor_account", "iban"))
+      case Some("CRDT") => (fld("debtor", "name"), fld("debtor_account", "iban"))
+      case _            => (fld("creditor", "name").orElse(fld("debtor", "name")), fld("creditor_account", "iban").orElse(fld("debtor_account", "iban")))
+    }
+    val remittance                                    = c
+      .get[List[String]]("remittance_information")
+      .toOption
+      .map(_.mkString(" "))
+      .filter(_.nonEmpty)
+      .orElse(c.get[String]("remittance_information_unstructured").toOption.filter(_.nonEmpty))
+    val btc                                           = c
+      .downField("bank_transaction_code")
+      .get[String]("description")
+      .toOption
+      .orElse(c.downField("bank_transaction_code").get[String]("code").toOption)
+      .orElse(c.get[String]("bank_transaction_code").toOption)
+      .filter(_.nonEmpty)
+    val entryRef                                      = c.get[String]("entry_reference").toOption.filter(_.nonEmpty)
+    EbTransaction(entryRef, signed, currency, status, bookedAt, name, acct, remittance, btc, j)
+  }
 
   private def parseInstant(s: String): Option[Instant] =
     Try(Instant.parse(s)).toOption
