@@ -11,6 +11,7 @@ import java.time.format.DateTimeFormatter
 import java.time.{Instant, ZoneOffset}
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.util.{Failure, Success}
 
 object DashboardPage {
 
@@ -21,6 +22,7 @@ object DashboardPage {
   private val editedBalances    = Var(Map.empty[AccountId, Long])
   private val copyButtonText    = Var("Copy Summary")
   private val syncingBanks      = Var(false)
+  private val syncMessage       = Var(Option.empty[(Boolean, String)]) // result of the last sync: (ok, message)
 
   /** When the balance was last driven by a bank sync (max over externally-sourced accounts). */
   private val lastSyncedAt: Signal[Option[Instant]] =
@@ -28,11 +30,20 @@ object DashboardPage {
 
   private def syncBanks(): Unit = {
     syncingBanks.set(true)
-    // One call syncs balances AND imports transactions across all connections (resilient to a single bank failing).
+    syncMessage.set(None)
+    // One call syncs balances AND imports new transactions across all connections (resilient to a single bank failing).
     api.banking
       .syncAll()
-      .flatMap(_ => dataService.initialize())
-      .onComplete(_ => syncingBanks.set(false))
+      .flatMap(r => dataService.initialize().map(_ => r))
+      .onComplete {
+        case Success(r)  =>
+          syncingBanks.set(false)
+          val base = s"Synced ${r.synced} bank(s), imported ${r.imported} new transaction(s)"
+          syncMessage.set(Some(if r.errors.isEmpty then (true, base) else (false, s"$base — issues: ${r.errors.mkString("; ")}")))
+        case Failure(ex) =>
+          syncingBanks.set(false)
+          syncMessage.set(Some((false, s"Sync failed: ${ex.getMessage}")))
+      }
   }
 
   def apply(): HtmlElement = {
@@ -168,11 +179,13 @@ object DashboardPage {
           cls := "d-flex align-items-baseline gap-2",
           span("Accounts"),
           child.maybe <-- lastSyncedAt.map(_.map(t => small(cls := "text-muted", s"synced ${Formatting.formatDateTime(t)}"))),
+          child.maybe <-- syncMessage.signal.map(_.map { case (ok, msg) => small(cls := (if ok then "text-success" else "text-danger"), msg) }),
         ),
         div(
           cls := "btn-group btn-group-sm",
           button(
-            cls := "btn btn-outline-primary py-0",
+            cls   := "btn btn-outline-primary py-0",
+            title := "Sync balances and import new transactions from all connected banks",
             disabled <-- syncingBanks.signal,
             child <-- syncingBanks.signal.map { syncing =>
               if syncing then span(span(cls := "spinner-border spinner-border-sm me-1"), "Syncing...")

@@ -405,7 +405,7 @@ object Routes {
     val currentPeriod = month.contains("current-period")
     for {
       periodOpt <- if currentPeriod then repos.periods.findCurrent else IO.pure(Option.empty[Period])
-      from       = if currentPeriod then periodOpt.map(_.startDate) else None
+      from       = if currentPeriod then periodOpt.map(periodStartOfDay) else None
       to         = if currentPeriod then periodOpt.flatMap(_.endDate) else None
       monthArg   = if currentPeriod then None else month.filter(_.nonEmpty)
       res       <- repos.bankTransactions.query(
@@ -495,7 +495,7 @@ object Routes {
     } yield result
 
   private def createCategory(repos: Repositories)(dto: CreateCategory): Result[Category] = {
-    val category = Category(CategoryId(UUID.randomUUID().toString), dto.name, dto.color, dto.monthlyBudget)
+    val category = Category(CategoryId(UUID.randomUUID().toString), dto.name, dto.color, dto.budgetType)
     repos.categories.create(category).as(Right(category))
   }
 
@@ -504,7 +504,7 @@ object Routes {
       existingOpt <- repos.categories.findById(id)
       result      <- existingOpt match {
                        case Some(_) =>
-                         val updated = Category(id, dto.name, dto.color, dto.monthlyBudget)
+                         val updated = Category(id, dto.name, dto.color, dto.budgetType)
                          repos.categories.update(updated).as(Right(updated))
                        case None    => IO.pure(Left(s"Category not found: ${id.value}"))
                      }
@@ -539,6 +539,13 @@ object Routes {
     *   - `currentPeriodSpentCents` = spend since the current period started.
     *   - `currency` = the primary currency.
     */
+  /** Instant at the start of a period's first calendar day (UTC). Bank `booked_at` is date-at-midnight, but a period starts at the paycheck instant
+    * (some afternoon time), so comparing transactions against the raw instant drops the whole start day's spend. Filtering from midnight of that day
+    * includes the start-day transactions in the period (bank data is date-granular, so we can't tell pre- vs post-paycheck spend anyway).
+    */
+  private def periodStartOfDay(p: Period): Instant =
+    java.time.LocalDate.ofInstant(p.startDate, java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
+
   private def categorySummaries(repos: Repositories): Result[List[CategorySummary]] =
     for {
       cats        <- repos.categories.findAll
@@ -550,7 +557,7 @@ object Routes {
       now          = java.time.LocalDate.now(java.time.ZoneOffset.UTC)
       firstOfMonth = now.withDayOfMonth(1)
       currentMonth = firstOfMonth.atStartOfDay(java.time.ZoneOffset.UTC).toInstant
-      periodStart  = periodOpt.map(_.startDate).getOrElse(currentMonth)
+      periodStart  = periodOpt.map(periodStartOfDay).getOrElse(currentMonth)
       // All completed-month spend (the in-progress current month is excluded by the `< currentMonth` upper bound), per (cat, currency, YYYY-MM).
       histRows    <- repos.bankTransactions.monthlySpendByCategory(java.time.Instant.EPOCH, currentMonth)
       curRows     <- repos.bankTransactions.spendByCategoryBetween(periodStart, None)

@@ -30,6 +30,7 @@ object TapirSchemas {
   given Schema[BankLinkTarget]     = Schema.derived[BankLinkTarget]
   given Schema[TransactionStatus]  = Schema.derivedEnumeration[TransactionStatus].defaultStringBased
   given Schema[CategorySource]     = Schema.derivedEnumeration[CategorySource].defaultStringBased
+  given Schema[CategoryBudgetType] = Schema.derivedEnumeration[CategoryBudgetType].defaultStringBased
   given Schema[TextMatchOp]        = Schema.derivedEnumeration[TextMatchOp].defaultStringBased
   given Schema[AmountMatchOp]      = Schema.derivedEnumeration[AmountMatchOp].defaultStringBased
   given Schema[RuleCriterion]      = Schema.derived[RuleCriterion]

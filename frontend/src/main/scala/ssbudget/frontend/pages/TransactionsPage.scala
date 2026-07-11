@@ -16,7 +16,16 @@ import ssbudget.shared.api.{
   SetNoteRequest,
   UpdateCategory,
 }
-import ssbudget.shared.model.{BankTransaction, Category, CategoryId, ClassificationRule, ClassificationRuleId, Money, TransactionStatus}
+import ssbudget.shared.model.{
+  BankTransaction,
+  Category,
+  CategoryBudgetType,
+  CategoryId,
+  ClassificationRule,
+  ClassificationRuleId,
+  Money,
+  TransactionStatus,
+}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.scalajs.js
@@ -448,7 +457,7 @@ object TransactionsPage {
     def renameCategory(c: Category): Unit = {
       val name = editName.now().trim
       editingId.set(None)
-      if name.nonEmpty && name != c.name then apiClient.categories.update(c.id, UpdateCategory(name, c.color, c.monthlyBudget)).onComplete {
+      if name.nonEmpty && name != c.name then apiClient.categories.update(c.id, UpdateCategory(name, c.color, c.budgetType)).onComplete {
         case Success(_) => reloadCategories(); reloadSummaries() // name shows on the tx category dropdown + rules card via cats
         case Failure(_) => ()
       }
@@ -460,13 +469,13 @@ object TransactionsPage {
         case Failure(_) => ()
       }
 
-    def toggleBudget(c: Category): Unit =
-      apiClient.categories.update(c.id, UpdateCategory(c.name, c.color, !c.monthlyBudget)).onComplete {
+    def setBudgetType(c: Category, budgetType: Option[CategoryBudgetType]): Unit =
+      apiClient.categories.update(c.id, UpdateCategory(c.name, c.color, budgetType)).onComplete {
         case Success(_) => reloadCategories(); reloadSummaries()
         case Failure(_) => ()
       }
 
-    // Row per category: rolling 3-mo average + this-period spend + the "monthly budget" toggle that surfaces it on the budget page.
+    // Row per category: average monthly spend + this-period spend + the budget-type selector that surfaces it on the budget page.
     def categoryRow(c: Category, summary: Option[CategorySummary]): HtmlElement = {
       val currency                   = summary.map(_.currency)
       def money(cents: Long): String =
@@ -495,11 +504,14 @@ object TransactionsPage {
         td(cls := "text-end font-monospace small", summary.map(s => money(s.currentPeriodSpentCents)).getOrElse("—")),
         td(
           cls  := "text-center",
-          input(
-            tpe     := "checkbox",
-            cls     := "form-check-input",
-            checked := c.monthlyBudget,
-            onChange.mapToChecked --> { _ => toggleBudget(c) },
+          select(
+            cls   := "form-select form-select-sm",
+            value := c.budgetType.map(CategoryBudgetType.asString).getOrElse("off"),
+            onChange.mapToValue --> { v => setBudgetType(c, if v == "off" then None else CategoryBudgetType.fromString(v).toOption) },
+            option(value := "off", "Off"),
+            option(value := "steady", "Steady"),
+            option(value := "bill", "Bill"),
+            option(value := "subscription", "Subscription"),
           ),
         ),
         td(
@@ -528,10 +540,14 @@ object TransactionsPage {
               th(
                 cls   := "text-end",
                 "Avg / mo",
-                title := "Median monthly spend over the last 3 full calendar months (robust to a month with two payments)",
+                title := "Mean monthly spend over the category's active span (first to last month with spend)",
               ),
               th(cls  := "text-end", "This period"),
-              th(cls  := "text-center", "Budget", title := "Track as a monthly budget on the Budget page"),
+              th(
+                cls   := "text-center",
+                "Budget",
+                title := "Budget type on the Budget page — Steady (time-based), Bill (one-off), or Subscription (fixed pool)",
+              ),
               th(),
             ),
           ),

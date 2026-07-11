@@ -40,9 +40,12 @@ object BudgetPage {
       div(
         cls   := "row g-3 mb-3",
         div(cls := "col-lg-6", plannedItemsCard()),
-        div(cls := "col-lg-6", estimatedExpensesCard()),
+        div(
+          cls   := "col-lg-6",
+          div(cls := "mb-3", estimatedExpensesCard()),
+          categoryBudgetsCard(),
+        ),
       ),
-      div(cls := "row g-3 mb-3", div(cls := "col-12", categoryBudgetsCard())),
       div(cls := "row g-3 mb-3", div(cls := "col-12", plannedSavingsCard())),
       div(cls := "row g-3", div(cls := "col-12", oneTimeExpensesCard())),
     )
@@ -168,7 +171,9 @@ object BudgetPage {
     )
   }
 
-  /** Categories flagged as monthly budgets: actual spend this period vs the rolling 3-month average, with a pace marker (expected-by-now). */
+  /** Categories with a budget type set: this-period spend vs the category's mean monthly spend, rendered per type (Steady pace bar / Bill paid-state
+    * / Subscription fixed pool).
+    */
   private def categoryBudgetsCard(): HtmlElement =
     div(
       cls := "card",
@@ -177,7 +182,10 @@ object BudgetPage {
         cls   := "card-body",
         children <-- dataService.budgetedCategories.combineWith(dataService.periodElapsedFraction).map { case (cats, elapsed) =>
           if cats.isEmpty then List(
-            div(cls := "text-muted small", "No category budgets yet. Flag a category as a monthly budget on the Transactions page."),
+            div(
+              cls := "text-muted small",
+              "No category budgets yet. Set a budget type (Steady / Bill / Subscription) on a category on the Transactions page.",
+            ),
           )
           else cats.map(c => categoryBudgetRow(c, elapsed))
         },
@@ -185,41 +193,65 @@ object BudgetPage {
     )
 
   private def categoryBudgetRow(s: CategorySummary, elapsed: Double): HtmlElement = {
-    val budget     = s.avgMonthlyCents
-    val spent      = s.currentPeriodSpentCents
-    val fillPct    = if budget <= 0 then (if spent > 0 then 100.0 else 0.0) else math.min(100.0, spent.toDouble / budget * 100.0)
-    val pacePct    = math.max(0.0, math.min(100.0, elapsed * 100.0))
-    val expected   = (budget * elapsed).toLong
-    val overBudget = budget > 0 && spent > budget
-    val overPace   = budget > 0 && spent > expected
-    val barColor   = if overBudget then "bg-danger" else if overPace then "bg-warning" else "bg-success"
-    val paceLabel  =
-      if budget <= 0 then "no budget history yet"
-      else if overBudget then "over budget"
-      else if overPace then "over pace"
-      else "under pace ✓"
+    val budget                 = s.avgMonthlyCents
+    val spent                  = s.currentPeriodSpentCents
+    val bt                     = s.category.budgetType.getOrElse(CategoryBudgetType.Steady)
+    val remaining              = CategoryBudgetType.remaining(bt, budget, spent, elapsed)
+    def money(c: Long): String = MoneyFormatter.formatSimple(c, s.currency)
+
+    // The colored bar + footer differ per budget type; the header (name + spent/budget) is shared.
+    val (bar, footerLeft, footerRight): (HtmlElement, String, String) = bt match {
+      case CategoryBudgetType.Bill         =>
+        val paid = spent > 0
+        val b    = div(
+          cls       := "progress",
+          styleAttr := "height: 1.1rem",
+          div(cls := s"progress-bar ${if paid then "bg-success" else "bg-secondary"}", styleAttr := s"width: ${if paid then 100 else 0}%"),
+        )
+        (b, if paid then "paid ✓" else "not paid yet", if paid then "" else s"reserve ${money(remaining)}")
+      case CategoryBudgetType.Subscription =>
+        val fillPct = if budget <= 0 then (if spent > 0 then 100.0 else 0.0) else math.min(100.0, spent.toDouble / budget * 100.0)
+        val over    = budget > 0 && spent > budget
+        val b       = div(
+          cls       := "progress",
+          styleAttr := "height: 1.1rem",
+          div(cls := s"progress-bar ${if over then "bg-danger" else "bg-success"}", styleAttr := s"width: $fillPct%"),
+        )
+        (b, if remaining <= 0 then "fully paid ✓" else "fixed pool", if remaining > 0 then s"${money(remaining)} left" else "")
+      case CategoryBudgetType.Steady       =>
+        val fillPct    = if budget <= 0 then (if spent > 0 then 100.0 else 0.0) else math.min(100.0, spent.toDouble / budget * 100.0)
+        val pacePct    = math.max(0.0, math.min(100.0, elapsed * 100.0))
+        val expected   = (budget * elapsed).toLong
+        val overBudget = budget > 0 && spent > budget
+        val overPace   = budget > 0 && spent > expected
+        val barColor   = if overBudget then "bg-danger" else if overPace then "bg-warning" else "bg-success"
+        val paceLabel  =
+          if budget <= 0 then "no budget history yet"
+          else if overBudget then "over budget"
+          else if overPace then "over pace"
+          else "under pace ✓"
+        val b          = div(
+          cls       := "progress position-relative",
+          styleAttr := "height: 1.1rem",
+          div(cls     := s"progress-bar $barColor", styleAttr := s"width: $fillPct%"),
+          // pace marker: where spending would be if it tracked the period elapsed exactly
+          div(
+            styleAttr := s"position: absolute; top: 0; bottom: 0; left: $pacePct%; width: 2px; background: rgba(0,0,0,0.65)",
+            title     := "expected by now",
+          ),
+        )
+        (b, paceLabel, s"reserve ${money(remaining)}")
+    }
+
     div(
       cls := "mb-3",
       div(
-        cls       := "d-flex justify-content-between",
-        span(cls := "fw-semibold", s.category.name),
-        span(cls := "font-monospace small", s"${MoneyFormatter.formatSimple(spent, s.currency)} / ${MoneyFormatter.formatSimple(budget, s.currency)}"),
+        cls   := "d-flex justify-content-between",
+        span(cls := "fw-semibold", s.category.name, span(cls := "badge text-bg-light text-muted ms-2", CategoryBudgetType.asString(bt))),
+        span(cls := "font-monospace small", s"${money(spent)} / ${money(budget)}"),
       ),
-      div(
-        cls       := "progress position-relative",
-        styleAttr := "height: 1.1rem",
-        div(cls     := s"progress-bar $barColor", styleAttr := s"width: $fillPct%"),
-        // pace marker: where spending would be if it tracked the period elapsed exactly
-        div(
-          styleAttr := s"position: absolute; top: 0; bottom: 0; left: $pacePct%; width: 2px; background: rgba(0,0,0,0.65)",
-          title     := "expected by now",
-        ),
-      ),
-      div(
-        cls       := "d-flex justify-content-between small text-muted",
-        span(paceLabel),
-        span(if budget > 0 then s"expected ~${MoneyFormatter.formatSimple(expected, s.currency)}" else ""),
-      ),
+      bar,
+      div(cls := "d-flex justify-content-between small text-muted", span(footerLeft), span(footerRight)),
     )
   }
 

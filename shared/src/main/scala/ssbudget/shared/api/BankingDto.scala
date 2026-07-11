@@ -62,15 +62,15 @@ final case class SetCategoryRequest(categoryId: Option[CategoryId]) derives Code
 /** Set (or clear, when None/blank) a transaction's free-text note. */
 final case class SetNoteRequest(note: Option[String]) derives Codec.AsObject
 
-final case class CreateCategory(name: String, color: Option[String], monthlyBudget: Boolean = false) derives Codec.AsObject
+final case class CreateCategory(name: String, color: Option[String], budgetType: Option[CategoryBudgetType] = None) derives Codec.AsObject
 
-final case class UpdateCategory(name: String, color: Option[String], monthlyBudget: Boolean = false) derives Codec.AsObject
+final case class UpdateCategory(name: String, color: Option[String], budgetType: Option[CategoryBudgetType] = None) derives Codec.AsObject
 
 /** Spending stats for a category, computed server-side from bank transactions (the browser no longer holds them). All amounts are converted to the
   * primary currency at the latest rates, so a category with mixed-currency transactions is counted in full.
   *
   *   - `avgMonthlyCents`: MEAN monthly outflow over the category's active span — total completed-month spend divided by the number of months from its
-  *     first to its last month-with-spend (the budget when `category.monthlyBudget`). The in-progress current month is excluded and empty
+  *     first to its last month-with-spend (the budget when `category.budgetType` is set). The in-progress current month is excluded and empty
   *     leading/trailing months don't count, so a recently-started or dormant category isn't diluted by zeros.
   *   - `currentPeriodSpentCents`: outflow since the current budget period started.
   *   - `currency`: the primary currency (all category spend is converted to it).

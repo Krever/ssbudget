@@ -157,18 +157,21 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       case None    => 0.0
     }
 
-  /** Budgeted categories only, in display order (by name). */
+  /** Budgeted categories only (any budget type set), in display order (by name). */
   override def budgetedCategories: Signal[List[CategorySummary]] =
-    categorySummariesVar.signal.map(_.filter(_.category.monthlyBudget).sortBy(_.category.name))
+    categorySummariesVar.signal.map(_.filter(_.category.budgetType.isDefined).sortBy(_.category.name))
 
-  /** Remaining category-budget spend expected this period: Σ max(0, avg − spentSoFar), in primary currency. Folded into predicted expenses. */
+  /** Remaining category-budget spend expected before the next paycheck, per the category's budget type (see [[CategoryBudgetType.remaining]]), summed
+    * in the primary currency. Folded into predicted expenses.
+    */
   override def categoryBudgetsRemaining: Signal[Money] =
     categorySummariesVar.signal
       .combineWith(exchangeRatesVar.signal)
       .combineWith(primaryCurrency)
-      .map { case (summaries, rates, primary) =>
-        val amounts = summaries.filter(_.category.monthlyBudget).map { s =>
-          Money(math.max(0L, s.avgMonthlyCents - s.currentPeriodSpentCents), s.currency)
+      .combineWith(periodElapsedFraction)
+      .map { case (summaries, rates, primary, elapsed) =>
+        val amounts = summaries.flatMap { s =>
+          s.category.budgetType.map(bt => Money(CategoryBudgetType.remaining(bt, s.avgMonthlyCents, s.currentPeriodSpentCents, elapsed), s.currency))
         }
         sumInPrimary(amounts, rates, primary)
       }

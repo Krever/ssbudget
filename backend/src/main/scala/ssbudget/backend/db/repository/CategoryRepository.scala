@@ -16,10 +16,10 @@ trait CategoryRepository {
 
 class CategoryRepositoryImpl(xa: Transactor[IO]) extends CategoryRepository {
 
-  private val columns = fr"id, name, color, monthly_budget"
+  private val columns = fr"id, name, color, budget_type"
 
   override def create(category: Category): IO[Unit] =
-    sql"INSERT INTO categories (id, name, color, monthly_budget) VALUES (${category.id}, ${category.name}, ${category.color}, ${category.monthlyBudget})".update.run
+    sql"INSERT INTO categories (id, name, color, budget_type) VALUES (${category.id}, ${category.name}, ${category.color}, ${category.budgetType})".update.run
       .transact(
         xa,
       )
@@ -32,7 +32,7 @@ class CategoryRepositoryImpl(xa: Transactor[IO]) extends CategoryRepository {
     (fr"SELECT" ++ columns ++ fr"FROM categories WHERE id = $id").query[Category].option.transact(xa)
 
   override def update(category: Category): IO[Unit] =
-    sql"UPDATE categories SET name = ${category.name}, color = ${category.color}, monthly_budget = ${category.monthlyBudget} WHERE id = ${category.id}".update.run
+    sql"UPDATE categories SET name = ${category.name}, color = ${category.color}, budget_type = ${category.budgetType} WHERE id = ${category.id}".update.run
       .transact(xa)
       .void
 

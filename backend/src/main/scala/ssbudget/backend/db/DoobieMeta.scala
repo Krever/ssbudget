@@ -31,10 +31,11 @@ object DoobieMeta {
 
   given Meta[ConnectionStatus] = Meta[String].tiemap(ConnectionStatus.fromString)(ConnectionStatus.asString)
 
-  given Meta[AccountRole]       = Meta[String].tiemap(AccountRole.fromString)(AccountRole.asString)
-  given Meta[BalanceSource]     = Meta[String].tiemap(BalanceSource.fromString)(BalanceSource.asString)
-  given Meta[TransactionStatus] = Meta[String].tiemap(TransactionStatus.fromString)(TransactionStatus.asString)
-  given Meta[CategorySource]    = Meta[String].tiemap(CategorySource.fromString)(CategorySource.asString)
+  given Meta[AccountRole]        = Meta[String].tiemap(AccountRole.fromString)(AccountRole.asString)
+  given Meta[BalanceSource]      = Meta[String].tiemap(BalanceSource.fromString)(BalanceSource.asString)
+  given Meta[TransactionStatus]  = Meta[String].tiemap(TransactionStatus.fromString)(TransactionStatus.asString)
+  given Meta[CategorySource]     = Meta[String].tiemap(CategorySource.fromString)(CategorySource.asString)
+  given Meta[CategoryBudgetType] = Meta[String].tiemap(CategoryBudgetType.fromString)(CategoryBudgetType.asString)
 
   // A rule's criteria list is stored as a single JSON column.
   given Meta[List[RuleCriterion]] =
