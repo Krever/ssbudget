@@ -505,13 +505,13 @@ object TransactionsPage {
         td(
           cls  := "text-center",
           select(
-            cls   := "form-select form-select-sm",
-            value := c.budgetType.map(CategoryBudgetType.asString).getOrElse("off"),
+            cls := "form-select form-select-sm",
             onChange.mapToValue --> { v => setBudgetType(c, if v == "off" then None else CategoryBudgetType.fromString(v).toOption) },
-            option(value := "off", "Off"),
-            option(value := "steady", "Steady"),
-            option(value := "bill", "Bill"),
-            option(value := "subscription", "Subscription"),
+            // Mark the current option with `selected` (not `value :=` on the select — that's applied before the options mount and falls back to "Off").
+            option(value := "off", selected          := c.budgetType.isEmpty, "Off"),
+            option(value := "steady", selected       := c.budgetType.contains(CategoryBudgetType.Steady), "Steady"),
+            option(value := "bill", selected         := c.budgetType.contains(CategoryBudgetType.Bill), "Bill"),
+            option(value := "subscription", selected := c.budgetType.contains(CategoryBudgetType.Subscription), "Subscription"),
           ),
         ),
         td(
