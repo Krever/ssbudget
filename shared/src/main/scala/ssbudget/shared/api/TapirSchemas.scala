@@ -19,6 +19,7 @@ object TapirSchemas {
   given Schema[BankTransactionId]    = Schema.string.map[BankTransactionId]((s: String) => Some(BankTransactionId(s)))(_.value)
   given Schema[CategoryId]           = Schema.string.map[CategoryId]((s: String) => Some(CategoryId(s)))(_.value)
   given Schema[ClassificationRuleId] = Schema.string.map[ClassificationRuleId]((s: String) => Some(ClassificationRuleId(s)))(_.value)
+  given Schema[ImportJobId]          = Schema.string.map[ImportJobId]((s: String) => Some(ImportJobId(s)))(_.value)
 
   // Enums and value types
   given Schema[Currency]           = Schema.string.map[Currency]((s: String) => Some(Currency(s)))(_.code)
@@ -31,6 +32,11 @@ object TapirSchemas {
   given Schema[TransactionStatus]  = Schema.derivedEnumeration[TransactionStatus].defaultStringBased
   given Schema[CategorySource]     = Schema.derivedEnumeration[CategorySource].defaultStringBased
   given Schema[CategoryBudgetType] = Schema.derivedEnumeration[CategoryBudgetType].defaultStringBased
+  given Schema[ImportJobStatus]    = Schema.derivedEnumeration[ImportJobStatus].defaultStringBased
+  given Schema[ImportJobKind]      = Schema.derivedEnumeration[ImportJobKind].defaultStringBased
+  given Schema[ImportItemStatus]   = Schema.derivedEnumeration[ImportItemStatus].defaultStringBased
+  given Schema[ImportJobItem]      = Schema.derived[ImportJobItem]
+  given Schema[ImportJob]          = Schema.derived[ImportJob]
   given Schema[TextMatchOp]        = Schema.derivedEnumeration[TextMatchOp].defaultStringBased
   given Schema[AmountMatchOp]      = Schema.derivedEnumeration[AmountMatchOp].defaultStringBased
   given Schema[RuleCriterion]      = Schema.derived[RuleCriterion]
@@ -76,7 +82,6 @@ object TapirSchemas {
   given Schema[ImportTransactionsRequest] = Schema.derived[ImportTransactionsRequest]
   given Schema[AccountImportResult]       = Schema.derived[AccountImportResult]
   given Schema[ImportResult]              = Schema.derived[ImportResult]
-  given Schema[SyncAllResult]             = Schema.derived[SyncAllResult]
   given Schema[SetCategoryRequest]        = Schema.derived[SetCategoryRequest]
   given Schema[SetNoteRequest]            = Schema.derived[SetNoteRequest]
   given Schema[CreateCategory]            = Schema.derived[CreateCategory]

@@ -1,6 +1,7 @@
 package ssbudget.backend
 
 import cats.effect.{IO, Resource}
+import cats.effect.std.Supervisor
 import cats.implicits.*
 import com.comcast.ip4s.{Host, Port, host}
 import doobie.hikari.HikariTransactor
@@ -15,6 +16,7 @@ import ssbudget.backend.banking.{
   EnableBankingClient,
   EnableBankingConfig,
   EnableBankingJwt,
+  ImportJobService,
   RuleEngineService,
   TransactionImportService,
 }
@@ -65,12 +67,17 @@ object ServerBuilder {
       _               <- Resource.eval(repos.bankTransactions.markInternalTransfers())
       ruleEngine       = new RuleEngineService(repos)
       _               <- Resource.eval(ruleEngine.applyRules())
+      // Background-job runner lives on an app-scoped supervisor so import/sync work outlives the HTTP request.
+      supervisor      <- Supervisor[IO]
+      // Any job left Running by a previous process was interrupted by the restart — mark it Failed so the UI doesn't show a phantom in-progress run.
+      _               <- Resource.eval(IO.realTimeInstant.flatMap(now => repos.importJobs.failRunning(now, "Interrupted by a server restart")))
       server          <- {
-        val passwordService = PasswordService()
-        val sessionService  = SessionService(repos.sessions)
-        val currencyService = new CurrencyService(repos, sttpBackend)
-        val bankingService  = new BankingService(repos, ebClientOpt)
-        val importService   = new TransactionImportService(repos, ebClientOpt, ruleEngine)
+        val passwordService  = PasswordService()
+        val sessionService   = SessionService(repos.sessions)
+        val currencyService  = new CurrencyService(repos, sttpBackend)
+        val bankingService   = new BankingService(repos, ebClientOpt)
+        val importService    = new TransactionImportService(repos, ebClientOpt, ruleEngine)
+        val importJobService = new ImportJobService(repos, supervisor, bankingService, importService)
 
         val authRoutes = AuthRoutes.make(
           repos.authConfig,
@@ -83,7 +90,7 @@ object ServerBuilder {
 
         // Routes now handle their own auth via Tapir's serverSecurityLogic
         val dataRoutes =
-          Routes.make(repos, xa, dbPath, sessionService, currencyService, bankingService, importService, ruleEngine, testMode)
+          Routes.make(repos, xa, dbPath, sessionService, currencyService, bankingService, importService, importJobService, ruleEngine, testMode)
 
         // Static file routes for production (serves frontend build)
         val staticRoutes = StaticRoutes.make(staticDir)

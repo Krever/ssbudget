@@ -25,6 +25,7 @@ object DoobieMeta {
   given Meta[BankTransactionId]    = Meta[String].timap(BankTransactionId.apply)(_.value)
   given Meta[CategoryId]           = Meta[String].timap(CategoryId.apply)(_.value)
   given Meta[ClassificationRuleId] = Meta[String].timap(ClassificationRuleId.apply)(_.value)
+  given Meta[ImportJobId]          = Meta[String].timap(ImportJobId.apply)(_.value)
 
   // Value types
   given Meta[Currency] = Meta[String].timap(Currency.apply)(_.code)
@@ -36,6 +37,8 @@ object DoobieMeta {
   given Meta[TransactionStatus]  = Meta[String].tiemap(TransactionStatus.fromString)(TransactionStatus.asString)
   given Meta[CategorySource]     = Meta[String].tiemap(CategorySource.fromString)(CategorySource.asString)
   given Meta[CategoryBudgetType] = Meta[String].tiemap(CategoryBudgetType.fromString)(CategoryBudgetType.asString)
+  given Meta[ImportJobStatus]    = Meta[String].tiemap(ImportJobStatus.fromString)(ImportJobStatus.asString)
+  given Meta[ImportJobKind]      = Meta[String].tiemap(ImportJobKind.fromString)(ImportJobKind.asString)
 
   // A rule's criteria list is stored as a single JSON column.
   given Meta[List[RuleCriterion]] =

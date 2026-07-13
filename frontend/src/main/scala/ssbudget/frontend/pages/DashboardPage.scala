@@ -28,23 +28,35 @@ object DashboardPage {
   private val lastSyncedAt: Signal[Option[Instant]] =
     dataService.accounts.map(_.filterNot(_.isManual).flatMap(_.balanceUpdatedAt).maxOption)
 
+  /** Sync balances + import transactions across all connections as a background job, then poll it to completion (see the Banking page's Import
+    * activity card for full history/errors). On finish, reload dashboard data.
+    */
   private def syncBanks(): Unit = {
     syncingBanks.set(true)
     syncMessage.set(None)
-    // One call syncs balances AND imports new transactions across all connections (resilient to a single bank failing).
-    api.banking
-      .syncAll()
-      .flatMap(r => dataService.initialize().map(_ => r))
-      .onComplete {
-        case Success(r)  =>
-          syncingBanks.set(false)
-          val base = s"Synced ${r.synced} bank(s), imported ${r.imported} new transaction(s)"
-          syncMessage.set(Some(if r.errors.isEmpty then (true, base) else (false, s"$base — issues: ${r.errors.mkString("; ")}")))
-        case Failure(ex) =>
-          syncingBanks.set(false)
-          syncMessage.set(Some((false, s"Sync failed: ${ex.getMessage}")))
-      }
+    api.banking.syncAll().onComplete {
+      case Success(job) => pollSyncJob(job.id)
+      case Failure(ex)  => syncingBanks.set(false); syncMessage.set(Some((false, s"Couldn't start sync: ${ex.getMessage}")))
+    }
   }
+
+  private def pollSyncJob(id: ImportJobId): Unit =
+    api.jobs.get(id).onComplete {
+      case Success(job) if job.status == ImportJobStatus.Running =>
+        dom.window.setTimeout(() => pollSyncJob(id), 2000d) // keep polling every 2s while it runs
+        ()
+      case Success(job)                                          =>
+        dataService.initialize()
+        syncingBanks.set(false)
+        val base = s"Imported ${job.imported} new transaction(s)"
+        syncMessage.set(job.message match {
+          case Some(msg) => Some((false, s"Sync failed: $msg"))
+          case None      => Some((job.errors.isEmpty, if job.errors.nonEmpty then s"$base · some banks had issues (see Banking)" else base))
+        })
+      case Failure(ex)                                           =>
+        syncingBanks.set(false)
+        syncMessage.set(Some((false, s"Lost track of sync: ${ex.getMessage}")))
+    }
 
   def apply(): HtmlElement = {
     div(

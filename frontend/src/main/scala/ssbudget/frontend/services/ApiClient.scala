@@ -208,7 +208,7 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request(id)).map(handleResponse)
     }
 
-    def syncAll(): Future[SyncAllResult] = {
+    def syncAll(): Future[ImportJob] = {
       val request = interpreter.toRequest(Endpoints.client.banking.syncAll, Some(baseUri))
       backend.send(request(())).map(handleResponse)
     }
@@ -233,9 +233,21 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request((id, req))).map(handleResponse)
     }
 
-    def importTransactions(id: BankConnectionId, req: ImportTransactionsRequest): Future[ImportResult] = {
+    def importTransactions(id: BankConnectionId, req: ImportTransactionsRequest): Future[ImportJob] = {
       val request = interpreter.toRequest(Endpoints.client.banking.importTransactions, Some(baseUri))
       backend.send(request((id, req))).map(handleResponse)
+    }
+  }
+
+  object jobs {
+    def list(): Future[List[ImportJob]] = {
+      val request = interpreter.toRequest(Endpoints.client.jobs.list, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def get(id: ImportJobId): Future[ImportJob] = {
+      val request = interpreter.toRequest(Endpoints.client.jobs.get, Some(baseUri))
+      backend.send(request(id)).map(handleResponse)
     }
   }
 

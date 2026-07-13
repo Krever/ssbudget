@@ -1,6 +1,7 @@
 package ssbudget.backend.banking
 
 import cats.effect.IO
+import cats.effect.std.Supervisor
 import cats.effect.unsafe.implicits.global
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.client.WireMock.*
@@ -96,12 +97,14 @@ class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAft
     releaseBackend = relSttp
 
     repos = Repositories.fromTransactor(xa)
-    val jwt             = EnableBankingJwt.create(cfg).unsafeRunSync()
-    val ebClient        = new EnableBankingClient(cfg, jwt, sttpBackend)
+    val jwt              = EnableBankingJwt.create(cfg).unsafeRunSync()
+    val ebClient         = new EnableBankingClient(cfg, jwt, sttpBackend)
     banking = new BankingService(repos, Some(ebClient))
-    val ruleEngine      = new RuleEngineService(repos)
+    val ruleEngine       = new RuleEngineService(repos)
     importService = new TransactionImportService(repos, Some(ebClient), ruleEngine)
-    val currencyService = new CurrencyService(repos, sttpBackend)
+    val currencyService  = new CurrencyService(repos, sttpBackend)
+    val supervisor       = Supervisor[IO].allocated.unsafeRunSync()._1 // test-scoped; finalizer intentionally not run
+    val importJobService = new ImportJobService(repos, supervisor, banking, importService)
     routes = Routes
       .make(
         repos,
@@ -111,6 +114,7 @@ class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAft
         currencyService,
         banking,
         importService,
+        importJobService,
         ruleEngine,
         testMode = true,
       )

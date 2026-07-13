@@ -13,7 +13,6 @@ import ssbudget.shared.api.{
   ImportTransactionsRequest,
   LinkAccountRequest,
   LinkCardGroupRequest,
-  SyncAllResult,
 }
 import ssbudget.shared.model.{
   Account,
@@ -28,6 +27,11 @@ import ssbudget.shared.model.{
   CardGroupId,
   ConnectionStatus,
   Currency,
+  ImportItemStatus,
+  ImportJob,
+  ImportJobId,
+  ImportJobItem,
+  ImportJobStatus,
 }
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -46,9 +50,24 @@ object BankingPage {
     val countryVar     = Var("PL")
     val aspspNameVar   = Var("")
     val connectingVar  = Var(false)
-    val syncingVar     = Var(Set.empty[String]) // connection ids currently syncing
-    val importingVar   = Var(Set.empty[String]) // connection ids currently importing transactions
-    val syncingAllVar  = Var(false)             // the one-shot "sync all banks" action is running
+    val syncingVar     = Var(Set.empty[String])      // connection ids currently syncing balances
+    val importingVar   = Var(Set.empty[String])      // connection ids currently importing transactions
+    val jobsVar        = Var(List.empty[ImportJob])  // recent import/sync jobs (polled)
+    val expandedJobs   = Var(Set.empty[ImportJobId]) // jobs whose per-account breakdown is expanded
+
+    // A background import/sync run is in progress → start buttons should reflect it (the server also refuses overlapping runs).
+    val anyJobRunning: Signal[Boolean] = jobsVar.signal.map(_.exists(_.status == ImportJobStatus.Running))
+
+    // Poll the job list; when a run just finished, refresh connections + balances so the UI reflects new data.
+    def refreshJobs(): Unit =
+      apiClient.jobs.list().onComplete {
+        case Success(js) =>
+          val wasRunning = jobsVar.now().exists(_.status == ImportJobStatus.Running)
+          val running    = js.exists(_.status == ImportJobStatus.Running)
+          if wasRunning && !running then { loadConnections(); loadAccounts() }
+          jobsVar.set(js)
+        case Failure(_)  => () // polling is best-effort
+      }
 
     def loadConnections(): Unit =
       apiClient.banking.connections().onComplete {
@@ -173,36 +192,22 @@ object BankingPage {
       }
     }
 
+    // Both actions now kick off a background job and return immediately; progress/results show in the "Import activity" card (polled).
     def syncAll(): Unit = {
-      syncingAllVar.set(true)
       errorVar.set(None)
       successVar.set(None)
       apiClient.banking.syncAll().onComplete {
-        case Success(r: SyncAllResult) =>
-          syncingAllVar.set(false)
-          connectionsVar.set(r.connections)
-          loadAccounts()
-          successVar.set(Some(s"Synced ${r.synced} bank(s); imported ${r.imported} new transaction(s). Refresh the app to see updated balances."))
-          if r.errors.nonEmpty then errorVar.set(Some("Some banks had issues: " + r.errors.mkString("; ")))
-        case Failure(ex)               =>
-          syncingAllVar.set(false)
-          errorVar.set(Some(s"Sync all failed: ${ex.getMessage}"))
+        case Success(_)  => refreshJobs()
+        case Failure(ex) => errorVar.set(Some(s"Couldn't start sync: ${ex.getMessage}"))
       }
     }
 
     def importTx(id: BankConnectionId, monthsBack: Option[Int]): Unit = {
-      importingVar.update(_ + id.value)
       errorVar.set(None)
       successVar.set(None)
       apiClient.banking.importTransactions(id, ImportTransactionsRequest(monthsBack)).onComplete {
-        case Success(res) =>
-          importingVar.update(_ - id.value)
-          successVar.set(
-            Some(s"Imported ${res.totalImported} new transaction(s) (${res.totalSkipped} already had). See the Transactions page."),
-          )
-        case Failure(ex)  =>
-          importingVar.update(_ - id.value)
-          errorVar.set(Some(s"Import failed: ${ex.getMessage}"))
+        case Success(_)  => refreshJobs()
+        case Failure(ex) => errorVar.set(Some(s"Couldn't start import: ${ex.getMessage}"))
       }
     }
 
@@ -213,20 +218,24 @@ object BankingPage {
         loadCardGroups()
         loadAccounts()
         loadAspsps()
+        refreshJobs()
       },
+      // Poll job status while the page is open (~2.5s) so the current run + history stay live.
+      EventStream.periodic(2500) --> Observer[Int](_ => refreshJobs()),
       div(
         cls := "d-flex justify-content-between align-items-center mb-4",
         h2(cls := "mb-0", "Bank Connections"),
         button(
           cls  := "btn btn-primary",
-          disabled <-- syncingAllVar.signal.combineWith(connectionsVar.signal).map { case (busy, conns) => busy || conns.isEmpty },
+          disabled <-- anyJobRunning.combineWith(connectionsVar.signal).map { case (running, conns) => running || conns.isEmpty },
           onClick --> { _ => syncAll() },
-          child <-- syncingAllVar.signal.map { busy =>
-            if busy then span(span(cls := "spinner-border spinner-border-sm me-1"), "Syncing all…")
+          child <-- anyJobRunning.map { running =>
+            if running then span(span(cls := "spinner-border spinner-border-sm me-1"), "Syncing…")
             else span("↻ Sync all banks")
           },
         ),
       ),
+      importActivityCard(jobsVar.signal, expandedJobs),
       child.maybe <-- errorVar.signal.map(_.map { error =>
         div(
           cls := "alert alert-danger alert-dismissible",
@@ -261,6 +270,143 @@ object BankingPage {
       },
     )
   }
+
+  /** Tracked import/sync runs (top level): the current run with live progress, plus history + stats. Each row expands into its per-account breakdown
+    * (second level). Fed by a polled job list.
+    */
+  private def importActivityCard(jobs: Signal[List[ImportJob]], expandedJobs: Var[Set[ImportJobId]]): HtmlElement =
+    div(
+      cls := "card mb-4",
+      div(
+        cls := "card-header d-flex justify-content-between align-items-center",
+        span("Import activity"),
+        small(cls := "text-muted", child.text <-- jobs.map(statsSummary)),
+      ),
+      div(
+        cls := "card-body p-0",
+        // Current run banner (rebuilds as progress text updates).
+        child <-- jobs.map(_.find(_.status == ImportJobStatus.Running)).map {
+          case Some(j) =>
+            div(
+              cls := "px-3 py-2 border-bottom bg-light d-flex align-items-center",
+              span(cls := "spinner-border spinner-border-sm me-2"),
+              span(cls := "fw-semibold me-2", j.label),
+              span(cls := "text-muted small", j.progress.getOrElse("working…")),
+              span(cls := "ms-auto text-muted small font-monospace", s"${j.imported} imported · ${j.skipped} skipped"),
+            )
+          case None    => emptyNode
+        },
+        table(
+          cls := "table table-sm mb-0 align-middle",
+          thead(
+            tr(
+              th(cls := "ps-3", "Started"),
+              th("Job"),
+              th("Status"),
+              th(cls := "text-end", "Imported"),
+              th(cls := "text-end", "Skipped"),
+              th(cls := "pe-3", "Accounts"),
+            ),
+          ),
+          children <-- jobs.split(_.id)((id, _, jobSignal) => jobTbody(id, jobSignal, expandedJobs)),
+          child <-- jobs.map(js =>
+            if js.isEmpty then tbody(
+              tr(td(colSpan := 6, cls := "p-3 text-muted small", "No imports yet — use “Sync all banks”, or a connection’s “Import tx”.")),
+            )
+            else emptyNode,
+          ),
+        ),
+      ),
+    )
+
+  /** One job as its own <tbody>: a clickable summary row + (when expanded) a detail row with the per-account breakdown. */
+  private def jobTbody(id: ImportJobId, job: Signal[ImportJob], expandedJobs: Var[Set[ImportJobId]]): HtmlElement =
+    tbody(
+      tr(
+        cls       := "table-row-clickable",
+        styleAttr := "cursor: pointer",
+        onClick --> { _ => expandedJobs.update(s => if s.contains(id) then s - id else s + id) },
+        td(
+          cls  := "ps-3 text-muted small text-nowrap",
+          span(cls := "me-1", child.text <-- expandedJobs.signal.map(s => if s.contains(id) then "▾" else "▸")),
+          child.text <-- job.map(j => Formatting.formatDateTime(j.startedAt)),
+        ),
+        td(cls := "small", child.text <-- job.map(_.label)),
+        td(child <-- job.map(statusBadge)),
+        td(cls := "text-end font-monospace small", child.text <-- job.map(_.imported.toString)),
+        td(cls := "text-end font-monospace small", child.text <-- job.map(_.skipped.toString)),
+        td(cls := "pe-3 small", child <-- job.map(jobSummaryCell)),
+      ),
+      child <-- job.combineWith(expandedJobs.signal).map { case (j, expanded) =>
+        if expanded.contains(id) then tr(td(colSpan := 6, cls := "p-0", detailPanel(j))) else emptyNode
+      },
+    )
+
+  private def statusBadge(j: ImportJob): HtmlElement = j.status match {
+    case ImportJobStatus.Running   => span(cls := "badge text-bg-secondary", "running")
+    case ImportJobStatus.Succeeded =>
+      if j.errors.nonEmpty then span(cls := "badge text-bg-warning", "done · warnings") else span(cls := "badge text-bg-success", "done")
+    case ImportJobStatus.Failed    => span(cls := "badge text-bg-danger", "failed")
+  }
+
+  /** Summary shown in the collapsed row's "Accounts" column: account count + an issues badge when there are warnings/a failure. */
+  private def jobSummaryCell(j: ImportJob): HtmlElement = {
+    val issues = j.errors.size + j.message.size
+    span(
+      span(cls := "text-muted", s"${j.items.size} account(s)"),
+      if issues > 0 then span(cls := "badge text-bg-warning ms-2", s"$issues issue(s)") else emptyNode,
+    )
+  }
+
+  /** Expanded detail (second drill-down level): fatal message, the per-account items table, then connection-level warnings. */
+  private def detailPanel(j: ImportJob): HtmlElement =
+    div(
+      cls := "p-3 bg-light",
+      j.message.map(m => div(cls := "text-danger small mb-2", s"Failed: $m")).getOrElse(emptyNode),
+      if j.items.isEmpty then div(cls := "text-muted small", "No per-account activity recorded.")
+      else
+        table(
+          cls                         := "table table-sm mb-2 bg-white",
+          thead(
+            tr(
+              th("Bank"),
+              th("Account"),
+              th("Status"),
+              th(cls := "text-end", "Imported"),
+              th(cls := "text-end", "Skipped"),
+              th("Error"),
+            ),
+          ),
+          tbody(j.items.map(itemRow)),
+        ),
+      if j.errors.nonEmpty then div(cls := "small text-warning-emphasis", j.errors.map(e => div(s"⚠ $e"))) else emptyNode,
+    )
+
+  private def itemRow(it: ImportJobItem): HtmlElement =
+    tr(
+      td(cls := "small", it.connection),
+      td(cls := "small", it.account),
+      td(itemStatusBadge(it.status)),
+      td(cls := "text-end font-monospace small", it.imported.toString),
+      td(cls := "text-end font-monospace small", it.skipped.toString),
+      td(cls := "small text-danger", it.error.getOrElse("")),
+    )
+
+  private def itemStatusBadge(status: ImportItemStatus): HtmlElement = status match {
+    case ImportItemStatus.Pending => span(cls := "badge text-bg-light text-muted", "pending")
+    case ImportItemStatus.Running => span(cls := "badge text-bg-secondary", "running")
+    case ImportItemStatus.Done    => span(cls := "badge text-bg-success", "done")
+    case ImportItemStatus.Failed  => span(cls := "badge text-bg-danger", "failed")
+  }
+
+  private def statsSummary(js: List[ImportJob]): String =
+    js.find(_.status != ImportJobStatus.Running) match {
+      case Some(j) =>
+        val when   = Formatting.formatDateTime(j.finishedAt.getOrElse(j.startedAt))
+        val issues = js.count(x => x.status != ImportJobStatus.Running && (x.message.isDefined || x.errors.nonEmpty))
+        s"last run $when · ${j.imported} imported" + (if issues > 0 then s" · $issues with issues" else "")
+      case None    => "no completed runs yet"
+    }
 
   private def connectCard(
       countryVar: Var[String],

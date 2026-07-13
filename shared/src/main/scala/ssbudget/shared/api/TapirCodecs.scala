@@ -22,4 +22,5 @@ object TapirCodecs {
   given Codec[String, BankTransactionId, CodecFormat.TextPlain]    = stringIdCodec(BankTransactionId.apply, _.value)
   given Codec[String, CategoryId, CodecFormat.TextPlain]           = stringIdCodec(CategoryId.apply, _.value)
   given Codec[String, ClassificationRuleId, CodecFormat.TextPlain] = stringIdCodec(ClassificationRuleId.apply, _.value)
+  given Codec[String, ImportJobId, CodecFormat.TextPlain]          = stringIdCodec(ImportJobId.apply, _.value)
 }

@@ -10,7 +10,7 @@ import sttp.tapir.*
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 import ssbudget.backend.auth.SessionService
-import ssbudget.backend.banking.{BankingService, RuleEngineService, TransactionImportService}
+import ssbudget.backend.banking.{BankingService, ImportJobService, RuleEngineService, TransactionImportService}
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.service.CurrencyService
 import ssbudget.shared.api.*
@@ -36,6 +36,7 @@ object Routes {
       currencyService: CurrencyService,
       bankingService: BankingService,
       importService: TransactionImportService,
+      importJobService: ImportJobService,
       ruleEngine: RuleEngineService,
       testMode: Boolean = false,
   ): HttpRoutes[IO] = {
@@ -92,12 +93,15 @@ object Routes {
       route(Endpoints.banking.disconnect)(id => bankingService.disconnect(id)),
       route(Endpoints.banking.linkAccount) { case (linkId, req) => bankingService.linkAccount(linkId, req) },
       route(Endpoints.banking.sync)(id => bankingService.sync(id)),
-      route(Endpoints.banking.syncAll)(_ => syncAllConnections(repos, bankingService, importService)),
+      route(Endpoints.banking.syncAll)(_ => importJobService.startSyncAll().map(Right(_))),
       route(Endpoints.banking.listCardGroups)(_ => bankingService.listCardGroups.map(Right(_))),
       route(Endpoints.banking.createCardGroup)(dto => bankingService.createCardGroup(dto)),
       route(Endpoints.banking.deleteCardGroup)(id => bankingService.deleteCardGroup(id)),
       route(Endpoints.banking.linkCardGroup) { case (id, req) => bankingService.linkCardGroup(id, req) },
-      route(Endpoints.banking.importTransactions) { case (id, req) => importService.importTransactions(id, req) },
+      route(Endpoints.banking.importTransactions) { case (id, req) => importJobService.startImport(id, req).map(Right(_)) },
+      // Background import/sync jobs (status, history, errors)
+      route(Endpoints.jobs.list)(_ => importJobService.listRecent.map(Right(_))),
+      route(Endpoints.jobs.get)(id => importJobService.get(id).map(_.toRight(s"Import job not found: ${id.value}"))),
       // Transactions
       route(Endpoints.transactions.list) { case (acc, month, cat, hide, sort, asc, limit) =>
         listTransactions(repos)(acc, month, cat, hide, sort, asc, limit)
@@ -455,38 +459,6 @@ object Routes {
       Right(TransactionListResponse(items, total, sums.map { case (cur, cents) => Money(cents, cur) }))
     }
   }
-
-  /** One-shot "sync everything": for each authorized connection, sync balances then import transactions (incremental). Resilient — a connection that
-    * fails (e.g. expired consent) is recorded in `errors` and the rest still complete. Runs connections sequentially to be gentle on the bank APIs.
-    * Balance sync and import are attempted independently so one failing doesn't suppress the other.
-    */
-  private def syncAllConnections(
-      repos: Repositories,
-      bankingService: BankingService,
-      importService: TransactionImportService,
-  ): Result[SyncAllResult] =
-    for {
-      conns    <- repos.bankConnections.findAll
-      active    = conns.filter(_.sessionId.isDefined) // skip connections still pending authorization
-      outcomes <- active.traverse { conn =>
-                    for {
-                      syncE <- bankingService.sync(conn.id).handleError(t => Left(t.getMessage))
-                      impE  <- importService.importTransactions(conn.id, ImportTransactionsRequest(None)).handleError(t => Left(t.getMessage))
-                    } yield {
-                      val errs = List(
-                        syncE.left.toOption.map(e => s"${conn.aspspName}: balance sync — $e"),
-                        impE.left.toOption.map(e => s"${conn.aspspName}: import — $e"),
-                      ).flatten
-                      (impE.toOption, errs)
-                    }
-                  }
-      views    <- bankingService.listConnections
-    } yield {
-      val imports = outcomes.flatMap(_._1)
-      val errors  = outcomes.flatMap(_._2)
-      val synced  = outcomes.count(_._2.isEmpty)
-      Right(SyncAllResult(views, imports.map(_.totalImported).sum, imports.map(_.totalSkipped).sum, synced, errors))
-    }
 
   /** Live rule preview: run the shared matcher over all stored transactions server-side (the browser no longer holds them). */
   private def previewRule(repos: Repositories)(req: RulePreviewRequest): Result[RulePreviewResponse] =

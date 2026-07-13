@@ -39,18 +39,6 @@ final case class ImportResult(accounts: List[AccountImportResult]) derives Codec
   def totalSkipped: Int  = accounts.map(_.skipped).sum
 }
 
-/** Outcome of the one-shot "sync everything" action: balances synced + transactions imported (incremental) across all authorized connections.
-  * `synced` counts connections that completed cleanly; `errors` holds one human-readable line per connection that had a problem — the rest still
-  * complete, so one expired consent doesn't block the other banks.
-  */
-final case class SyncAllResult(
-    connections: List[BankConnectionView],
-    imported: Int,
-    skipped: Int,
-    synced: Int,
-    errors: List[String],
-) derives Codec.AsObject
-
 /** A page of transactions matching the server-side filters, plus the total number that match (before the display cap) and the net signed sum per
   * currency over the FULL match (`sums`) so the UI can show a reliable total even when `items` is capped.
   */

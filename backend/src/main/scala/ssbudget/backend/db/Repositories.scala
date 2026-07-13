@@ -22,6 +22,7 @@ final case class Repositories(
     bankTransactions: BankTransactionRepository,
     categories: CategoryRepository,
     classificationRules: ClassificationRuleRepository,
+    importJobs: ImportJobRepository,
 )
 
 object Repositories {
@@ -44,6 +45,7 @@ object Repositories {
       bankTransactions = new BankTransactionRepositoryImpl(xa),
       categories = new CategoryRepositoryImpl(xa),
       classificationRules = new ClassificationRuleRepositoryImpl(xa),
+      importJobs = new ImportJobRepositoryImpl(xa),
     )
   }
 }

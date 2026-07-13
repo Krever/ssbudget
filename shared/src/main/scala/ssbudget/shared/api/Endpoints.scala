@@ -187,11 +187,11 @@ object Endpoints {
         .out(jsonBody[List[BankConnectionView]])
         .errorOut(stringBody)
 
-    /** Sync balances + import transactions (incremental) across all authorized connections in one call. */
-    val syncAll: Secured[Unit, SyncAllResult] =
+    /** Kick off a background "sync balances + import transactions across all connections" run; returns the tracked job immediately. */
+    val syncAll: Secured[Unit, ImportJob] =
       secureEndpoint.post
         .in("banking" / "sync-all")
-        .out(jsonBody[SyncAllResult])
+        .out(jsonBody[ImportJob])
         .errorOut(stringBody)
 
     val listCardGroups: Secured[Unit, List[CardGroup]] =
@@ -210,12 +210,21 @@ object Endpoints {
         .out(jsonBody[List[CardGroup]])
         .errorOut(stringBody)
 
-    val importTransactions: Secured[(BankConnectionId, ImportTransactionsRequest), ImportResult] =
+    // Kicks off a background import and returns the tracked job immediately (Running). Poll `jobs.get` for progress/result.
+    val importTransactions: Secured[(BankConnectionId, ImportTransactionsRequest), ImportJob] =
       secureEndpoint.post
         .in("banking" / "connections" / path[BankConnectionId]("id") / "import-transactions")
         .in(jsonBody[ImportTransactionsRequest])
-        .out(jsonBody[ImportResult])
+        .out(jsonBody[ImportJob])
         .errorOut(stringBody)
+  }
+
+  object jobs {
+    val list: Secured[Unit, List[ImportJob]] =
+      secureEndpoint.get.in("jobs").out(jsonBody[List[ImportJob]]).errorOut(stringBody)
+
+    val get: Secured[ImportJobId, ImportJob] =
+      secureEndpoint.get.in("jobs" / path[ImportJobId]("id")).out(jsonBody[ImportJob]).errorOut(stringBody)
   }
 
   object transactions {
@@ -450,6 +459,8 @@ object Endpoints {
     banking.deleteCardGroup,
     banking.linkCardGroup,
     banking.importTransactions,
+    jobs.list,
+    jobs.get,
     transactions.list,
     transactions.months,
     transactions.setCategory,
@@ -597,10 +608,10 @@ object Endpoints {
           .out(jsonBody[List[BankConnectionView]])
           .errorOut(stringBody)
 
-      val syncAll: Client[Unit, SyncAllResult] =
+      val syncAll: Client[Unit, ImportJob] =
         baseEndpoint.post
           .in("banking" / "sync-all")
-          .out(jsonBody[SyncAllResult])
+          .out(jsonBody[ImportJob])
           .errorOut(stringBody)
 
       val listCardGroups: Client[Unit, List[CardGroup]] =
@@ -619,12 +630,20 @@ object Endpoints {
           .out(jsonBody[List[CardGroup]])
           .errorOut(stringBody)
 
-      val importTransactions: Client[(BankConnectionId, ImportTransactionsRequest), ImportResult] =
+      val importTransactions: Client[(BankConnectionId, ImportTransactionsRequest), ImportJob] =
         baseEndpoint.post
           .in("banking" / "connections" / path[BankConnectionId]("id") / "import-transactions")
           .in(jsonBody[ImportTransactionsRequest])
-          .out(jsonBody[ImportResult])
+          .out(jsonBody[ImportJob])
           .errorOut(stringBody)
+    }
+
+    object jobs {
+      val list: Client[Unit, List[ImportJob]] =
+        baseEndpoint.get.in("jobs").out(jsonBody[List[ImportJob]]).errorOut(stringBody)
+
+      val get: Client[ImportJobId, ImportJob] =
+        baseEndpoint.get.in("jobs" / path[ImportJobId]("id")).out(jsonBody[ImportJob]).errorOut(stringBody)
     }
 
     object transactions {
