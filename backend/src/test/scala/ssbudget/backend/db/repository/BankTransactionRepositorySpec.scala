@@ -283,22 +283,24 @@ class BankTransactionRepositorySpec extends RepositorySpec {
     } yield months shouldBe List("2026-03", "2026-01")
   }
 
-  "spendByCategoryBetween sums categorized outflows per category within the window, excluding inflows/uncategorized" in {
+  "spendByCategoryBetween sums categorized spend per category (gross outflow by default, net with includeInflows), excluding uncategorized" in {
     val repo    = new BankTransactionRepositoryImpl(xa)
     val catRepo = new CategoryRepositoryImpl(xa)
     val jan     = Instant.parse("2026-01-10T00:00:00Z")
     val feb     = Instant.parse("2026-02-10T00:00:00Z")
     for {
-      _       <- catRepo.create(Category(CategoryId("cat-1"), "Groceries", None))
-      _       <- repo.insertNew(tx("t1", "uid-1", "r1", amountCents = -1000, bookedAt = jan, categoryId = Some(CategoryId("cat-1"))))
-      _       <- repo.insertNew(tx("t2", "uid-1", "r2", amountCents = -2000, bookedAt = feb, categoryId = Some(CategoryId("cat-1"))))
-      _       <- repo.insertNew(tx("t3", "uid-1", "r3", amountCents = 5000, bookedAt = feb, categoryId = Some(CategoryId("cat-1")))) // inflow → excluded
-      _       <- repo.insertNew(tx("t4", "uid-1", "r4", amountCents = -3000, bookedAt = feb, categoryId = None))                     // uncategorized → excluded
-      all     <- repo.spendByCategoryBetween(Instant.parse("2026-01-01T00:00:00Z"), Some(Instant.parse("2026-03-01T00:00:00Z")))
-      janOnly <- repo.spendByCategoryBetween(Instant.parse("2026-01-01T00:00:00Z"), Some(Instant.parse("2026-02-01T00:00:00Z")))
+      _        <- catRepo.create(Category(CategoryId("cat-1"), "Groceries", None))
+      _        <- repo.insertNew(tx("t1", "uid-1", "r1", amountCents = -1000, bookedAt = jan, categoryId = Some(CategoryId("cat-1"))))
+      _        <- repo.insertNew(tx("t2", "uid-1", "r2", amountCents = -2000, bookedAt = feb, categoryId = Some(CategoryId("cat-1"))))
+      _        <- repo.insertNew(tx("t3", "uid-1", "r3", amountCents = 5000, bookedAt = feb, categoryId = Some(CategoryId("cat-1")))) // inflow
+      _        <- repo.insertNew(tx("t4", "uid-1", "r4", amountCents = -3000, bookedAt = feb, categoryId = None))                     // uncategorized → excluded
+      grossAll <- repo.spendByCategoryBetween(Instant.parse("2026-01-01T00:00:00Z"), Some(Instant.parse("2026-03-01T00:00:00Z")))
+      netAll   <- repo.spendByCategoryBetween(Instant.parse("2026-01-01T00:00:00Z"), Some(Instant.parse("2026-03-01T00:00:00Z")), includeInflows = true)
+      janOnly  <- repo.spendByCategoryBetween(Instant.parse("2026-01-01T00:00:00Z"), Some(Instant.parse("2026-02-01T00:00:00Z")))
     } yield {
-      all shouldBe List((CategoryId("cat-1"), Currency.PLN, 3000L))     // 1000 + 2000, inflow and uncategorized dropped
-      janOnly shouldBe List((CategoryId("cat-1"), Currency.PLN, 1000L)) // upper bound is exclusive
+      grossAll shouldBe List((CategoryId("cat-1"), Currency.PLN, 3000L)) // default: outflow only (1000 + 2000); inflow + uncategorized dropped
+      netAll shouldBe List((CategoryId("cat-1"), Currency.PLN, -2000L))  // includeInflows: 1000 + 2000 − 5000 (net); uncategorized still dropped
+      janOnly shouldBe List((CategoryId("cat-1"), Currency.PLN, 1000L))  // upper bound is exclusive
     }
   }
 

@@ -69,16 +69,21 @@ final case class UpdateCategory(name: String, color: Option[String], budgetType:
 /** Spending stats for a category, computed server-side from bank transactions (the browser no longer holds them). All amounts are converted to the
   * primary currency at the latest rates, so a category with mixed-currency transactions is counted in full.
   *
-  *   - `avgMonthlyCents`: MEAN monthly outflow over the category's active span — total completed-month spend divided by the number of months from its
-  *     first to its last month-with-spend (the budget when `category.budgetType` is set). The in-progress current month is excluded and empty
+  *   - `avgMonthlyCents`: MEAN monthly NET spend over the category's active span — total completed-month spend divided by the number of months from
+  *     its first to its last month-with-spend (the budget when `category.budgetType` is set). The in-progress current month is excluded and empty
   *     leading/trailing months don't count, so a recently-started or dormant category isn't diluted by zeros.
-  *   - `currentPeriodSpentCents`: outflow since the current budget period started.
+  *   - `currentPeriodSpentCents`: net spend since the current budget period started.
+  *   - `lastPeriodSpentCents`: net spend over the previous (most recent closed) period; 0 if there is none.
   *   - `currency`: the primary currency (all category spend is converted to it).
+  *
+  * Spend is NET (outflows minus inflows), so pure-inflow categories (salary, refunds) show a negative figure instead of 0, and refunds reduce a
+  * category's spend.
   */
 final case class CategorySummary(
     category: Category,
     avgMonthlyCents: Long,
     currentPeriodSpentCents: Long,
+    lastPeriodSpentCents: Long,
     currency: Currency,
 ) derives Codec.AsObject
 

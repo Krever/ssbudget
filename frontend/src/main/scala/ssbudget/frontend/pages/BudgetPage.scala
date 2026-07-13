@@ -22,6 +22,7 @@ object BudgetPage {
   private val addingEstimated = Var(false)
   private val addingIncome    = Var(false)
   private val showOnlyPending = Var(true)
+  private val hidePaidBudgets = Var(true) // Category Budgets: hide budgets already covered this period
 
   // Savings state
   private val savingToAccountId  = Var[Option[AccountId]](None)
@@ -174,23 +175,50 @@ object BudgetPage {
   /** Categories with a budget type set: this-period spend vs the category's mean monthly spend, rendered per type (Steady pace bar / Bill paid-state
     * / Subscription fixed pool).
     */
-  private def categoryBudgetsCard(): HtmlElement =
+  private def categoryBudgetsCard(): HtmlElement = {
+    // A budget is "paid" (covered) when nothing more is expected before the next paycheck — i.e. remaining <= 0. Steady budgets keep a
+    // remaining-time share until the period ends, so they stay visible; Bill/Subscription drop off once covered.
+    def remainingCents(c: CategorySummary, elapsed: Double): Long =
+      CategoryBudgetType.remaining(c.category.budgetType.getOrElse(CategoryBudgetType.Steady), c.avgMonthlyCents, c.currentPeriodSpentCents, elapsed)
+
     div(
       cls := "card",
-      div(cls := "card-header py-2", "Category Budgets"),
       div(
-        cls   := "card-body",
-        children <-- dataService.budgetedCategories.combineWith(dataService.periodElapsedFraction).map { case (cats, elapsed) =>
-          if cats.isEmpty then List(
-            div(
-              cls := "text-muted small",
-              "No category budgets yet. Set a budget type (Steady / Bill / Subscription) on a category on the Transactions page.",
-            ),
-          )
-          else cats.map(c => categoryBudgetRow(c, elapsed))
-        },
+        cls := "card-header py-2 d-flex justify-content-between align-items-center",
+        span("Category Budgets"),
+        div(
+          cls := "form-check form-switch mb-0",
+          input(
+            cls     := "form-check-input",
+            tpe     := "checkbox",
+            idAttr  := "hidePaidBudgets",
+            checked <-- hidePaidBudgets.signal,
+            onChange.mapToChecked --> hidePaidBudgets.writer,
+          ),
+          label(cls := "form-check-label small", forId := "hidePaidBudgets", "Hide paid"),
+        ),
+      ),
+      div(
+        cls := "card-body",
+        children <-- dataService.budgetedCategories
+          .combineWith(dataService.periodElapsedFraction)
+          .combineWith(hidePaidBudgets.signal)
+          .map { case (cats, elapsed, hidePaid) =>
+            val visible = if hidePaid then cats.filter(c => remainingCents(c, elapsed) > 0) else cats
+            if cats.isEmpty then List(
+              div(
+                cls := "text-muted small",
+                "No category budgets yet. Set a budget type (Steady / Bill / Subscription) on a category on the Transactions page.",
+              ),
+            )
+            else if visible.isEmpty then List(
+              div(cls := "text-muted small", "All budgets are covered this period ✓ (turn off “Hide paid” to see them)."),
+            )
+            else visible.map(c => categoryBudgetRow(c, elapsed))
+          },
       ),
     )
+  }
 
   private def categoryBudgetRow(s: CategorySummary, elapsed: Double): HtmlElement = {
     val budget                 = s.avgMonthlyCents

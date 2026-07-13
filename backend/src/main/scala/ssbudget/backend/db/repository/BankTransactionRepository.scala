@@ -45,13 +45,16 @@ trait BankTransactionRepository {
   /** Distinct YYYY-MM buckets present in the data, newest first — for the month filter dropdown. */
   def distinctMonths(): IO[List[String]]
 
-  /** Outflow (positive cents) per (category, currency) over `[from, to)` — only categorized, non-internal debits. Powers category budgets. */
-  def spendByCategoryBetween(from: Instant, to: Option[Instant]): IO[List[(CategoryId, Currency, Long)]]
-
-  /** Outflow per (category, currency, YYYY-MM) over `[from, to)`. A per-month breakdown so budgets can use a median (robust to a month that happens
-    * to contain two payments of a monthly bill) rather than a skewable mean.
+  /** Spend (positive cents) per (category, currency) over `[from, to)`, categorized + non-internal. `includeInflows=false` counts only debits (gross
+    * outflow); `true` sums the NET (`SUM(-amount_cents)`, so inflows/refunds subtract) — the latter powers category budgets so pure-inflow categories
+    * (salary, refunds) aren't reported as 0 and refunds reduce a category's spend.
     */
-  def monthlySpendByCategory(from: Instant, to: Instant): IO[List[(CategoryId, Currency, String, Long)]]
+  def spendByCategoryBetween(from: Instant, to: Option[Instant], includeInflows: Boolean = false): IO[List[(CategoryId, Currency, Long)]]
+
+  /** Spend per (category, currency, YYYY-MM) over `[from, to)`, categorized + non-internal — a per-month breakdown. `includeInflows` as in
+    * [[spendByCategoryBetween]] (false = gross outflow, e.g. for the analytics chart; true = net, for the budget average).
+    */
+  def monthlySpendByCategory(from: Instant, to: Instant, includeInflows: Boolean = false): IO[List[(CategoryId, Currency, String, Long)]]
 
   /** Import/categorization health counts across all stored transactions, as a tuple of (total, internal, categorized, uncategorized, manual, rule)
     * where categorized/uncategorized count only non-internal rows and manual/rule reflect `category_source`.
@@ -165,19 +168,22 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
   override def distinctMonths(): IO[List[String]] =
     sql"SELECT DISTINCT substr(booked_at, 1, 7) AS m FROM bank_transactions ORDER BY m DESC".query[String].to[List].transact(xa)
 
-  override def spendByCategoryBetween(from: Instant, to: Option[Instant]): IO[List[(CategoryId, Currency, Long)]] = {
+  override def spendByCategoryBetween(from: Instant, to: Option[Instant], includeInflows: Boolean): IO[List[(CategoryId, Currency, Long)]] = {
     val upper = to.fold(Fragment.empty)(t => fr"AND booked_at <" ++ fr"$t")
+    val debit = if includeInflows then Fragment.empty else fr"AND amount_cents < 0"
     (fr"""SELECT category_id, currency, SUM(-amount_cents)
           FROM bank_transactions
-          WHERE category_id IS NOT NULL AND is_internal = 0 AND amount_cents < 0 AND booked_at >= $from""" ++ upper ++
+          WHERE category_id IS NOT NULL AND is_internal = 0""" ++ debit ++ fr"AND booked_at >= $from" ++ upper ++
       fr"GROUP BY category_id, currency").query[(CategoryId, Currency, Long)].to[List].transact(xa)
   }
 
-  override def monthlySpendByCategory(from: Instant, to: Instant): IO[List[(CategoryId, Currency, String, Long)]] =
-    sql"""SELECT category_id, currency, substr(booked_at, 1, 7) AS ym, SUM(-amount_cents)
+  override def monthlySpendByCategory(from: Instant, to: Instant, includeInflows: Boolean): IO[List[(CategoryId, Currency, String, Long)]] = {
+    val debit = if includeInflows then Fragment.empty else fr"AND amount_cents < 0"
+    (fr"""SELECT category_id, currency, substr(booked_at, 1, 7) AS ym, SUM(-amount_cents)
           FROM bank_transactions
-          WHERE category_id IS NOT NULL AND is_internal = 0 AND amount_cents < 0 AND booked_at >= $from AND booked_at < $to
-          GROUP BY category_id, currency, ym""".query[(CategoryId, Currency, String, Long)].to[List].transact(xa)
+          WHERE category_id IS NOT NULL AND is_internal = 0""" ++ debit ++ fr"AND booked_at >= $from AND booked_at < $to" ++
+      fr"GROUP BY category_id, currency, ym").query[(CategoryId, Currency, String, Long)].to[List].transact(xa)
+  }
 
   override def categorizationCounts(): IO[(Int, Int, Int, Int, Int, Int)] =
     sql"""SELECT

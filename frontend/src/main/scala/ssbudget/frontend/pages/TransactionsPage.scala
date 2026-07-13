@@ -434,6 +434,31 @@ object TransactionsPage {
     )
   }
 
+  /** Inline explanation of the budget types (shown in the categories card on demand). Each type predicts the money still needed before the next
+    * paycheck differently — see also `CategoryBudgetType.remaining`.
+    */
+  private def budgetTypeHelp: HtmlElement =
+    div(
+      cls := "px-3 py-2 small text-muted border-bottom",
+      div(cls := "mb-1", "Budget type = how a category predicts the money still needed before the next paycheck:"),
+      ul(
+        cls   := "mb-0 ps-3",
+        li(
+          span(cls := "fw-semibold", "Steady"),
+          " — time-based (groceries, eating out): reserves the remaining-time share of the monthly average; overspending never zeroes it.",
+        ),
+        li(
+          span(cls := "fw-semibold", "Bill"),
+          " — one payment per period (rent, kindergarten): reserves the full amount until any payment lands this period, then 0.",
+        ),
+        li(
+          span(cls := "fw-semibold", "Subscription"),
+          " — fixed pool (subscriptions): reserves average − spent; pay them all early and nothing more is reserved.",
+        ),
+        li(span(cls := "fw-semibold", "Off"), " — not tracked as a budget."),
+      ),
+    )
+
   private def categoriesCard(
       catsVar: Var[List[Category]],
       summaries: Signal[List[CategorySummary]],
@@ -445,6 +470,7 @@ object TransactionsPage {
     val nameVar   = Var("")
     val editingId = Var(Option.empty[CategoryId]) // category whose name is being edited inline
     val editName  = Var("")
+    val showHelp  = Var(false)                    // toggles the budget-type explanation
 
     def addCategory(): Unit = {
       val name = nameVar.now().trim
@@ -501,6 +527,7 @@ object TransactionsPage {
           },
         ),
         td(cls := "text-end font-monospace small", summary.map(s => money(s.avgMonthlyCents)).getOrElse("—")),
+        td(cls := "text-end font-monospace small text-muted", summary.map(s => money(s.lastPeriodSpentCents)).getOrElse("—")),
         td(cls := "text-end font-monospace small", summary.map(s => money(s.currentPeriodSpentCents)).getOrElse("—")),
         td(
           cls  := "text-center",
@@ -529,9 +556,19 @@ object TransactionsPage {
 
     div(
       cls := "card mb-3",
-      div(cls := "card-header py-2", "Categories & monthly averages"),
       div(
-        cls   := "card-body p-0",
+        cls := "card-header py-2 d-flex justify-content-between align-items-center",
+        span("Categories & monthly averages"),
+        button(
+          tpe := "button",
+          cls := "btn btn-sm btn-link p-0 text-decoration-none small",
+          child.text <-- showHelp.signal.map(o => if o then "Hide budget types" else "What are budget types?"),
+          onClick --> { _ => showHelp.update(!_) },
+        ),
+      ),
+      child.maybe <-- showHelp.signal.map(o => Option.when(o)(budgetTypeHelp)),
+      div(
+        cls := "card-body p-0",
         table(
           cls := "table table-sm table-hover mb-0 align-middle",
           thead(
@@ -540,8 +577,9 @@ object TransactionsPage {
               th(
                 cls   := "text-end",
                 "Avg / mo",
-                title := "Mean monthly spend over the category's active span (first to last month with spend)",
+                title := "Mean monthly net spend over the category's active span (first to last month with spend)",
               ),
+              th(cls  := "text-end", "Last period", title := "Net spend over the previous (most recent closed) period"),
               th(cls  := "text-end", "This period"),
               th(
                 cls   := "text-center",
@@ -553,7 +591,7 @@ object TransactionsPage {
           ),
           tbody(
             children <-- catsVar.signal.combineWith(summaries).map { case (cats, summs) =>
-              if cats.isEmpty then List(tr(td(colSpan := 5, cls := "text-muted small text-center py-2", "No categories yet.")))
+              if cats.isEmpty then List(tr(td(colSpan := 6, cls := "text-muted small text-center py-2", "No categories yet.")))
               else {
                 val byId = summs.map(s => s.category.id -> s).toMap
                 cats.map(c => categoryRow(c, byId.get(c.id)))
@@ -563,7 +601,7 @@ object TransactionsPage {
         ),
       ),
       div(
-        cls   := "card-footer py-2",
+        cls := "card-footer py-2",
         div(
           cls       := "input-group input-group-sm",
           styleAttr := "max-width: 24rem",

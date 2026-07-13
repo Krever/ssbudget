@@ -531,25 +531,27 @@ object Routes {
       if span <= 0 then 0L else monthMap.values.sum / span
     }
 
-  /** Per-category spend stats, all converted to the primary currency at the latest rates (so a category with mixed-currency transactions is counted
-    * in full, not just its dominant currency):
-    *   - `avgMonthlyCents` = MEAN monthly spend over the category's active span (see [[monthlyMean]]): total completed-month spend divided by the
-    *     number of months from its first to its last month-with-spend. The in-progress current month is excluded (a partial month would deflate the
-    *     mean), and empty leading/trailing months don't count.
-    *   - `currentPeriodSpentCents` = spend since the current period started.
+  private def startOfDayUtc(i: Instant): Instant =
+    java.time.LocalDate.ofInstant(i, java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
+
+  /** Start of a period's first calendar day (UTC). Bank `booked_at` is date-at-midnight, but a period starts at the paycheck instant (an afternoon
+    * time), so comparing against the raw instant drops the whole start day's spend. Filtering from midnight of that day includes the start-day
+    * transactions (bank data is date-granular, so we can't tell pre- vs post-paycheck spend anyway).
+    */
+  private def periodStartOfDay(p: Period): Instant = startOfDayUtc(p.startDate)
+
+  /** Per-category spend stats, converted to the primary currency at the latest rates (mixed-currency categories counted in full). Spend is NET
+    * (outflows minus inflows) so pure-inflow categories (salary, refunds) aren't reported as 0 and refunds reduce a category's spend:
+    *   - `avgMonthlyCents` = MEAN monthly net spend over the category's active span (see [[monthlyMean]]); current partial month excluded.
+    *   - `currentPeriodSpentCents` = net spend since the current period started (from the start of that calendar day).
+    *   - `lastPeriodSpentCents` = net spend over the previous (most recent closed) period; 0 if none.
     *   - `currency` = the primary currency.
     */
-  /** Instant at the start of a period's first calendar day (UTC). Bank `booked_at` is date-at-midnight, but a period starts at the paycheck instant
-    * (some afternoon time), so comparing transactions against the raw instant drops the whole start day's spend. Filtering from midnight of that day
-    * includes the start-day transactions in the period (bank data is date-granular, so we can't tell pre- vs post-paycheck spend anyway).
-    */
-  private def periodStartOfDay(p: Period): Instant =
-    java.time.LocalDate.ofInstant(p.startDate, java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
 
   private def categorySummaries(repos: Repositories): Result[List[CategorySummary]] =
     for {
       cats        <- repos.categories.findAll
-      periodOpt   <- repos.periods.findCurrent
+      periods     <- repos.periods.findAll
       primaryOpt  <- repos.currencySettings.findPrimary
       enabled     <- repos.currencySettings.findAll
       primary      = primaryOpt.map(_.code).getOrElse(Currency.PLN)
@@ -557,30 +559,42 @@ object Routes {
       now          = java.time.LocalDate.now(java.time.ZoneOffset.UTC)
       firstOfMonth = now.withDayOfMonth(1)
       currentMonth = firstOfMonth.atStartOfDay(java.time.ZoneOffset.UTC).toInstant
-      periodStart  = periodOpt.map(periodStartOfDay).getOrElse(currentMonth)
-      // All completed-month spend (the in-progress current month is excluded by the `< currentMonth` upper bound), per (cat, currency, YYYY-MM).
-      histRows    <- repos.bankTransactions.monthlySpendByCategory(java.time.Instant.EPOCH, currentMonth)
-      curRows     <- repos.bankTransactions.spendByCategoryBetween(periodStart, None)
+      currentOpt   = periods.find(_.endDate.isEmpty)
+      prevOpt      = periods.filter(_.endDate.isDefined).sortBy(_.startDate.toEpochMilli).lastOption // most recent closed period
+      periodStart  = currentOpt.map(periodStartOfDay).getOrElse(currentMonth)
+      // NET spend (inflows subtract). All completed-month spend (current partial month excluded by `< currentMonth`), per (cat, currency, YYYY-MM).
+      histRows    <- repos.bankTransactions.monthlySpendByCategory(java.time.Instant.EPOCH, currentMonth, includeInflows = true)
+      curRows     <- repos.bankTransactions.spendByCategoryBetween(periodStart, None, includeInflows = true)
+      prevRows    <- prevOpt match {
+                       case Some(p) =>
+                         repos.bankTransactions.spendByCategoryBetween(periodStartOfDay(p), p.endDate.map(startOfDayUtc), includeInflows = true)
+                       case None    => IO.pure(List.empty[(CategoryId, Currency, Long)])
+                     }
     } yield {
       val rateMap                                     = rateList.flatten.map(r => r.fromCurrency -> r).toMap
       // Convert cents in any currency to the primary currency; falls back to 1:1 if a rate is missing (rare — currency not enabled).
       def toPrimary(cents: Long, cur: Currency): Long =
         if cur == primary then cents else rateMap.get(cur).map(_.convert(Money(cents, cur)).amountCents).getOrElse(cents)
 
-      // category -> (YYYY-MM -> primary-currency spend, summed across currencies); only months that had spend are present.
-      val byCatMonth = histRows
+      // category -> (YYYY-MM -> primary-currency net spend, summed across currencies); only months that had activity are present.
+      val byCatMonth                                                                = histRows
         .groupBy(_._1)
         .view
         .mapValues(rows => rows.groupBy(_._3).view.mapValues(_.map { case (_, cur, _, cents) => toPrimary(cents, cur) }.sum).toMap)
         .toMap
-      val curByCat   = curRows
-        .groupBy(_._1)
-        .view
-        .mapValues(_.map { case (_, cur, cents) => toPrimary(cents, cur) }.sum)
-        .toMap
+      def sumByCat(rows: List[(CategoryId, Currency, Long)]): Map[CategoryId, Long] =
+        rows.groupBy(_._1).view.mapValues(_.map { case (_, cur, cents) => toPrimary(cents, cur) }.sum).toMap
+      val curByCat                                                                  = sumByCat(curRows)
+      val prevByCat                                                                 = sumByCat(prevRows)
       Right(cats.map { cat =>
         val monthMap = byCatMonth.getOrElse(cat.id, Map.empty[String, Long])
-        CategorySummary(cat, avgMonthlyCents = monthlyMean(monthMap), currentPeriodSpentCents = curByCat.getOrElse(cat.id, 0L), currency = primary)
+        CategorySummary(
+          cat,
+          avgMonthlyCents = monthlyMean(monthMap),
+          currentPeriodSpentCents = curByCat.getOrElse(cat.id, 0L),
+          lastPeriodSpentCents = prevByCat.getOrElse(cat.id, 0L),
+          currency = primary,
+        )
       })
     }
 
