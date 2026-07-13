@@ -19,6 +19,11 @@ trait BalanceSnapshotRepository {
     * pre-`at` balance is unknown).
     */
   def balanceAsOf(accountId: AccountId, at: Instant): IO[Option[Long]]
+
+  /** Amount of the account's earliest snapshot (its first recorded balance); None if it has no snapshots. Used as a period-start baseline fallback
+    * when nothing was recorded before the period began.
+    */
+  def earliestAmount(accountId: AccountId): IO[Option[Long]]
   def delete(id: BalanceSnapshotId): IO[Unit]
   def deleteByAccountId(accountId: AccountId): IO[Unit]
 }
@@ -59,6 +64,10 @@ class BalanceSnapshotRepositoryImpl(xa: Transactor[IO]) extends BalanceSnapshotR
       WHERE account_id = $accountId AND recorded_at <= $at
       ORDER BY recorded_at DESC LIMIT 1
     """.query[Long].option.transact(xa)
+  }
+
+  override def earliestAmount(accountId: AccountId): IO[Option[Long]] = {
+    sql"SELECT amount FROM balance_snapshots WHERE account_id = $accountId ORDER BY recorded_at ASC LIMIT 1".query[Long].option.transact(xa)
   }
 
   override def findAllLatest: IO[List[BalanceSnapshot]] = {

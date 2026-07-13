@@ -364,10 +364,13 @@ object Routes {
                       case None    => IO.pure(List.empty[(Long, Currency)])
                       case Some(p) =>
                         savings.traverse { acc =>
-                          repos.balanceSnapshots.balanceAsOf(acc.id, p.startDate).map { startOpt =>
-                            // Unknown pre-period balance → treat start as current so it contributes no change.
-                            (acc.balanceCents - startOpt.getOrElse(acc.balanceCents), acc.currency)
-                          }
+                          for {
+                            atStart  <- repos.balanceSnapshots.balanceAsOf(acc.id, p.startDate)
+                            // Baseline = balance at period start, else the earliest recorded balance (first observation ≈ start), else current
+                            // (no history → no change). This makes the change reflect what actually moved even when balances were only recorded
+                            // mid-period (bank balances are snapshotted on sync, not before the period).
+                            baseline <- if atStart.isDefined then IO.pure(atStart) else repos.balanceSnapshots.earliestAmount(acc.id)
+                          } yield (acc.balanceCents - baseline.getOrElse(acc.balanceCents), acc.currency)
                         }
                     }
     } yield {
