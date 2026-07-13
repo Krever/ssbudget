@@ -70,6 +70,7 @@ object Routes {
       route(Endpoints.savingsTransactions.listCurrent)(_ => listCurrentPeriodSavingsTransactions(repos)),
       route(Endpoints.savingsTransactions.create)(createSavingsTransaction(repos)),
       route(Endpoints.savingsTransactions.delete)(deleteSavingsTransaction(repos)),
+      route(Endpoints.savings.periodChange)(_ => savingsPeriodChange(repos)),
       // One-time expenses
       route(Endpoints.oneTimeExpenses.list)(_ => repos.oneTimeExpenses.findAll.map(Right(_))),
       route(Endpoints.oneTimeExpenses.create)(createOneTimeExpense(repos)),
@@ -341,6 +342,36 @@ object Routes {
                 }
     } yield result
   }
+
+  /** Net change in savings-account balances over the current period: Σ (current balance − balance as of the period start) across savings accounts,
+    * converted to the primary currency. Positive = net saved, negative = net withdrawn. If an account has no snapshot before the period start its
+    * pre-period balance is unknown, so we count no change for it. Informational only — not part of the free-money calc.
+    */
+  private def savingsPeriodChange(repos: Repositories): Result[Money] =
+    for {
+      accounts   <- repos.accounts.findAll
+      savings     = accounts.filter(_.role == AccountRole.Savings)
+      periodOpt  <- repos.periods.findCurrent
+      primaryOpt <- repos.currencySettings.findPrimary
+      enabled    <- repos.currencySettings.findAll
+      primary     = primaryOpt.map(_.code).getOrElse(Currency.PLN)
+      rateList   <- enabled.filterNot(_.code == primary).traverse(s => repos.exchangeRates.findLatest(s.code, primary))
+      changes    <- periodOpt match {
+                      case None    => IO.pure(List.empty[(Long, Currency)])
+                      case Some(p) =>
+                        savings.traverse { acc =>
+                          repos.balanceSnapshots.balanceAsOf(acc.id, p.startDate).map { startOpt =>
+                            // Unknown pre-period balance → treat start as current so it contributes no change.
+                            (acc.balanceCents - startOpt.getOrElse(acc.balanceCents), acc.currency)
+                          }
+                        }
+                    }
+    } yield {
+      val rateMap                                     = rateList.flatten.map(r => r.fromCurrency -> r).toMap
+      def toPrimary(cents: Long, cur: Currency): Long =
+        if cur == primary then cents else rateMap.get(cur).map(_.convert(Money(cents, cur)).amountCents).getOrElse(cents)
+      Right(Money(changes.map { case (delta, cur) => toPrimary(delta, cur) }.sum, primary))
+    }
 
   private def createOneTimeExpense(repos: Repositories)(dto: CreateOneTimeExpense): Result[OneTimeExpense] = {
     val id      = OneTimeExpenseId(UUID.randomUUID().toString)

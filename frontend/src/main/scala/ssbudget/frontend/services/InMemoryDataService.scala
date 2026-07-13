@@ -277,6 +277,7 @@ object InMemoryDataService extends DataService {
   override def categorySummaries: Signal[List[CategorySummary]]  = Val(List.empty)
   override def budgetedCategories: Signal[List[CategorySummary]] = Val(List.empty)
   override def categoryBudgetsRemaining: Signal[Money]           = primaryCurrency.map(Money.zero)
+  override def savingsPeriodChange: Signal[Money]                = primaryCurrency.map(Money.zero)
 
   override def periodElapsedFraction: Signal[Double] =
     currentPeriod.map {
@@ -295,16 +296,14 @@ object InMemoryDataService extends DataService {
   override def predictedExpenses: Signal[Money] =
     unpaidPlannedExpenses
       .combineWith(scaledEstimatedExpenses)
-      .combineWith(remainingSavingsTarget)
-      .map { case (unpaid, scaled, savings) => unpaid + scaled + savings }
+      .map { case (unpaid, scaled) => unpaid + scaled }
 
   override def freeMoney: Signal[Money] =
     bankAccountBalance
       .combineWith(unpaidPlannedExpenses)
       .combineWith(scaledEstimatedExpenses)
-      .combineWith(remainingSavingsTarget)
       .combineWith(pendingIncome)
-      .map { case (bankBalance, unpaid, scaled, savings, income) => bankBalance - unpaid - scaled - savings + income }
+      .map { case (bankBalance, unpaid, scaled, income) => bankBalance - unpaid - scaled + income }
 
   override def availableNow: Signal[Money] =
     bankAccountBalance

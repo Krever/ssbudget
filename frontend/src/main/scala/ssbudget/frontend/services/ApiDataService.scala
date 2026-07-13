@@ -21,6 +21,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   private val availableCurrenciesVar: Var[List[(String, String)]]   = Var(List.empty)
   private val oneTimeExpensesVar: Var[List[OneTimeExpense]]         = Var(List.empty)
   private val categorySummariesVar: Var[List[CategorySummary]]      = Var(List.empty)
+  private val savingsChangeVar: Var[Money]                          = Var(Money.zero(Currency.PLN)) // actual net savings-balance change this period
 
   // Initialize by fetching all data from individual endpoints
   override def initialize(): Future[Unit] = {
@@ -33,6 +34,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     val currencySettingsFut = client.currencies.getSettings()
     val oneTimeExpensesFut  = client.oneTimeExpenses.list()
     val categorySummsFut    = client.categories.summaries()
+    val savingsChangeFut    = client.savings.periodChange()
 
     for {
       accounts         <- accountsFut
@@ -44,6 +46,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       currencySettings <- currencySettingsFut
       oneTimeExpenses  <- oneTimeExpensesFut
       categorySumms    <- categorySummsFut
+      savingsChange    <- savingsChangeFut
     } yield {
       accountsVar.set(accounts)
       budgetItemsVar.set(budgetItems)
@@ -55,6 +58,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       availableCurrenciesVar.set(currencySettings.availableCurrencies.map(c => (c.code, c.name)))
       oneTimeExpensesVar.set(oneTimeExpenses)
       categorySummariesVar.set(categorySumms)
+      savingsChangeVar.set(savingsChange)
     }
   }
 
@@ -264,21 +268,23 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
         sumInPrimary(pendingAmounts, rates, primary)
       }
 
+  override def savingsPeriodChange: Signal[Money] = savingsChangeVar.signal
+
   override def predictedExpenses: Signal[Money] =
     unpaidPlannedExpenses
       .combineWith(scaledEstimatedExpenses)
-      .combineWith(remainingSavingsTarget)
       .combineWith(categoryBudgetsRemaining)
-      .map { case (unpaid, scaled, savings, catBudgets) => unpaid + scaled + savings + catBudgets }
+      .map { case (unpaid, scaled, catBudgets) => unpaid + scaled + catBudgets }
 
+  // Savings is deliberately NOT subtracted here: moving money to savings already lowers the (spending-only) bankAccountBalance, so reserving it
+  // again would double-count. Actual savings movement is surfaced separately via `savingsPeriodChange` (informational).
   override def freeMoney: Signal[Money] =
     bankAccountBalance
       .combineWith(unpaidPlannedExpenses)
       .combineWith(scaledEstimatedExpenses)
-      .combineWith(remainingSavingsTarget)
       .combineWith(categoryBudgetsRemaining)
       .combineWith(pendingIncome)
-      .map { case (bankBalance, unpaid, scaled, savings, catBudgets, income) => bankBalance - unpaid - scaled - savings - catBudgets + income }
+      .map { case (bankBalance, unpaid, scaled, catBudgets, income) => bankBalance - unpaid - scaled - catBudgets + income }
 
   override def availableNow: Signal[Money] =
     bankAccountBalance

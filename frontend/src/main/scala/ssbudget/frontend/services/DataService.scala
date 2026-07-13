@@ -52,8 +52,9 @@ trait DataService {
   def updateAccount(id: AccountId, name: String, currency: Currency, savingsTarget: Option[Long]): Future[Unit]
   def addSavingsTransaction(accountId: AccountId, amount: Long, note: Option[String]): Future[Unit]
   def deleteSavingsTransaction(id: SavingsTransactionId): Future[Unit]
-  def remainingSavingsTarget: Signal[Money]     // planned - actual contributions for current period
-  def periodSavingsTotal: Signal[Money]         // cumulative savings in current period
+  def remainingSavingsTarget: Signal[Money]     // planned - actual contributions (Planned Savings card only; no longer in free money)
+  def periodSavingsTotal: Signal[Money]         // cumulative logged savings transactions in current period
+  def savingsPeriodChange: Signal[Money]        // actual net savings-balance change this period (current - period start); informational
   def periodOneTimeExpensesTotal: Signal[Money] // cumulative one-time expenses in current period
 
   // One-time expenses
@@ -79,7 +80,7 @@ trait DataService {
   def scaledEstimatedExpenses: Signal[Money]
   def pendingIncome: Signal[Money]
   def predictedExpenses: Signal[Money]
-  def freeMoney: Signal[Money]          // bankAccountBalance - predicted expenses - remaining savings + pending income
+  def freeMoney: Signal[Money]          // bankAccountBalance - predicted expenses + pending income (savings excluded)
   def availableNow: Signal[Money]       // bankAccountBalance - unpaid planned only (conservative estimate)
   def dailyBudget: Signal[Money]
   def bankAccountBalance: Signal[Money] // only bank accounts, not savings

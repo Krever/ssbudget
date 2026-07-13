@@ -135,6 +135,12 @@ object Endpoints {
         .errorOut(stringBody)
   }
 
+  object savings {
+    // Net change in savings-account balances over the current period (current balance − balance at period start), in the primary currency.
+    val periodChange: Secured[Unit, Money] =
+      secureEndpoint.get.in("savings" / "period-change").out(jsonBody[Money]).errorOut(stringBody)
+  }
+
   object banking {
     val listAspsps: Secured[Option[String], List[Aspsp]] =
       secureEndpoint.get
@@ -420,6 +426,7 @@ object Endpoints {
     savingsTransactions.listCurrent,
     savingsTransactions.create,
     savingsTransactions.delete,
+    savings.periodChange,
     oneTimeExpenses.list,
     oneTimeExpenses.create,
     oneTimeExpenses.update,
@@ -550,6 +557,11 @@ object Endpoints {
 
       val delete: Client[SavingsTransactionId, Unit] =
         baseEndpoint.delete.in("savings-transactions" / path[SavingsTransactionId]("id")).errorOut(stringBody)
+    }
+
+    object savings {
+      val periodChange: Client[Unit, Money] =
+        baseEndpoint.get.in("savings" / "period-change").out(jsonBody[Money]).errorOut(stringBody)
     }
 
     object banking {

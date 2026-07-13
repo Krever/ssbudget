@@ -165,6 +165,13 @@ class ApiClient(implicit ec: ExecutionContext) {
     }
   }
 
+  object savings {
+    def periodChange(): Future[Money] = {
+      val request = interpreter.toRequest(Endpoints.client.savings.periodChange, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+  }
+
   object banking {
     def listAspsps(country: Option[String]): Future[List[Aspsp]] = {
       val request = interpreter.toRequest(Endpoints.client.banking.listAspsps, Some(baseUri))
