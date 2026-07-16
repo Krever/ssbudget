@@ -81,6 +81,12 @@ trait BankTransactionRepository {
   def setNote(id: BankTransactionId, note: Option[String]): IO[Unit]
   def deleteByConnection(connectionId: BankConnectionId): IO[Unit]
 
+  /** Move every transaction of a re-authorized account onto its new connection + account uid. Enable Banking mints a fresh account uid on each
+    * consent renewal, so a reconnect would otherwise orphan the old history and re-import it as duplicates; re-keying it here preserves the history
+    * and lets future imports dedupe against it. Safe only when the new uid has no transactions yet (true at callback time, before any import).
+    */
+  def repointAccount(oldUid: String, newConnectionId: BankConnectionId, newUid: String): IO[Unit]
+
   /** Apply the rule engine's decisions in one transaction: each tuple sets a row's (category_id, category_source). Only changed rows should be
     * passed.
     */
@@ -233,6 +239,10 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
 
   override def deleteByConnection(connectionId: BankConnectionId): IO[Unit] =
     sql"DELETE FROM bank_transactions WHERE connection_id = $connectionId".update.run.transact(xa).void
+
+  override def repointAccount(oldUid: String, newConnectionId: BankConnectionId, newUid: String): IO[Unit] =
+    sql"""UPDATE bank_transactions SET connection_id = $newConnectionId, eb_account_uid = $newUid
+          WHERE eb_account_uid = $oldUid""".update.run.transact(xa).void
 
   override def markInternalTransfers(): IO[Unit] = {
     // A transaction is internal when EITHER its counterparty is one of our own accounts (by IBAN), OR its remittance is one of the bank's own-movement

@@ -151,7 +151,10 @@ class ImportJobService(
                  // Sync + import are attempted independently so one failing doesn't suppress the other; problems become warnings.
                  for {
                    syncE <- bankingService.sync(conn.id).handleError(t => Left(t.getMessage))
-                   _     <- syncE.left.toOption.traverse_(e => reporter.warn(bank, s"balance sync — $e"))
+                   _     <- syncE match {
+                              case Left(e)        => reporter.warn(bank, s"balance sync — $e")
+                              case Right(outcome) => outcome.warnings.traverse_(w => reporter.warn(bank, s"balance — $w"))
+                            }
                    impE  <- importService
                               .importTransactions(
                                 conn.id,

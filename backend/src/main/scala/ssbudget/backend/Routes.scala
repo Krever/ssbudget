@@ -92,7 +92,7 @@ object Routes {
       route(Endpoints.banking.connections)(_ => bankingService.listConnections.map(Right(_))),
       route(Endpoints.banking.disconnect)(id => bankingService.disconnect(id)),
       route(Endpoints.banking.linkAccount) { case (linkId, req) => bankingService.linkAccount(linkId, req) },
-      route(Endpoints.banking.sync)(id => bankingService.sync(id)),
+      route(Endpoints.banking.sync)(id => bankingService.sync(id).map(_.map(_.views))),
       route(Endpoints.banking.syncAll)(_ => importJobService.startSyncAll().map(Right(_))),
       route(Endpoints.banking.listCardGroups)(_ => bankingService.listCardGroups.map(Right(_))),
       route(Endpoints.banking.createCardGroup)(dto => bankingService.createCardGroup(dto)),

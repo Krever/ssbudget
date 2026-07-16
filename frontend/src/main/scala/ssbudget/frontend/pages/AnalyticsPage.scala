@@ -1,6 +1,7 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
+import org.scalajs.dom
 import ssbudget.frontend.services.ApiClient
 import ssbudget.frontend.util.{Chart, MoneyFormatter}
 import ssbudget.shared.api.AnalyticsResponse
@@ -9,9 +10,9 @@ import ssbudget.shared.model.Category
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.scalajs.js
 import scala.scalajs.js.JSConverters.*
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
-/** Spending analytics: a per-month, per-category stacked bar chart (Chart.js — click a legend entry to hide/show that category, hover for the exact
+/** Spending analytics: a per-month, per-category stacked area chart (Chart.js — click a legend entry to hide/show that category, hover for the exact
   * breakdown), plus import/categorization health and the top counterparties still awaiting a category. All amounts arrive already converted to the
   * primary currency.
   */
@@ -33,6 +34,25 @@ object AnalyticsPage {
 
   private def colorFor(idx: Int, cat: Category): String =
     cat.color.filter(_.trim.nonEmpty).getOrElse(palette(idx % palette.size))
+
+  /** Translucent variant of the category color for the stacked-area fill (solid color stays the line). Appends an alpha byte to a `#rrggbb` hex;
+    * leaves any other CSS color untouched (Chart.js then fills opaque, still fine since stacked bands don't overlap).
+    */
+  private def fillColor(idx: Int, cat: Category): String = {
+    val c = colorFor(idx, cat)
+    if c.length == 7 && c.startsWith("#") then s"${c}b3" else c // b3 ≈ 70% alpha
+  }
+
+  // Categories the user has hidden on the chart, persisted so the always-irrelevant ones stay hidden across reloads.
+  private val hiddenStorageKey = "ssbudget.analytics.hiddenCategories"
+
+  private def loadHiddenCategories(): Set[String] =
+    Try(Option(dom.window.localStorage.getItem(hiddenStorageKey)).filter(_.nonEmpty).fold(Set.empty[String]) { s =>
+      js.JSON.parse(s).asInstanceOf[js.Array[String]].toSet
+    }).getOrElse(Set.empty)
+
+  private def saveHiddenCategories(ids: Set[String]): Unit =
+    dom.window.localStorage.setItem(hiddenStorageKey, js.JSON.stringify(ids.toJSArray))
 
   /** Compact major-unit amount for the y-axis: 1.2k, 3.4M, 850. */
   private def compactMajor(v: Double): String = {
@@ -131,49 +151,105 @@ object AnalyticsPage {
 
   // ---- Monthly spending chart (Chart.js) ----------------------------------------------------
 
-  private def chartCard(data: AnalyticsResponse): HtmlElement =
+  private def chartCard(data: AnalyticsResponse): HtmlElement = {
+    // Chart.js owns the <canvas>; we hold its instance here so the header "Show all" button can reach it. Data is fixed per page load, so the chart is
+    // built once on mount and torn down on unmount; only visibility changes at runtime (no data update).
+    var chart: js.UndefOr[Chart] = js.undefined
+    val catIds                   = data.series.map(_.category.id.value)
+    // Whether any plotted category is currently hidden — drives the "Show all" button's visibility.
+    val anyHidden                = Var(catIds.exists(loadHiddenCategories().contains))
+
+    def showAll(): Unit = chart.foreach { c =>
+      val cd = c.asInstanceOf[js.Dynamic]
+      catIds.indices.foreach(i => cd.setDatasetVisibility(i, true))
+      cd.update()
+      saveHiddenCategories(Set.empty)
+      anyHidden.set(false)
+    }
+
     div(
       cls := "card mb-3",
       div(
         cls := "card-header d-flex justify-content-between align-items-center",
         span("Monthly spending by category"),
-        small(cls := "text-muted", "Click a category in the legend to hide it"),
+        div(
+          cls := "d-flex align-items-center gap-2",
+          small(cls := "text-muted", "Click to hide (remembered) · double-click to solo"),
+          child.maybe <-- anyHidden.signal.map(
+            Option.when(_)(button(tpe := "button", cls := "btn btn-sm btn-outline-secondary py-0", "Show all", onClick --> (_ => showAll()))),
+          ),
+        ),
       ),
       div(
         cls := "card-body",
         if data.series.isEmpty then div(cls := "text-muted text-center py-5", s"No spending recorded in the last ${data.months.size} months.")
-        else chartCanvas(data),
-      ),
-    )
-
-  private def chartCanvas(data: AnalyticsResponse): HtmlElement = {
-    // Chart.js owns the <canvas>; create it on mount, tear it down on unmount. Data is fixed per page load, so no reactive update is needed.
-    var chart: js.UndefOr[Chart] = js.undefined
-    div(
-      // A relatively-positioned, fixed-height box is what `maintainAspectRatio: false` needs to size the canvas.
-      styleAttr := "position:relative;height:400px",
-      canvasTag(
-        onMountCallback { ctx => chart = new Chart(ctx.thisNode.ref, chartConfig(data)) },
-        onUnmountCallback { _ => chart.foreach(_.destroy()); chart = js.undefined },
+        else
+          div(
+            // A relatively-positioned, fixed-height box is what `maintainAspectRatio: false` needs to size the canvas.
+            styleAttr                       := "position:relative;height:400px",
+            canvasTag(
+              onMountCallback { ctx => chart = new Chart(ctx.thisNode.ref, chartConfig(data, anyHidden.set)) },
+              onUnmountCallback { _ => chart.foreach(_.destroy()); chart = js.undefined },
+            ),
+          ),
       ),
     )
   }
 
-  private def chartConfig(data: AnalyticsResponse): js.Any = {
+  private def chartConfig(data: AnalyticsResponse, onHiddenChange: Boolean => Unit): js.Any = {
     val cur    = data.currency.code
     val labels = data.months.map(monthLabel).toJSArray
+
+    // datasetIndex -> category id, so visibility persists by category (ids are stable; positions aren't).
+    val catIds  = data.series.map(_.category.id.value).toJSArray
+    val hidden0 = loadHiddenCategories()
 
     val datasets = data.series.zipWithIndex.map { case (s, idx) =>
       js.Dynamic.literal(
         label = s.category.name,
-        data = s.monthly.map(_ / 100.0).toJSArray, // Chart.js works in major units; tooltip/axis re-attach the currency
-        backgroundColor = colorFor(idx, s.category),
-        borderRadius = 3,
-        borderWidth = 0,
+        data = s.monthly.map(_ / 100.0).toJSArray,     // Chart.js works in major units; tooltip/axis re-attach the currency
+        borderColor = colorFor(idx, s.category),
+        backgroundColor = fillColor(idx, s.category),
+        fill = true,                                   // with y.stacked = true this yields a stacked area (each band fills to the one below)
+        tension = 0.3,                                 // gently smoothed lines
+        borderWidth = 2,
+        pointRadius = 0,
+        pointHoverRadius = 4,
+        hidden = hidden0.contains(s.category.id.value), // restore the user's persisted hidden set
       )
     }.toJSArray
 
-    // Tooltip: "Groceries: 1,234.56 PLN" per stacked segment.
+    // Persist which categories are currently hidden after any legend interaction.
+    def persist(chart: js.Dynamic): Unit = {
+      val n   = catIds.length
+      val ids = (0 until n).collect { case i if !chart.isDatasetVisible(i).asInstanceOf[Boolean] => catIds(i) }.toSet
+      saveHiddenCategories(ids)
+      onHiddenChange(ids.nonEmpty)
+    }
+
+    // Legend: single click toggles a category (Chart.js default); double click SOLOS it (only that one) — double click again shows all.
+    var lastIdx                                                             = -1
+    var lastAt                                                              = 0.0
+    val legendClick: js.Function3[js.Dynamic, js.Dynamic, js.Dynamic, Unit] = (_, item, legend) => {
+      val chart    = legend.chart
+      val idx      = item.datasetIndex.asInstanceOf[Int]
+      val now      = js.Date.now()
+      val isDouble = idx == lastIdx && (now - lastAt) < 350
+      lastIdx = idx
+      lastAt = now
+      val n        = catIds.length
+      if isDouble then {
+        // If this category is already the only visible one, restore all; otherwise isolate it.
+        val onlyThis = (0 until n).forall(i => chart.isDatasetVisible(i).asInstanceOf[Boolean] == (i == idx))
+        (0 until n).foreach(i => chart.setDatasetVisibility(i, onlyThis || i == idx))
+      } else {
+        chart.setDatasetVisibility(idx, !chart.isDatasetVisible(idx).asInstanceOf[Boolean])
+      }
+      chart.update()
+      persist(chart)
+    }
+
+    // Tooltip: "Groceries: 1,234.56 PLN" per category band.
     val labelCb: js.Function1[js.Dynamic, String] = (item: js.Dynamic) => {
       val v    = item.parsed.y.asInstanceOf[Double]
       val name = item.dataset.label.asInstanceOf[String]
@@ -183,19 +259,19 @@ object AnalyticsPage {
     val tickCb: js.Function1[js.Any, String]      = (value: js.Any) => compactMajor(value.asInstanceOf[Double])
 
     js.Dynamic.literal(
-      `type` = "bar",
+      `type` = "line",
       data = js.Dynamic.literal(labels = labels, datasets = datasets),
       options = js.Dynamic.literal(
         responsive = true,
         maintainAspectRatio = false,
-        // Tooltip shows only the single segment directly under the cursor (not the whole month's stack).
-        interaction = js.Dynamic.literal(mode = "nearest", intersect = true),
+        // Single nearest band under the cursor (not the whole month's stack); intersect=false so you needn't land exactly on the line.
+        interaction = js.Dynamic.literal(mode = "nearest", intersect = false),
         scales = js.Dynamic.literal(
-          x = js.Dynamic.literal(stacked = true, grid = js.Dynamic.literal(display = false)),
+          x = js.Dynamic.literal(grid = js.Dynamic.literal(display = false)),
           y = js.Dynamic.literal(stacked = true, ticks = js.Dynamic.literal(callback = tickCb)),
         ),
         plugins = js.Dynamic.literal(
-          legend = js.Dynamic.literal(position = "bottom", labels = js.Dynamic.literal(boxWidth = 12, usePointStyle = true)),
+          legend = js.Dynamic.literal(position = "bottom", onClick = legendClick, labels = js.Dynamic.literal(boxWidth = 12, usePointStyle = true)),
           tooltip = js.Dynamic.literal(callbacks = js.Dynamic.literal(label = labelCb)),
         ),
       ),

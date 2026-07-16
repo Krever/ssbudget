@@ -2,10 +2,10 @@ package ssbudget.backend.banking
 
 import cats.effect.IO
 import cats.syntax.all.*
-import ssbudget.backend.banking.EnableBankingClient.{EbAccountDetails, EbBalance, EbSession, EbTransactionsPage}
+import ssbudget.backend.banking.EnableBankingClient.{EbAccountDetails, EbAccountRef, EbBalance, EbSession, EbTransactionsPage}
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.db.repository.RepositorySpec
-import ssbudget.shared.api.{CreateCardGroup, LinkAccountRequest, LinkCardGroupRequest}
+import ssbudget.shared.api.{BankCallbackRequest, CreateCardGroup, LinkAccountRequest, LinkCardGroupRequest}
 import ssbudget.shared.model.*
 
 import java.time.{Instant, LocalDate}
@@ -14,10 +14,11 @@ import java.time.{Instant, LocalDate}
 class FakeEnableBankingApi(
     balances: Map[String, EbBalance] = Map.empty,
     details: Map[String, EbAccountDetails] = Map.empty,
+    sessionAccounts: List[EbAccountRef] = Nil,
 ) extends EnableBankingApi {
   override def listAspsps(country: Option[String])                                                                          = IO.pure(Right(Nil))
   override def startAuthorization(aspspName: String, aspspCountry: String, s: String)                                       = IO.pure(Right("https://bank.example/redirect"))
-  override def createSession(code: String)                                                                                  = IO.pure(Right(EbSession("sess-1", Nil, None)))
+  override def createSession(code: String)                                                                                  = IO.pure(Right(EbSession("sess-1", sessionAccounts, None)))
   override def getBalances(accountUid: String)                                                                              = IO.pure(balances.get(accountUid).toRight(s"no balance for $accountUid"))
   override def getAccountDetails(accountUid: String)                                                                        = IO.pure(details.get(accountUid).toRight(s"no details for $accountUid"))
   override def getTransactions(accountUid: String, dateFrom: LocalDate, dateTo: LocalDate, continuationKey: Option[String]) =
@@ -42,8 +43,36 @@ class BankingServiceSpec extends RepositorySpec {
       BankConnection(BankConnectionId(id), "PKO", "PL", Some("sess-1"), ConnectionStatus.Active, None, None, now),
     )
 
-  private def link(id: String, connId: String, uid: String, currency: Option[Currency] = None): BankAccountLink =
-    BankAccountLink(BankAccountLinkId(id), BankConnectionId(connId), uid, BankLinkTarget.Unlinked, None, None, currency, None, None, None, None)
+  private def link(id: String, connId: String, uid: String, currency: Option[Currency] = None, iban: Option[String] = None): BankAccountLink =
+    BankAccountLink(BankAccountLinkId(id), BankConnectionId(connId), uid, BankLinkTarget.Unlinked, iban, None, currency, None, None, None, None)
+
+  private def pendingConnection(repos: Repositories, id: String, state: String): IO[Unit] =
+    repos.bankConnections.create(
+      BankConnection(BankConnectionId(id), "PKO", "PL", None, ConnectionStatus.Pending, None, Some(state), now),
+    )
+
+  private def tx(id: String, connId: String, uid: String): BankTransaction =
+    BankTransaction(
+      BankTransactionId(id),
+      BankConnectionId(connId),
+      uid,
+      Some(id),
+      id,
+      -1000L,
+      Currency.PLN,
+      TransactionStatus.Booked,
+      now,
+      None,
+      None,
+      None,
+      None,
+      None,
+      "{}",
+      now,
+      false,
+      None,
+      None,
+    )
 
   "linkAccount marks the target account Bank-driven, and unlinking reverts it to Manual" in {
     val (svc, repos) = service()
@@ -178,6 +207,49 @@ class BankingServiceSpec extends RepositorySpec {
     } yield {
       conns shouldBe empty
       acc.map(_.balanceSource) shouldBe Some(BalanceSource.Manual)
+    }
+  }
+
+  "disconnect keeps transaction history (never wipes categorized spend)" in {
+    val (svc, repos) = service()
+    for {
+      _     <- activeConnection(repos, "c-1")
+      _     <- repos.bankConnections.createLink(link("l-1", "c-1", "uid-1", iban = Some("PL1")))
+      _     <- repos.bankTransactions.insertNew(tx("t-1", "c-1", "uid-1"))
+      _     <- svc.disconnect(BankConnectionId("c-1"))
+      kept  <- repos.bankTransactions.findById(BankTransactionId("t-1"))
+      conns <- svc.listConnections
+    } yield {
+      conns shouldBe empty
+      kept.isDefined shouldBe true
+    }
+  }
+
+  "callback folds a prior connection's history onto the reconnected account by IBAN and keeps the link" in {
+    val fake         = new FakeEnableBankingApi(sessionAccounts = List(EbAccountRef("uid-new", Some("Main"), Some("PLN"), Some("PL1"))))
+    val (svc, repos) = service(Some(fake))
+    for {
+      // Old, soon-to-be-stale connection: one account (IBAN PL1) linked to acc-1, with a transaction.
+      _     <- repos.accounts.create(account("acc-1"))
+      _     <- activeConnection(repos, "c-old")
+      _     <- repos.bankConnections.createLink(link("l-old", "c-old", "uid-old", iban = Some("PL1")))
+      _     <- svc.linkAccount(BankAccountLinkId("l-old"), LinkAccountRequest(BankLinkTarget.Account(AccountId("acc-1"))))
+      _     <- repos.bankTransactions.insertNew(tx("t-1", "c-old", "uid-old"))
+      // Reconnect: a fresh pending connection completes its callback, minting a new uid for the same IBAN.
+      _     <- pendingConnection(repos, "c-new", "st")
+      _     <- svc.callback(BankCallbackRequest("code", "st"))
+      moved <- repos.bankTransactions.findById(BankTransactionId("t-1"))
+      conns <- svc.listConnections
+      acc   <- repos.accounts.findById(AccountId("acc-1"))
+    } yield {
+      // Old connection is gone; only the new one remains.
+      conns.map(_.connection.id.value) shouldBe List("c-new")
+      // The transaction now lives under the new connection + new account uid.
+      moved.map(_.connectionId.value) shouldBe Some("c-new")
+      moved.map(_.ebAccountUid) shouldBe Some("uid-new")
+      // The new link inherited the old target, so the account is still bank-driven.
+      acc.map(_.balanceSource) shouldBe Some(BalanceSource.Bank)
+      conns.flatMap(_.accounts).find(_.ebAccountUid == "uid-new").map(_.target) shouldBe Some(BankLinkTarget.Account(AccountId("acc-1")))
     }
   }
 
