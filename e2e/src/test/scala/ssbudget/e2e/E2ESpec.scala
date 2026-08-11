@@ -1,20 +1,53 @@
 package ssbudget.e2e
 
 import io.github.bonigarcia.wdm.WebDriverManager
-import org.openqa.selenium.{By, WebDriver, WebElement}
 import org.openqa.selenium.chrome.{ChromeDriver, ChromeOptions}
 import org.openqa.selenium.support.ui.{ExpectedConditions, WebDriverWait}
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+import org.openqa.selenium.{By, JavascriptExecutor, WebDriver, WebElement}
+import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Millis, Seconds, Span}
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
 import java.time.Duration
 import scala.jdk.CollectionConverters.*
 
-trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
+/** One headless Chrome for the whole run.
+  *
+  * Launching a browser costs a second or two, which dwarfs most of these tests, so the driver is created once and every spec borrows it. Per-test
+  * isolation comes from clearing browser state in `beforeEach` instead of from a fresh process. Specs needing different Chrome options (a download
+  * directory, a virtual authenticator) still build their own driver and are responsible for quitting it.
+  */
+object SharedDriver {
+
+  lazy val instance: WebDriver = {
+    WebDriverManager.chromedriver().setup()
+    val options = new ChromeOptions()
+    options.addArguments("--headless", "--no-sandbox", "--disable-dev-shm-usage")
+    val driver  = new ChromeDriver(options)
+    driver.manage().timeouts().implicitlyWait(E2ESpec.implicitWait)
+    Runtime.getRuntime.addShutdownHook(new Thread(() => driver.quit()))
+    driver
+  }
+}
+
+object E2ESpec {
+
+  /** How long element lookups keep retrying. Also the ceiling for [[Eventually]] assertions. */
+  val implicitWait: Duration = Duration.ofSeconds(10)
+}
+
+trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with BeforeAndAfterEach with Eventually {
 
   import scala.compiletime.uninitialized
   protected var driver: WebDriver = uninitialized
+
+  /** Poll rather than sleep: assertions wrapped in `eventually` pass as soon as the UI catches up, so the common case costs one interval instead of a
+    * fixed guess. Re-find elements INSIDE the block — a reference captured outside goes stale when the DOM updates and would never recover.
+    */
+  implicit override val patienceConfig: PatienceConfig =
+    PatienceConfig(timeout = Span(E2ESpec.implicitWait.toSeconds, Seconds), interval = Span(100, Millis))
 
   // If E2E_BASE_URL is set, use it (external servers). Otherwise the first spec to run starts them.
   protected def baseUrl: String =
@@ -27,24 +60,28 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     if sys.env.get("E2E_BASE_URL").isEmpty then {
       TestServers.startAll()
     }
-    WebDriverManager.chromedriver().setup()
   }
 
   override def beforeEach(): Unit = {
-    val options = new ChromeOptions()
-    options.addArguments("--headless", "--no-sandbox", "--disable-dev-shm-usage")
-    driver = new ChromeDriver(options)
-    driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10))
+    driver = SharedDriver.instance
+    resetBrowserState()
   }
 
-  override def afterEach(): Unit = if driver != null then driver.quit()
+  override def afterEach(): Unit = () // the shared driver outlives the spec; a shutdown hook quits it
 
-  protected def waitFor: WebDriverWait = new WebDriverWait(driver, Duration.ofSeconds(10))
+  /** Undo anything a previous test left in the browser. The database is deliberately NOT reset — these specs have always shared it — but persisted UI
+    * preferences would otherwise leak between tests.
+    */
+  private def resetBrowserState(): Unit = {
+    // localStorage is per-origin, so we must be on the app before we can clear it. After the first test we already are.
+    if !driver.getCurrentUrl.startsWith(baseUrl) then driver.get(baseUrl)
+    driver.asInstanceOf[JavascriptExecutor].executeScript("window.localStorage.clear(); window.sessionStorage.clear();")
+  }
 
-  protected def waitForPage(title: String): Unit = {
+  protected def waitFor: WebDriverWait = new WebDriverWait(driver, E2ESpec.implicitWait)
+
+  protected def waitForPage(title: String): Unit =
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h4"), title))
-    Thread.sleep(300)
-  }
 
   protected def findCard(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//span[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
@@ -79,15 +116,28 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   private def withoutImplicitWait[A](body: => A): A = {
     driver.manage().timeouts().implicitlyWait(Duration.ZERO)
     try body
-    finally driver.manage().timeouts().implicitlyWait(implicitWait)
+    finally driver.manage().timeouts().implicitlyWait(E2ESpec.implicitWait)
   }
 
-  private val implicitWait = Duration.ofSeconds(10)
+  // ---- Polling assertions ----
+  // The UI updates asynchronously after an action, so these READ BY POLLING. `parent` is by-name on purpose: a Laminar re-render replaces the rows it
+  // returns, so anything captured before the action would go stale mid-assertion. Never assert on a snapshot taken before a click.
+
+  protected def textShouldAppear(parent: => WebElement, text: String): Unit =
+    eventually(parent.getText should include(text))
+
+  protected def textShouldDisappear(parent: => WebElement, text: String): Unit =
+    eventually(parent.getText should not include text)
+
+  protected def rowShouldExist(parent: => WebElement, text: String): Unit =
+    eventually(rows(parent).exists(_.getText.contains(text)) shouldBe true)
+
+  protected def rowShouldNotExist(parent: => WebElement, text: String): Unit =
+    eventually(rows(parent).exists(_.getText.contains(text)) shouldBe false)
 
   protected def click(parent: WebElement, buttonText: String): Unit = {
     // Use . instead of text() to match text in child elements (like spans)
     parent.findElement(By.xpath(s".//button[contains(.,'$buttonText')]")).click()
-    Thread.sleep(300)
   }
 
   protected def clickIfExists(parent: WebElement, buttonText: String): Boolean = {
@@ -95,7 +145,6 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     val buttons = parent.findElements(By.xpath(s".//button[contains(.,'$buttonText')]")).asScala
     if buttons.nonEmpty then {
       buttons.head.click()
-      Thread.sleep(300)
       true
     } else false
   }
@@ -112,7 +161,7 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     val cardText          = currentPeriodCard.getText
     if cardText.contains("No active period") then {
       click(currentPeriodCard, "Start New Period")
-      Thread.sleep(500)
+      eventually(findCardByDiv("Current Period").getText should not include "No active period")
       // Refresh to see updated state
       driver.get(s"$baseUrl/periods")
       waitForPage("Periods")
@@ -136,7 +185,7 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
       select.findElement(By.xpath(s".//option[text()='$currency']")).click()
     }
     click(addRow, "Add")
-    Thread.sleep(300)
+    eventually(findCard("Bank Accounts").getText should include(name))
   }
 
   /** Add a savings account */
@@ -153,7 +202,7 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
       addRow.findElement(By.cssSelector("input[type='number']")).sendKeys(amount.toString)
     }
     click(addRow, "Add")
-    Thread.sleep(300)
+    eventually(findCard("Savings Accounts").getText should include(name))
   }
 
   /** Add a planned expense */
@@ -168,7 +217,7 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
     addRow.findElement(By.cssSelector("input[type='number']")).sendKeys(amount.toString)
     click(addRow, "Add")
-    Thread.sleep(300)
+    eventually(findCard("Planned Items").getText should include(name))
   }
 
   /** Add a planned income */
@@ -183,7 +232,7 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
     addRow.findElement(By.cssSelector("input[type='number']")).sendKeys(amount.toString)
     click(addRow, "Add")
-    Thread.sleep(300)
+    eventually(findCard("Planned Items").getText should include(name))
   }
 
   /** Add an estimated expense */
@@ -198,6 +247,6 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
     addRow.findElement(By.cssSelector("input[type='number']")).sendKeys(amount.toString)
     click(addRow, "Add")
-    Thread.sleep(300)
+    eventually(findCard("Estimated Expenses").getText should include(name))
   }
 }

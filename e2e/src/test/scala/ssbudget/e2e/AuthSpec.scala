@@ -72,7 +72,6 @@ class AuthSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Bef
 
     // Should redirect to dashboard after auto-login
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h4"), "Dashboard"))
-    Thread.sleep(500)
 
     // Should see navbar with logout button
     waitFor.until(ExpectedConditions.visibilityOfElementLocated(By.xpath("//button[text()='Logout']")))
@@ -86,7 +85,6 @@ class AuthSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Bef
     driver.findElement(By.id("confirm")).sendKeys("testpassword123")
     driver.findElement(By.xpath("//button[text()='Create Password']")).click()
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h4"), "Dashboard"))
-    Thread.sleep(500)
 
     // Click logout (wait for it to be visible first)
     waitFor.until(ExpectedConditions.elementToBeClickable(By.xpath("//button[text()='Logout']"))).click()
@@ -105,7 +103,6 @@ class AuthSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Bef
     driver.findElement(By.id("confirm")).sendKeys("testpassword123")
     driver.findElement(By.xpath("//button[text()='Create Password']")).click()
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h4"), "Dashboard"))
-    Thread.sleep(500)
 
     // Logout
     waitFor.until(ExpectedConditions.elementToBeClickable(By.xpath("//button[text()='Logout']"))).click()
@@ -127,7 +124,6 @@ class AuthSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Bef
     driver.findElement(By.id("confirm")).sendKeys("testpassword123")
     driver.findElement(By.xpath("//button[text()='Create Password']")).click()
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h4"), "Dashboard"))
-    Thread.sleep(500)
 
     // Logout
     driver.findElement(By.xpath("//button[text()='Logout']")).click()

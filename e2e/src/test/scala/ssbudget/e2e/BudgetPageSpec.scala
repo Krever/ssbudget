@@ -30,7 +30,7 @@ class BudgetPageSpec extends E2ESpec {
     addRow.findElement(By.cssSelector("input[type='number']")).sendKeys("123.45")
     click(addRow, "Add")
 
-    rows(card).exists(_.getText.contains("Test Expense")) shouldBe true
+    rowShouldExist(card, "Test Expense")
   }
 
   it should "add a new planned income" in {
@@ -47,7 +47,7 @@ class BudgetPageSpec extends E2ESpec {
     addRow.findElement(By.cssSelector("input[type='number']")).sendKeys("500")
     click(addRow, "Add")
 
-    rows(card).exists(_.getText.contains("Test Income")) shouldBe true
+    rowShouldExist(card, "Test Income")
   }
 
   it should "pay expense with default amount" in {
@@ -63,7 +63,7 @@ class BudgetPageSpec extends E2ESpec {
     click(pendingRow, "Pay")
     click(card.findElement(By.cssSelector("tr.table-info")), "Save")
 
-    card.getText should include("Paid")
+    textShouldAppear(card, "Paid")
   }
 
   it should "pay expense with overridden amount" in {
@@ -83,7 +83,7 @@ class BudgetPageSpec extends E2ESpec {
     input.sendKeys("99.99")
     click(editRow, "Save")
 
-    card.getText should include("99.99")
+    textShouldAppear(card, "99.99")
   }
 
   it should "add and delete an estimated expense" in {
@@ -100,13 +100,13 @@ class BudgetPageSpec extends E2ESpec {
     addRow.findElement(By.cssSelector("input[type='number']")).sendKeys("100")
     click(addRow, "Add")
 
-    rows(card).exists(_.getText.contains("To Delete Expense")) shouldBe true
+    rowShouldExist(card, "To Delete Expense")
 
     val toDelete = card.findElement(By.xpath(".//tr[.//td[contains(text(),'To Delete Expense')]]"))
     click(toDelete, "Edit")
     click(card.findElement(By.cssSelector("tr.table-warning")), "Del")
 
-    rows(card).exists(_.getText.contains("To Delete Expense")) shouldBe false
+    rowShouldNotExist(card, "To Delete Expense")
   }
 
   // ============ Planned Savings ============
@@ -129,10 +129,10 @@ class BudgetPageSpec extends E2ESpec {
     waitForPage("Budget")
 
     val card = findCard("Planned Savings")
-    card.getText should include("Budget Savings Test")
-    card.getText should include("Target")
-    card.getText should include("Saved")
-    card.getText should include("Remaining")
+    textShouldAppear(card, "Budget Savings Test")
+    textShouldAppear(card, "Target")
+    textShouldAppear(card, "Saved")
+    textShouldAppear(card, "Remaining")
   }
 
   it should "expand savings account to show transactions" in {
@@ -146,7 +146,6 @@ class BudgetPageSpec extends E2ESpec {
     // Find a savings account row and click to expand
     val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Expand Test Savings')]]"))
     savingsRow.click()
-    Thread.sleep(300)
 
     // Should see "+ Add" button in expanded view
     card.findElement(By.xpath(".//button[contains(text(),'+ Add')]")).isDisplayed shouldBe true
@@ -163,7 +162,6 @@ class BudgetPageSpec extends E2ESpec {
     // Expand the savings account
     val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Add Txn Savings')]]"))
     savingsRow.click()
-    Thread.sleep(300)
 
     // Click + Add to show transaction form
     click(card, "+ Add")
@@ -177,7 +175,7 @@ class BudgetPageSpec extends E2ESpec {
     click(addRow, "Add")
 
     // Transaction should appear
-    card.getText should include("Test deposit")
+    textShouldAppear(card, "Test deposit")
   }
 
   it should "delete a savings transaction" in {
@@ -191,7 +189,6 @@ class BudgetPageSpec extends E2ESpec {
     // Expand the savings account
     val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Delete Txn Savings')]]"))
     savingsRow.click()
-    Thread.sleep(300)
 
     // Add a transaction to delete
     click(card, "+ Add")
@@ -202,13 +199,13 @@ class BudgetPageSpec extends E2ESpec {
     amountInput.sendKeys("10")
     click(addRow, "Add")
 
-    card.getText should include("To delete txn")
+    textShouldAppear(card, "To delete txn")
 
     // Find and delete the transaction
     val txnRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'To delete txn')]]"))
     click(txnRow, "×")
 
-    card.getText should not include "To delete txn"
+    textShouldDisappear(card, "To delete txn")
   }
 
   it should "collapse expanded savings account" in {
@@ -221,13 +218,11 @@ class BudgetPageSpec extends E2ESpec {
     val card = findCard("Planned Savings")
     // Expand
     card.findElement(By.xpath(".//tr[.//td[contains(text(),'Collapse Test Savings')]]")).click()
-    Thread.sleep(300)
 
     card.findElements(By.xpath(".//button[contains(text(),'+ Add')]")).size() shouldBe 1
 
     // Collapse - need to re-find element as DOM was updated
     card.findElement(By.xpath(".//tr[.//td[contains(text(),'Collapse Test Savings')]]")).click()
-    Thread.sleep(300)
 
     card.findElements(By.xpath(".//button[contains(text(),'+ Add')]")).size() shouldBe 0
   }

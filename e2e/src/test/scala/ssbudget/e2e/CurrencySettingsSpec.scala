@@ -26,7 +26,7 @@ class CurrencySettingsSpec extends E2ESpec {
 
     val currenciesCard = findCardByH5("Currencies")
     val plnRow         = currenciesCard.findElement(By.xpath(".//tr[contains(.,'PLN')]"))
-    plnRow.getText should include("Primary")
+    textShouldAppear(plnRow, "Primary")
   }
 
   it should "have Refresh Rates button" in {
@@ -46,7 +46,7 @@ class CurrencySettingsSpec extends E2ESpec {
 
     // Click refresh rates button
     click(currenciesCard, "Refresh Rates")
-    Thread.sleep(2000) // Wait for API call to external service
+    // Poll instead of guessing how long the external rates provider takes.
 
     // Wait for success message
     waitFor.until { _ =>
@@ -75,12 +75,10 @@ class CurrencySettingsSpec extends E2ESpec {
     val input = currenciesCard.findElement(By.cssSelector("input[type='text']"))
     input.sendKeys("USD")
     click(currenciesCard, "Add Currency")
-    Thread.sleep(500)
 
-    val newRows = currenciesCard.findElements(By.cssSelector("tbody tr")).asScala.size
-    newRows shouldBe (initialRows + 1)
-    currenciesCard.getText should include("USD")
-    currenciesCard.getText should include("US Dollar")
+    eventually(currenciesCard.findElements(By.cssSelector("tbody tr")).asScala.size shouldBe (initialRows + 1))
+    textShouldAppear(currenciesCard, "USD")
+    textShouldAppear(currenciesCard, "US Dollar")
   }
 
   it should "set a different currency as primary" in {
@@ -95,13 +93,11 @@ class CurrencySettingsSpec extends E2ESpec {
       val input = currenciesCard.findElement(By.cssSelector("input[type='text']"))
       input.sendKeys("USD")
       click(currenciesCard, "Add Currency")
-      Thread.sleep(500)
     }
 
     // Set USD as primary
     val usdRow = currenciesCard.findElement(By.xpath(".//tr[contains(.,'USD')]"))
     click(usdRow, "Set Primary")
-    Thread.sleep(500)
 
     // Verify USD is now primary
     driver.get(s"$baseUrl/settings")
@@ -109,7 +105,7 @@ class CurrencySettingsSpec extends E2ESpec {
 
     val updatedCard   = findCardByH5("Currencies")
     val updatedUsdRow = updatedCard.findElement(By.xpath(".//tr[contains(.,'USD')]"))
-    updatedUsdRow.getText should include("Primary")
+    textShouldAppear(updatedUsdRow, "Primary")
 
     // The old primary (PLN) should no longer have the primary badge in its row
     val plnRow = updatedCard.findElement(By.xpath(".//tr[contains(.,'PLN')]"))
@@ -117,7 +113,6 @@ class CurrencySettingsSpec extends E2ESpec {
 
     // Restore PLN as primary for other tests
     click(plnRow, "Set Primary")
-    Thread.sleep(500)
   }
 
   it should "remove a non-primary currency" in {
@@ -131,17 +126,14 @@ class CurrencySettingsSpec extends E2ESpec {
       val input = currenciesCard.findElement(By.cssSelector("input[type='text']"))
       input.sendKeys("GBP")
       click(currenciesCard, "Add Currency")
-      Thread.sleep(500)
     }
 
     val rowsBefore = currenciesCard.findElements(By.cssSelector("tbody tr")).asScala.size
     val gbpRow     = currenciesCard.findElement(By.xpath(".//tr[contains(.,'GBP')]"))
     click(gbpRow, "Remove")
-    Thread.sleep(500)
 
-    val rowsAfter = currenciesCard.findElements(By.cssSelector("tbody tr")).asScala.size
-    rowsAfter shouldBe (rowsBefore - 1)
-    currenciesCard.getText should not include "GBP"
+    eventually(currenciesCard.findElements(By.cssSelector("tbody tr")).asScala.size shouldBe (rowsBefore - 1))
+    textShouldDisappear(currenciesCard, "GBP")
   }
 
   it should "not show remove button for primary currency" in {
@@ -164,7 +156,6 @@ class CurrencySettingsSpec extends E2ESpec {
       val input = currenciesCard.findElement(By.cssSelector("input[type='text']"))
       input.sendKeys("USD")
       click(currenciesCard, "Add Currency")
-      Thread.sleep(500)
     }
 
     // Navigate to accounts page

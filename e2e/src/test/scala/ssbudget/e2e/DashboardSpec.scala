@@ -32,8 +32,7 @@ class DashboardSpec extends E2ESpec {
     input.sendKeys("5000.00")
     click(card, "Save All")
 
-    Thread.sleep(300)
-    card.getText should include("5,000")
+    eventually(findCard("Accounts").getText should include("5,000"))
   }
 
   it should "cancel balance edit without saving" in {
@@ -65,7 +64,6 @@ class DashboardSpec extends E2ESpec {
     // Click the savings account row to expand it
     val accountRow  = savingsCard.findElement(By.xpath(".//tbody/tr[contains(.,'E2E Savings')]"))
     accountRow.click()
-    Thread.sleep(300)
 
     // Click "+ Add" to open the transaction form
     click(savingsCard, "+ Add")
@@ -76,7 +74,6 @@ class DashboardSpec extends E2ESpec {
     amountInput.clear()
     amountInput.sendKeys("200")
     click(txnRow, "Add")
-    Thread.sleep(500)
 
     // Navigate to dashboard and verify "Saved" row
     driver.get(baseUrl)
@@ -100,7 +97,6 @@ class DashboardSpec extends E2ESpec {
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("Test Purchase")
     addRow.findElement(By.cssSelector("input[type='number']")).sendKeys("350")
     click(addRow, "Add")
-    Thread.sleep(500)
 
     // Navigate to dashboard and verify "One-Time Expenses" row
     driver.get(baseUrl)
@@ -133,7 +129,6 @@ class DashboardSpec extends E2ESpec {
 
     val btn = driver.findElement(By.xpath("//button[contains(text(),'Copy Summary')]"))
     btn.click()
-    Thread.sleep(500)
 
     // Button should show "Copied!" feedback
     btn.getText shouldBe "Copied!"

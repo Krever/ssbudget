@@ -23,7 +23,7 @@ class PeriodsPageSpec extends E2ESpec {
     // If no period, start one
     if card.getText.contains("No active period") then {
       click(card, "Start New Period")
-      Thread.sleep(500)
+      eventually(findCardByDiv("Current Period").getText should not include "No active period")
     }
 
     // Now should have an active period with progress bar
@@ -66,9 +66,11 @@ class PeriodsPageSpec extends E2ESpec {
     val currentCard  = findCardByDiv("Current Period")
 
     click(currentCard, "End Period & Start New")
-    Thread.sleep(500)
 
-    rows(historyCard).size shouldBe (initialCount + 1)
-    historyCard.findElements(By.xpath(".//span[contains(@class,'badge') and contains(text(),'Active')]")).size() shouldBe 1
+    eventually {
+      val history = findCardByDiv("Period History")
+      rows(history).size shouldBe (initialCount + 1)
+      history.findElements(By.xpath(".//span[contains(@class,'badge') and contains(text(),'Active')]")).size() shouldBe 1
+    }
   }
 }

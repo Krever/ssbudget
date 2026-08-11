@@ -16,8 +16,8 @@ class TransactionsPageSpec extends E2ESpec {
     driver.get(s"$baseUrl/transactions")
     waitForPage("Transactions")
 
-    foldToggle.getText should include("▾")
-    categoriesCard.getText should include("Avg / mo")
+    textShouldAppear(foldToggle, "▾")
+    textShouldAppear(categoriesCard, "Avg / mo")
   }
 
   it should "fold away the table, and stay folded across a reload" in {
@@ -25,19 +25,17 @@ class TransactionsPageSpec extends E2ESpec {
     waitForPage("Transactions")
 
     foldToggle.click()
-    Thread.sleep(300)
+    textShouldAppear(foldToggle, "▸")
 
-    val folded = categoriesCard
-    folded.getText should include("▸")
-    folded.getText should not include "Avg / mo"         // the table is gone
-    assertAbsent(folded, By.cssSelector(".card-footer")) // so is the add-category row
-    assertAbsent(folded, By.xpath(".//button[contains(.,'budget types')]"))
+    textShouldDisappear(categoriesCard, "Avg / mo")              // the table is gone
+    assertAbsent(categoriesCard, By.cssSelector(".card-footer")) // so is the add-category row
+    assertAbsent(categoriesCard, By.xpath(".//button[contains(.,'budget types')]"))
 
     driver.navigate().refresh()
     waitForPage("Transactions")
 
-    foldToggle.getText should include("▸")
-    categoriesCard.getText should not include "Avg / mo"
+    textShouldAppear(foldToggle, "▸")
+    textShouldDisappear(categoriesCard, "Avg / mo")
   }
 
   it should "unfold again, and stay unfolded across a reload" in {
@@ -45,16 +43,14 @@ class TransactionsPageSpec extends E2ESpec {
     waitForPage("Transactions")
 
     foldToggle.click() // fold
-    Thread.sleep(300)
+    textShouldAppear(foldToggle, "▸")
     foldToggle.click() // unfold
-    Thread.sleep(300)
-
-    categoriesCard.getText should include("Avg / mo")
+    textShouldAppear(categoriesCard, "Avg / mo")
 
     driver.navigate().refresh()
     waitForPage("Transactions")
 
-    foldToggle.getText should include("▾")
-    categoriesCard.getText should include("Avg / mo")
+    textShouldAppear(foldToggle, "▾")
+    textShouldAppear(categoriesCard, "Avg / mo")
   }
 }

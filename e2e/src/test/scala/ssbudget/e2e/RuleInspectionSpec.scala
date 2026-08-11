@@ -25,7 +25,6 @@ class RuleInspectionSpec extends E2ESpec {
     driver.get(s"$baseUrl/transactions")
     waitForPage("Transactions")
     click(findCard("Categorization rules"), "Re-apply")
-    Thread.sleep(500)
 
     driver.get(s"$baseUrl/transactions?category=all")
     waitForPage("Transactions")
@@ -47,18 +46,18 @@ class RuleInspectionSpec extends E2ESpec {
 
     val row = txTable.findElement(By.xpath(".//tr[.//div[contains(text(),'Orlen E2E')]]"))
     row.findElement(ruleBadge).click()
-    Thread.sleep(500)
 
     // The rules modal, populated with the rule behind this transaction rather than a blank new-rule form.
     val modal = driver.findElement(By.cssSelector(".modal.show, .modal.d-block"))
-    modal.getText should include("Edit rule")
+    textShouldAppear(modal, "Edit rule")
 
     // Its name and the condition it matches on are both loaded (criteria render as editable inputs, so they're values not text).
     val values = modal.findElements(By.cssSelector("input")).asScala.toList.map(_.getAttribute("value"))
     values should contain("Fuel rule")
     values should contain("Orlen E2E")
 
-    modal.getText should include("Matches") // the live preview of what the rule covers
+    // The live preview of what the rule covers. It reads "Matching…" until the server responds, so accept either state rather than racing the round trip.
+    modal.getText should (include("Matches") or include("Matching"))
   }
 
   "A manually categorized transaction" should "not show a rule badge" in {

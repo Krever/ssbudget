@@ -38,7 +38,8 @@ class DatabaseSpec extends E2ESpec {
   }
 
   override def afterEach(): Unit = {
-    super.afterEach()
+    // This spec builds its OWN driver (for the download directory), so it owns quitting it — the shared one is left alone.
+    if driver != null then driver.quit()
     // Cleanup download directory
     if downloadDir != null then {
       Files.walk(downloadDir).sorted(java.util.Comparator.reverseOrder()).forEach(Files.delete(_))
@@ -126,27 +127,29 @@ class DatabaseSpec extends E2ESpec {
     // Send the backup file path to the hidden input
     fileInput.sendKeys(backupFile.get.getAbsolutePath)
 
-    // Wait for import to complete (success message should appear)
-    Thread.sleep(2000)
+    // Poll for the import to land rather than guessing at it.
+    eventually(driver.findElements(By.cssSelector(".alert")).asScala.map(_.getText).mkString should not be empty)
     val alerts = driver.findElements(By.cssSelector(".alert-success")).asScala
     alerts.exists(_.getText.contains("imported successfully")) shouldBe true
 
     // Step 5: Verify the data was restored (new data should be gone, original should exist)
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
-    Thread.sleep(500)
 
-    val bankCardAfter = findCard("Bank Accounts")
-    bankCardAfter.getText should include("Original Account")
-    bankCardAfter.getText should not include "New Account After Backup"
+    eventually {
+      val bankCardAfter = findCard("Bank Accounts")
+      bankCardAfter.getText should include("Original Account")
+      bankCardAfter.getText should not include "New Account After Backup"
+    }
 
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
-    Thread.sleep(500)
 
-    val plannedCard = findCard("Planned Items")
-    plannedCard.getText should include("Original Expense")
-    plannedCard.getText should not include "New Expense After Backup"
+    eventually {
+      val plannedCard = findCard("Planned Items")
+      plannedCard.getText should include("Original Expense")
+      plannedCard.getText should not include "New Expense After Backup"
+    }
   }
 
   it should "show error for invalid file" in {
@@ -161,9 +164,10 @@ class DatabaseSpec extends E2ESpec {
     val fileInput = dataCard.findElement(By.cssSelector("input[type='file']"))
     fileInput.sendKeys(invalidFile.toAbsolutePath.toString)
 
-    // Wait for error message
-    Thread.sleep(2000)
-    val alerts = driver.findElements(By.cssSelector(".alert-danger")).asScala
-    alerts.exists(_.getText.toLowerCase.contains("invalid")) shouldBe true
+    // Poll for the error message instead of guessing how long validation takes.
+    eventually {
+      val alerts = driver.findElements(By.cssSelector(".alert-danger")).asScala
+      alerts.exists(_.getText.toLowerCase.contains("invalid")) shouldBe true
+    }
   }
 }

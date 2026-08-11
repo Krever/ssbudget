@@ -12,7 +12,7 @@ class OneTimeExpensesSpec extends E2ESpec {
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
-    findCard("One-Time Expenses").getText should include("One-Time Expenses")
+    textShouldAppear(findCard("One-Time Expenses"), "One-Time Expenses")
 
     // === Add a one-time expense ===
     click(findCard("One-Time Expenses"), "+ Add")
@@ -22,8 +22,8 @@ class OneTimeExpensesSpec extends E2ESpec {
     click(addRow, "Add")
 
     // Re-find card after DOM update
-    findCard("One-Time Expenses").getText should include("New Laptop")
-    findCard("One-Time Expenses").getText should include("4,500.00")
+    textShouldAppear(findCard("One-Time Expenses"), "New Laptop")
+    textShouldAppear(findCard("One-Time Expenses"), "4,500.00")
 
     // === Add a second expense ===
     click(findCard("One-Time Expenses"), "+ Add")
@@ -32,7 +32,7 @@ class OneTimeExpensesSpec extends E2ESpec {
     addRow2.findElement(By.cssSelector("input[type='number']")).sendKeys("1200")
     click(addRow2, "Add")
 
-    findCard("One-Time Expenses").getText should include("Car Repair")
+    textShouldAppear(findCard("One-Time Expenses"), "Car Repair")
 
     // === Edit the first expense ===
     val laptopRow = findCard("One-Time Expenses").findElement(By.xpath(".//tr[.//td[contains(text(),'New Laptop')]]"))
@@ -47,30 +47,30 @@ class OneTimeExpensesSpec extends E2ESpec {
     amountInput.sendKeys("5500")
     click(editRow, "Save")
 
-    findCard("One-Time Expenses").getText should include("Gaming Laptop")
-    findCard("One-Time Expenses").getText should include("5,500.00")
-    findCard("One-Time Expenses").getText should not include "New Laptop"
+    textShouldAppear(findCard("One-Time Expenses"), "Gaming Laptop")
+    textShouldAppear(findCard("One-Time Expenses"), "5,500.00")
+    textShouldDisappear(findCard("One-Time Expenses"), "New Laptop")
 
     // === Navigate to the history page via "View All" link ===
     findCard("One-Time Expenses").findElement(By.xpath(".//a[contains(text(),'View All')]")).click()
     waitForPage("One-Time Expenses")
 
     val historyCard = findCard("All One-Time Expenses")
-    historyCard.getText should include("Gaming Laptop")
-    historyCard.getText should include("Car Repair")
+    textShouldAppear(historyCard, "Gaming Laptop")
+    textShouldAppear(historyCard, "Car Repair")
 
     // === Delete from history page ===
     val carRow = findCard("All One-Time Expenses").findElement(By.xpath(".//tr[.//td[contains(text(),'Car Repair')]]"))
     click(carRow, "Del")
 
-    findCard("All One-Time Expenses").getText should not include "Car Repair"
-    findCard("All One-Time Expenses").getText should include("Gaming Laptop")
+    textShouldDisappear(findCard("All One-Time Expenses"), "Car Repair")
+    textShouldAppear(findCard("All One-Time Expenses"), "Gaming Laptop")
 
     // === Go back to budget page and verify deletion is reflected ===
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
-    findCard("One-Time Expenses").getText should include("Gaming Laptop")
-    findCard("One-Time Expenses").getText should not include "Car Repair"
+    textShouldAppear(findCard("One-Time Expenses"), "Gaming Laptop")
+    textShouldDisappear(findCard("One-Time Expenses"), "Car Repair")
   }
 }

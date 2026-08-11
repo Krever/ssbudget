@@ -27,7 +27,7 @@ class AccountsPageSpec extends E2ESpec {
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("Test Account")
     click(addRow, "Add")
 
-    rows(bankCard).size shouldBe (initialCount + 1)
+    eventually(rows(bankCard).size shouldBe (initialCount + 1))
   }
 
   it should "cancel adding bank account" in {
@@ -93,8 +93,8 @@ class AccountsPageSpec extends E2ESpec {
     addRow.findElement(By.cssSelector("input[type='number']")).sendKeys("200")
     click(addRow, "Add")
 
-    rows(savingsCard).size shouldBe (initialCount + 1)
-    rows(savingsCard).exists(_.getText.contains("New Savings")) shouldBe true
+    eventually(rows(savingsCard).size shouldBe (initialCount + 1))
+    rowShouldExist(savingsCard, "New Savings")
   }
 
   it should "cancel adding savings account" in {
@@ -127,7 +127,7 @@ class AccountsPageSpec extends E2ESpec {
     targetInput.sendKeys("999")
     click(editRow, "Save")
 
-    savingsCard.getText should include("999")
+    textShouldAppear(savingsCard, "999")
   }
 
   it should "delete savings account" in {
@@ -142,15 +142,15 @@ class AccountsPageSpec extends E2ESpec {
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("To Delete")
     click(addRow, "Add")
 
+    rowShouldExist(savingsCard, "To Delete")
     val countAfterAdd = rows(savingsCard).size
-    rows(savingsCard).exists(_.getText.contains("To Delete")) shouldBe true
 
     // Now delete it
     val toDelete = savingsCard.findElement(By.xpath(".//tr[.//td[contains(text(),'To Delete')]]"))
     click(toDelete, "Edit")
     click(savingsCard.findElement(By.cssSelector("tbody tr.table-warning")), "Del")
 
-    rows(savingsCard).size shouldBe (countAfterAdd - 1)
-    rows(savingsCard).exists(_.getText.contains("To Delete")) shouldBe false
+    eventually(rows(savingsCard).size shouldBe (countAfterAdd - 1))
+    rowShouldNotExist(savingsCard, "To Delete")
   }
 }

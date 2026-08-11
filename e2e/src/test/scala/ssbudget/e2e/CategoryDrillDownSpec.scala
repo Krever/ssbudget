@@ -15,7 +15,7 @@ class CategoryDrillDownSpec extends E2ESpec {
     val toggle = card.findElement(By.cssSelector("input#hidePaidBudgets"))
     if toggle.isSelected then {
       toggle.click()
-      Thread.sleep(300)
+      eventually(card.findElement(By.cssSelector("input#hidePaidBudgets")).isSelected shouldBe false)
     }
   }
 
@@ -37,19 +37,18 @@ class CategoryDrillDownSpec extends E2ESpec {
     TransactionSeed.addTransaction("Biedronka E2E", -14230, categoryId = Some(categoryId))
     TransactionSeed.addTransaction("Lidl E2E", -8810, categoryId = Some(categoryId))
 
-    val card   = openBudgetsCard()
-    val header = budgetRow(card, "Drilldown Groceries")
-    header.getText should include("▸")
+    val card = openBudgetsCard()
+    textShouldAppear(budgetRow(card, "Drilldown Groceries"), "▸")
 
-    header.click()
-    Thread.sleep(700)
-
-    val text = card.getText
-    text should include("▾")
-    text should include("Biedronka E2E")
-    text should include("Lidl E2E")
-    text should include("142.30") // the outflow, shown with its sign
-    text should include("open in Transactions")
+    budgetRow(card, "Drilldown Groceries").click()
+    eventually {
+      val text = findCard("Category Budgets").getText
+      text should include("▾")
+      text should include("Biedronka E2E")
+      text should include("Lidl E2E")
+      text should include("142.30") // the outflow, shown with its sign
+      text should include("open in Transactions")
+    }
   }
 
   it should "say so when the category has no transactions this period" in {
@@ -58,9 +57,7 @@ class CategoryDrillDownSpec extends E2ESpec {
 
     val card = openBudgetsCard()
     budgetRow(card, "Drilldown Empty").click()
-    Thread.sleep(700)
-
-    card.getText should include("No transactions this period")
+    textShouldAppear(findCard("Category Budgets"), "No transactions this period")
   }
 
   it should "link out to the transactions list filtered to that category and period" in {
@@ -69,8 +66,6 @@ class CategoryDrillDownSpec extends E2ESpec {
 
     val card = openBudgetsCard()
     budgetRow(card, "Drilldown Rent").click()
-    Thread.sleep(500)
-
     card.findElement(By.xpath(".//a[contains(text(),'open in Transactions')]")).click()
     waitForPage("Transactions")
 
@@ -96,11 +91,12 @@ class CategoryDrillDownSpec extends E2ESpec {
     val card = findCard("Categories & monthly averages")
     val row  = card.findElement(By.xpath(".//tr[.//span[text()='Drilldown Fuel']]"))
     row.findElement(By.xpath(".//a[contains(text(),'250')]")).click()
-    Thread.sleep(700)
 
     // The filters below now target that category over the current period, and the table shows its transaction.
-    selectedOptionTexts(driver.findElement(By.id("tx-filters"))) should contain("Drilldown Fuel")
-    txTable.getText should include("Orlen Drill E2E")
+    eventually {
+      selectedOptionTexts(driver.findElement(By.id("tx-filters"))) should contain("Drilldown Fuel")
+      txTable.getText should include("Orlen Drill E2E")
+    }
   }
 
   it should "stay plain text while the category has no spend" in {
