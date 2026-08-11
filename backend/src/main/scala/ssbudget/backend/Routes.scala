@@ -115,6 +115,8 @@ object Routes {
       route(Endpoints.categories.create)(createCategory(repos)),
       route(Endpoints.categories.update) { case (id, dto) => updateCategory(repos)(id, dto) },
       route(Endpoints.categories.delete)(deleteCategory(repos, ruleEngine)),
+      route(Endpoints.categories.setOverride) { case (id, dto) => setCategoryOverride(repos)(id, Some(dto.remainingCents)) },
+      route(Endpoints.categories.clearOverride)(id => setCategoryOverride(repos)(id, None)),
       // Classification rules
       route(Endpoints.rules.list)(_ => repos.classificationRules.findAll.map(Right(_))),
       route(Endpoints.rules.create)(createRule(repos, ruleEngine)),
@@ -439,29 +441,42 @@ object Routes {
       asc: Option[Boolean],
       limit: Option[Int],
   ): Result[TransactionListResponse] = {
-    // The month dropdown carries a "current-period" sentinel; resolve it to the open period's [start, end) window server-side.
-    val currentPeriod = month.contains("current-period")
+    // The month dropdown carries period sentinels instead of a YYYY-MM bucket; resolve them to the same [from, to) window the category-spend figures
+    // use (see periodWindow), so drilling into a category budget lists exactly the transactions its number was computed from.
+    val isSentinel = month.exists(m => m == MonthFilter.CurrentPeriod || m == MonthFilter.PreviousPeriod)
     for {
-      periodOpt <- if currentPeriod then repos.periods.findCurrent else IO.pure(Option.empty[Period])
-      from       = if currentPeriod then periodOpt.map(periodStartOfDay) else None
-      to         = if currentPeriod then periodOpt.flatMap(_.endDate) else None
-      monthArg   = if currentPeriod then None else month.filter(_.nonEmpty)
-      res       <- repos.bankTransactions.query(
-                     accountUid.filter(_.nonEmpty),
-                     monthArg,
-                     from,
-                     to,
-                     category.filter(_.nonEmpty),
-                     hideInternal.getOrElse(false),
-                     sort.getOrElse("date"),
-                     asc.getOrElse(false),
-                     Some(limit.getOrElse(transactionPageCap)),
-                   )
+      periodOpt <- month match {
+                     case Some(MonthFilter.CurrentPeriod)  => repos.periods.findCurrent
+                     case Some(MonthFilter.PreviousPeriod) => repos.periods.findAll.map(previousClosedPeriod)
+                     case _                                => IO.pure(Option.empty[Period])
+                   }
+      window     = periodOpt.map(periodWindow)
+      from       = window.map(_._1)
+      to         = window.flatMap(_._2)
+      monthArg   = if isSentinel then None else month.filter(_.nonEmpty)
+      // A sentinel that resolves to nothing (no period started, or no closed period yet) means "no such window", not "no filter".
+      res       <- if isSentinel && periodOpt.isEmpty then IO.pure((List.empty[BankTransaction], 0, List.empty[(Currency, Long)]))
+                   else
+                     repos.bankTransactions.query(
+                       accountUid.filter(_.nonEmpty),
+                       monthArg,
+                       from,
+                       to,
+                       category.filter(_.nonEmpty),
+                       hideInternal.getOrElse(false),
+                       sort.getOrElse("date"),
+                       asc.getOrElse(false),
+                       Some(limit.getOrElse(transactionPageCap)),
+                     )
     } yield {
       val (items, total, sums) = res
       Right(TransactionListResponse(items, total, sums.map { case (cur, cents) => Money(cents, cur) }))
     }
   }
+
+  /** The most recent closed period, i.e. the one that ended when the current period started. */
+  private def previousClosedPeriod(periods: List[Period]): Option[Period] =
+    periods.filter(_.endDate.isDefined).sortBy(_.startDate.toEpochMilli).lastOption
 
   /** Live rule preview: run the shared matcher over all stored transactions server-side (the browser no longer holds them). */
   private def previewRule(repos: Repositories)(req: RulePreviewRequest): Result[RulePreviewResponse] =
@@ -517,6 +532,25 @@ object Routes {
     } yield result
   }
 
+  /** Sets (`Some`) or clears (`None`) the manual remaining-amount override for a category budget in the CURRENT period, then returns the refreshed
+    * summaries. Negative amounts are clamped to 0 ("nothing left to pay"), which is also how a budget is marked as already paid.
+    */
+  private def setCategoryOverride(repos: Repositories)(id: CategoryId, remainingCents: Option[Long]): Result[List[CategorySummary]] =
+    for {
+      catOpt    <- repos.categories.findById(id)
+      periodOpt <- repos.periods.findCurrent
+      result    <- (catOpt, periodOpt) match {
+                     case (None, _)               => IO.pure(Left(s"Category not found: ${id.value}"))
+                     case (_, None)               => IO.pure(Left("No active period"))
+                     case (Some(_), Some(period)) =>
+                       val write = remainingCents match {
+                         case Some(cents) => IO.realTimeInstant.flatMap(repos.categoryBudgetOverrides.upsert(period.id, id, math.max(0L, cents), _))
+                         case None        => repos.categoryBudgetOverrides.delete(period.id, id)
+                       }
+                       write >> categorySummaries(repos)
+                   }
+    } yield result
+
   /** Month index (year*12 + month) for a "YYYY-MM" bucket, so we can count how many calendar months a range spans. */
   private def monthIndex(ym: String): Int =
     ym.split("-") match {
@@ -546,12 +580,19 @@ object Routes {
     */
   private def periodStartOfDay(p: Period): Instant = startOfDayUtc(p.startDate)
 
+  /** A period's `[from, to)` transaction window: midnight of its first day (see [[periodStartOfDay]]) up to, but excluding, midnight of the day it
+    * ended (open-ended while it's still running). Used both to total a category's spend and to list the transactions behind that total, so the two
+    * can't drift apart.
+    */
+  private def periodWindow(p: Period): (Instant, Option[Instant]) = (periodStartOfDay(p), p.endDate.map(startOfDayUtc))
+
   /** Per-category spend stats, converted to the primary currency at the latest rates (mixed-currency categories counted in full). Spend is NET
     * (outflows minus inflows) so pure-inflow categories (salary, refunds) aren't reported as 0 and refunds reduce a category's spend:
     *   - `avgMonthlyCents` = MEAN monthly net spend over the category's active span (see [[monthlyMean]]); current partial month excluded.
     *   - `currentPeriodSpentCents` = net spend since the current period started (from the start of that calendar day).
     *   - `lastPeriodSpentCents` = net spend over the previous (most recent closed) period; 0 if none.
     *   - `currency` = the primary currency.
+    *   - `overrideRemainingCents` = the user's manual remaining-amount override for the current period, when set.
     */
 
   private def categorySummaries(repos: Repositories): Result[List[CategorySummary]] =
@@ -566,16 +607,19 @@ object Routes {
       firstOfMonth = now.withDayOfMonth(1)
       currentMonth = firstOfMonth.atStartOfDay(java.time.ZoneOffset.UTC).toInstant
       currentOpt   = periods.find(_.endDate.isEmpty)
-      prevOpt      = periods.filter(_.endDate.isDefined).sortBy(_.startDate.toEpochMilli).lastOption // most recent closed period
+      prevOpt      = previousClosedPeriod(periods)
       periodStart  = currentOpt.map(periodStartOfDay).getOrElse(currentMonth)
       // NET spend (inflows subtract). All completed-month spend (current partial month excluded by `< currentMonth`), per (cat, currency, YYYY-MM).
       histRows    <- repos.bankTransactions.monthlySpendByCategory(java.time.Instant.EPOCH, currentMonth, includeInflows = true)
       curRows     <- repos.bankTransactions.spendByCategoryBetween(periodStart, None, includeInflows = true)
       prevRows    <- prevOpt match {
                        case Some(p) =>
-                         repos.bankTransactions.spendByCategoryBetween(periodStartOfDay(p), p.endDate.map(startOfDayUtc), includeInflows = true)
+                         val (from, to) = periodWindow(p)
+                         repos.bankTransactions.spendByCategoryBetween(from, to, includeInflows = true)
                        case None    => IO.pure(List.empty[(CategoryId, Currency, Long)])
                      }
+      // Manual remaining-amount overrides apply to the current period only.
+      overrides   <- currentOpt.traverse(p => repos.categoryBudgetOverrides.findByPeriod(p.id)).map(_.getOrElse(Map.empty))
     } yield {
       val rateMap                                     = rateList.flatten.map(r => r.fromCurrency -> r).toMap
       // Convert cents in any currency to the primary currency; falls back to 1:1 if a rate is missing (rare — currency not enabled).
@@ -600,6 +644,7 @@ object Routes {
           currentPeriodSpentCents = curByCat.getOrElse(cat.id, 0L),
           lastPeriodSpentCents = prevByCat.getOrElse(cat.id, 0L),
           currency = primary,
+          overrideRemainingCents = overrides.get(cat.id),
         )
       })
     }
@@ -685,6 +730,7 @@ object Routes {
     for {
       _ <- repos.bankTransactions.clearCategory(id)
       _ <- repos.classificationRules.deleteByCategory(id)
+      _ <- repos.categoryBudgetOverrides.deleteByCategory(id)
       _ <- repos.categories.delete(id)
       _ <- ruleEngine.applyRules()
     } yield Right(())

@@ -16,23 +16,18 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   import scala.compiletime.uninitialized
   protected var driver: WebDriver = uninitialized
 
-  // If E2E_BASE_URL is set, use it (external servers)
-  // Otherwise, TestServers will be started by E2ESuite
+  // If E2E_BASE_URL is set, use it (external servers). Otherwise the first spec to run starts them.
   protected def baseUrl: String =
     sys.env.getOrElse("E2E_BASE_URL", TestServers.frontendUrl)
 
   override def beforeAll(): Unit = {
-    // Start servers if not using external servers and not already started
+    // `startAll` is idempotent, so every spec can ask and only the first one pays: the backend, vite and the temp database are shared by the whole run
+    // and torn down by TestServers' shutdown hook. There is deliberately no aggregate Suite — one would make sbt run every spec twice, once on its own
+    // and once nested.
     if sys.env.get("E2E_BASE_URL").isEmpty then {
       TestServers.startAll()
     }
     WebDriverManager.chromedriver().setup()
-  }
-
-  override def afterAll(): Unit = {
-    // Servers are stopped by E2ESuite if running via suite,
-    // or need to be stopped here if running individual spec
-    // TestServers.stopAll() is idempotent
   }
 
   override def beforeEach(): Unit = {
@@ -62,6 +57,32 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
 
   protected def rows(parent: WebElement): List[WebElement] =
     parent.findElements(By.cssSelector("tbody tr")).asScala.toList
+
+  /** The transaction table on the Transactions page. Scoped by a header only it has — the categories card's table shares its CSS classes and comes
+    * first in the DOM.
+    */
+  protected def txTable: WebElement =
+    driver.findElement(By.xpath("//table[.//th[text()='Description']]"))
+
+  /** Visible text of every selected `<option>` under `parent` — for asserting which filters a page landed on. */
+  protected def selectedOptionTexts(parent: WebElement): List[String] =
+    parent.findElements(By.cssSelector("option")).asScala.toList.filter(_.isSelected).map(_.getText)
+
+  /** Assert nothing under `parent` matches `locator`.
+    *
+    * Do NOT write this as a bare `findElements(...) shouldBe empty`: with an implicit wait set, Selenium keeps retrying until the timeout before
+    * conceding that a set is empty, so every negative assertion would cost the full 10 seconds.
+    */
+  protected def assertAbsent(parent: WebElement, locator: By): Unit =
+    withoutImplicitWait(parent.findElements(locator).asScala shouldBe empty)
+
+  private def withoutImplicitWait[A](body: => A): A = {
+    driver.manage().timeouts().implicitlyWait(Duration.ZERO)
+    try body
+    finally driver.manage().timeouts().implicitlyWait(implicitWait)
+  }
+
+  private val implicitWait = Duration.ofSeconds(10)
 
   protected def click(parent: WebElement, buttonText: String): Unit = {
     // Use . instead of text() to match text in child elements (like spans)

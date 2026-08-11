@@ -302,6 +302,26 @@ sig1.combineWith(sig2).combineWith(sig3).combineWith(sig4).map { case (a, b, c, 
 
 Note: `Signal.combine` with exactly 2 signals works fine.
 
+**`value <--` on a `<select>` with async options**: a `<select>` silently discards a value that matches no `<option>` yet, and the binder doesn't re-fire when the options arrive later — so the control shows the wrong entry while the underlying state is correct. Declare `value <--` *after* the `children <--` that builds the options (modifiers bind in order, so within one transaction the options are inserted first), and combine the options signal into the value signal so it re-applies when they load:
+
+```scala
+// DON'T - value is applied before the options exist; select falls back to the first option
+select(
+  value <-- categoryFilter.signal,
+  option(value := "all", "All"),
+  children <-- cats.map(_.map(c => option(value := c.id.value, c.name))),
+)
+
+// DO - options first, and the value re-applies whenever they change
+select(
+  option(value := "all", "All"),
+  children <-- cats.map(_.map(c => option(value := c.id.value, c.name))),
+  value <-- categoryFilter.signal.combineWith(cats).map { case (selected, _) => selected },
+)
+```
+
+The same trap is why the budget-type dropdown in `TransactionsPage.categoriesCard` marks the current option with `selected :=` instead of using `value :=` on the select.
+
 **ZoneId.systemDefault() in Scala.js**: `ZoneId.systemDefault()` fails silently without the `scala-java-time-tzdb` dependency. If an object has `ZoneId.systemDefault()` in its static initialization, any call to that object (even unrelated methods) will fail silently.
 
 ```scala

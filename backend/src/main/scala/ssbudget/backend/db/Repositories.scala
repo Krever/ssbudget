@@ -21,6 +21,7 @@ final case class Repositories(
     cardGroups: CardGroupRepository,
     bankTransactions: BankTransactionRepository,
     categories: CategoryRepository,
+    categoryBudgetOverrides: CategoryBudgetOverrideRepository,
     classificationRules: ClassificationRuleRepository,
     importJobs: ImportJobRepository,
 )
@@ -44,6 +45,7 @@ object Repositories {
       cardGroups = new CardGroupRepositoryImpl(xa),
       bankTransactions = new BankTransactionRepositoryImpl(xa),
       categories = new CategoryRepositoryImpl(xa),
+      categoryBudgetOverrides = new CategoryBudgetOverrideRepositoryImpl(xa),
       classificationRules = new ClassificationRuleRepositoryImpl(xa),
       importJobs = new ImportJobRepositoryImpl(xa),
     )

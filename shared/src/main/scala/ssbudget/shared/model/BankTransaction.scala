@@ -55,4 +55,9 @@ final case class BankTransaction(
 ) derives Codec.AsObject {
   def money: Money       = Money(amountCents, currency)
   def isOutflow: Boolean = amountCents < 0
+
+  /** What to label this transaction with: the counterparty if the bank gave us one, else the remittance text, else the raw bank code. Banks populate
+    * these inconsistently, so every list that shows transactions needs the same fallback chain.
+    */
+  def description: String = counterpartyName.orElse(remittance).getOrElse(bankTransactionCode.getOrElse("—"))
 }

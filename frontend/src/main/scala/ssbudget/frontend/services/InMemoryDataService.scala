@@ -1,7 +1,7 @@
 package ssbudget.frontend.services
 
 import com.raquo.laminar.api.L.*
-import ssbudget.shared.api.CategorySummary
+import ssbudget.shared.api.{CategorySummary, TransactionListResponse}
 import ssbudget.shared.model.*
 
 import java.time.{Instant, LocalDate, ZoneId}
@@ -278,6 +278,13 @@ object InMemoryDataService extends DataService {
   override def budgetedCategories: Signal[List[CategorySummary]] = Val(List.empty)
   override def categoryBudgetsRemaining: Signal[Money]           = primaryCurrency.map(Money.zero)
   override def savingsPeriodChange: Signal[Money]                = primaryCurrency.map(Money.zero)
+
+  override def setCategoryBudgetOverride(categoryId: CategoryId, remainingCents: Long): Future[Unit] = Future.successful(())
+  override def clearCategoryBudgetOverride(categoryId: CategoryId): Future[Unit]                     = Future.successful(())
+
+  // The mock has no bank transactions, so a category budget drill-down is always empty here.
+  override def categoryPeriodTransactions(categoryId: CategoryId, limit: Int): Future[TransactionListResponse] =
+    Future.successful(TransactionListResponse(Nil, 0, Nil))
 
   override def periodElapsedFraction: Signal[Double] =
     currentPeriod.map {

@@ -2,7 +2,7 @@ package ssbudget.frontend.services
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
-import ssbudget.shared.api.CategorySummary
+import ssbudget.shared.api.{CategorySummary, TransactionListResponse}
 import ssbudget.shared.model.*
 
 import scala.concurrent.Future
@@ -73,8 +73,20 @@ trait DataService {
   // Category budgets (rolling 3-month average per category, computed server-side)
   def categorySummaries: Signal[List[CategorySummary]]
   def budgetedCategories: Signal[List[CategorySummary]] // only categories flagged as monthly budgets
-  def categoryBudgetsRemaining: Signal[Money]           // Σ max(0, avg − spent this period), in primary currency
+  def categoryBudgetsRemaining: Signal[Money]           // Σ remaining per budget (override wins), in primary currency
   def periodElapsedFraction: Signal[Double]             // 0..1 through the current period (for pace markers)
+
+  // Manual remaining-amount override for a category budget, current period only (0 = already paid; clearing restores the computed value).
+  def setCategoryBudgetOverride(categoryId: CategoryId, remainingCents: Long): Future[Unit]
+  def clearCategoryBudgetOverride(categoryId: CategoryId): Future[Unit]
+
+  /** The current period's transactions behind one category's spend, newest first — what a category budget's "spent" number is made of. Fetched on
+    * demand (not a Signal) because it's only needed while a budget row is expanded. Excludes internal transfers, matching how the spend is computed.
+    *
+    * `limit` caps the rows fetched; the response's `total` is the full count regardless, so a caller showing the first few can still say how many
+    * more there are without shipping them.
+    */
+  def categoryPeriodTransactions(categoryId: CategoryId, limit: Int): Future[TransactionListResponse]
 
   def unpaidPlannedExpenses: Signal[Money]
   def scaledEstimatedExpenses: Signal[Money]

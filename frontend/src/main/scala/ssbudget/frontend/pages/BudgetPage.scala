@@ -1,28 +1,34 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
-import ssbudget.frontend.components.Loading
+import ssbudget.frontend.components.{Loading, LoadingState}
 import ssbudget.frontend.services.DataService
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
-import ssbudget.shared.api.CategorySummary
+import ssbudget.shared.api.{CategorySummary, MonthFilter, TransactionListResponse}
 import ssbudget.shared.model.*
 
 import java.time.Instant
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.util.{Failure, Success}
 
 object BudgetPage {
 
   private val dataService = DataService.instance
 
-  private val editingItemId   = Var[Option[ExpenseDefId]](None)
-  private val payingItemId    = Var[Option[ExpenseDefId]](None)
-  private val addingPlanned   = Var(false)
-  private val addingEstimated = Var(false)
-  private val addingIncome    = Var(false)
-  private val showOnlyPending = Var(true)
-  private val hidePaidBudgets = Var(true) // Category Budgets: hide budgets already covered this period
+  private val editingItemId     = Var[Option[ExpenseDefId]](None)
+  private val payingItemId      = Var[Option[ExpenseDefId]](None)
+  private val addingPlanned     = Var(false)
+  private val addingEstimated   = Var(false)
+  private val addingIncome      = Var(false)
+  private val showOnlyPending   = Var(true)
+  private val hidePaidBudgets   = Var(true)                     // Category Budgets: hide budgets already covered this period
+  private val editingOverrideId = Var[Option[CategoryId]](None) // Category Budget whose remaining amount is being overridden
+
+  // Category Budget drill-down: the transactions behind each expanded row. Presence of a key IS the expanded state — there's no second Var to keep in
+  // step with it.
+  private val budgetTxs = Var[Map[CategoryId, LoadingState[TransactionListResponse]]](Map.empty)
 
   // Savings state
   private val savingToAccountId  = Var[Option[AccountId]](None)
@@ -35,8 +41,12 @@ object BudgetPage {
   def apply(): HtmlElement = {
     div(
       cls := "container-fluid mt-3",
-      // Refresh on each visit so changes made elsewhere (e.g. flagging a category as a budget) are reflected without a manual page reload.
-      onMountCallback(_ => { dataService.initialize(); () }),
+      // Refresh on each visit so changes made elsewhere (e.g. flagging a category as a budget) are reflected without a manual page reload. Budget
+      // drill-downs collapse too — their cached transactions would otherwise be stale after recategorizing something on the Transactions page.
+      onMountCallback { _ =>
+        dataService.initialize()
+        budgetTxs.set(Map.empty)
+      },
       h4("Budget"),
       div(
         cls   := "row g-3 mb-3",
@@ -176,11 +186,8 @@ object BudgetPage {
     * / Subscription fixed pool).
     */
   private def categoryBudgetsCard(): HtmlElement = {
-    // A budget is "paid" (covered) when nothing more is expected before the next paycheck — i.e. remaining <= 0. Steady budgets keep a
-    // remaining-time share until the period ends, so they stay visible; Bill/Subscription drop off once covered.
-    def remainingCents(c: CategorySummary, elapsed: Double): Long =
-      CategoryBudgetType.remaining(c.category.budgetType.getOrElse(CategoryBudgetType.Steady), c.avgMonthlyCents, c.currentPeriodSpentCents, elapsed)
-
+    // A budget is "paid" (covered) when nothing more is expected before the next paycheck — i.e. remaining <= 0 (an override of 0 does exactly
+    // that). Steady budgets keep a remaining-time share until the period ends, so they stay visible; Bill/Subscription drop off once covered.
     div(
       cls := "card",
       div(
@@ -204,7 +211,7 @@ object BudgetPage {
           .combineWith(dataService.periodElapsedFraction)
           .combineWith(hidePaidBudgets.signal)
           .map { case (cats, elapsed, hidePaid) =>
-            val visible = if hidePaid then cats.filter(c => remainingCents(c, elapsed) > 0) else cats
+            val visible = if hidePaid then cats.filter(_.remainingCents(elapsed) > 0) else cats
             if cats.isEmpty then List(
               div(
                 cls := "text-muted small",
@@ -224,13 +231,15 @@ object BudgetPage {
     val budget                 = s.avgMonthlyCents
     val spent                  = s.currentPeriodSpentCents
     val bt                     = s.category.budgetType.getOrElse(CategoryBudgetType.Steady)
-    val remaining              = CategoryBudgetType.remaining(bt, budget, spent, elapsed)
+    val remaining              = s.remainingCents(elapsed)
+    val isOverridden           = s.overrideRemainingCents.isDefined
     def money(c: Long): String = MoneyFormatter.formatSimple(c, s.currency)
 
     // The colored bar + footer differ per budget type; the header (name + spent/budget) is shared.
     val (bar, footerLeft, footerRight): (HtmlElement, String, String) = bt match {
       case CategoryBudgetType.Bill         =>
-        val paid = spent > 0
+        // An override decides the paid state (that's the point of setting one); otherwise any spend this period counts as the payment.
+        val paid = if isOverridden then remaining <= 0 else spent > 0
         val b    = div(
           cls       := "progress",
           styleAttr := "height: 1.1rem",
@@ -238,7 +247,10 @@ object BudgetPage {
         )
         (b, if paid then "paid ✓" else "not paid yet", if paid then "" else s"reserve ${money(remaining)}")
       case CategoryBudgetType.Subscription =>
-        val fillPct = if budget <= 0 then (if spent > 0 then 100.0 else 0.0) else math.min(100.0, spent.toDouble / budget * 100.0)
+        // Fill is what's been covered (budget − remaining), so an override moves the bar too.
+        val fillPct =
+          if budget <= 0 then (if remaining <= 0 then 100.0 else 0.0)
+          else math.min(100.0, math.max(0.0, (budget - remaining).toDouble / budget * 100.0))
         val over    = budget > 0 && spent > budget
         val b       = div(
           cls       := "progress",
@@ -273,13 +285,150 @@ object BudgetPage {
 
     div(
       cls := "mb-3",
+      // The header line is the drill-down toggle: "why is this budget already at X?" is answered by the transactions right under the bar.
       div(
-        cls   := "d-flex justify-content-between",
-        span(cls := "fw-semibold", s.category.name, span(cls := "badge text-bg-light text-muted ms-2", CategoryBudgetType.asString(bt))),
+        cls       := "d-flex justify-content-between user-select-none",
+        styleAttr := "cursor: pointer",
+        title     := "Show the transactions behind this spend",
+        onClick --> { _ => toggleBudgetExpansion(s.category.id) },
+        span(
+          cls    := "fw-semibold",
+          span(
+            cls    := "text-muted me-1",
+            child.text <-- rowExpanded(s.category.id).map(if _ then "▾" else "▸"),
+          ),
+          s.category.name,
+          span(cls := "badge text-bg-light text-muted ms-2", CategoryBudgetType.asString(bt)),
+          if isOverridden then span(cls := "badge text-bg-warning ms-1", title := "remaining amount set manually", "manual") else emptyNode,
+        ),
         span(cls := "font-monospace small", s"${money(spent)} / ${money(budget)}"),
       ),
       bar,
-      div(cls := "d-flex justify-content-between small text-muted", span(footerLeft), span(footerRight)),
+      // Both bindings below narrow to THIS row and dedupe, so one row expanding or opening its editor doesn't re-render every other row.
+      child <-- editingOverrideId.signal.map(_.contains(s.category.id)).distinct.map { editing =>
+        if editing then overrideEditRow(s, remaining, isOverridden)
+        else
+          div(
+            cls := "d-flex justify-content-between small text-muted",
+            span(footerLeft),
+            span(
+              cls       := "text-decoration-underline",
+              styleAttr := "cursor: pointer",
+              title     := "Set the remaining amount manually",
+              onClick --> { _ => editingOverrideId.set(Some(s.category.id)) },
+              if footerRight.nonEmpty then footerRight else "set remaining",
+            ),
+          )
+      },
+      child <-- budgetTxs.signal.map(_.get(s.category.id)).distinct.map {
+        case Some(state) => categoryBudgetTransactions(s, state)
+        case None        => emptyNode
+      },
+    )
+  }
+
+  private def rowExpanded(categoryId: CategoryId): Signal[Boolean] = budgetTxs.signal.map(_.contains(categoryId)).distinct
+
+  /** Expand/collapse a category budget's transaction list, fetching on expand. Collapsing drops the cached rows, so re-expanding always shows current
+    * data (categories get recategorized on the Transactions page while this page stays open).
+    */
+  private def toggleBudgetExpansion(categoryId: CategoryId): Unit = {
+    if budgetTxs.now().contains(categoryId) then budgetTxs.update(_ - categoryId)
+    else {
+      budgetTxs.update(_.updated(categoryId, LoadingState.Loading))
+      // Only ever fill in a row that's still expanded: collapsing mid-flight drops the key, and the late response mustn't put it back.
+      def complete(state: LoadingState[TransactionListResponse]): Unit =
+        budgetTxs.update(m => if m.contains(categoryId) then m.updated(categoryId, state) else m)
+      dataService.categoryPeriodTransactions(categoryId, budgetDrillDownRows + 1).onComplete {
+        case Success(page) => complete(LoadingState.Loaded(page))
+        case Failure(ex)   => complete(LoadingState.Error(ex.getMessage))
+      }
+    }
+  }
+
+  /** Transactions shown inline under a category budget before falling back to the "+N more" link — enough to spot the outlier that moved the number,
+    * without pushing the other budgets off screen.
+    */
+  private val budgetDrillDownRows = 8
+
+  /** The current period's transactions behind a category budget's spend: compact and read-only. Fixing a miscategorized transaction happens on the
+    * Transactions page, which the footer link opens with this category and window already filtered.
+    */
+  private def categoryBudgetTransactions(s: CategorySummary, state: LoadingState[TransactionListResponse]): HtmlElement = {
+    val target  = Page.Transactions(category = Some(s.category.id.value), month = Some(MonthFilter.CurrentPeriod))
+    def linkOut = a(cls := "small text-nowrap", Router.linkTo(target), "open in Transactions →")
+
+    div(
+      cls := "border-start ps-2 ms-1 mt-1",
+      state match {
+        case LoadingState.Loading                            => div(cls := "small text-muted", "Loading…")
+        case LoadingState.Error(msg)                         => div(cls := "small text-danger", s"Couldn't load transactions: $msg")
+        case LoadingState.Loaded(page) if page.items.isEmpty =>
+          div(cls := "d-flex justify-content-between", span(cls := "small text-muted", "No transactions this period."), linkOut)
+        case LoadingState.Loaded(page)                       =>
+          val shown = page.items.take(budgetDrillDownRows)
+          div(
+            shown.map(budgetTransactionRow),
+            div(
+              cls := "d-flex justify-content-between mt-1",
+              // `total` counts the whole match, not just the rows fetched, so this stays exact however few we asked for.
+              span(cls := "small text-muted", if page.total > shown.size then s"+${page.total - shown.size} more" else ""),
+              linkOut,
+            ),
+          )
+      },
+    )
+  }
+
+  private def budgetTransactionRow(t: BankTransaction): HtmlElement = {
+    // Everything here is spend, so outflows stay neutral; an inflow (refund) is called out because it SUBTRACTS from the category's spend.
+    val amountCls = if t.amountCents < 0 then "" else "text-success"
+    div(
+      cls := "d-flex gap-2 small",
+      span(cls := "text-muted text-nowrap font-monospace", Formatting.formatDateShort(t.bookedAt)),
+      span(cls := "text-truncate flex-grow-1", title := t.description, t.description),
+      span(cls := s"font-monospace text-nowrap $amountCls", MoneyFormatter.formatSimple(t.amountCents, t.currency)),
+    )
+  }
+
+  /** Inline editor for a category budget's remaining amount: type an amount, mark it fully paid (0), or clear the override to go back to the computed
+    * value. Applies to the current period only.
+    */
+  private def overrideEditRow(s: CategorySummary, remaining: Long, isOverridden: Boolean): HtmlElement = {
+    var amountRef: org.scalajs.dom.html.Input = null
+
+    def setOverride(cents: => Long): () => Future[Unit] =
+      () => dataService.setCategoryBudgetOverride(s.category.id, cents).map(_ => editingOverrideId.set(None))
+
+    val saveAction = Loading.actionGroup("Save", setOverride(parseCents(amountRef)), "btn btn-success btn-sm py-0")
+
+    div(
+      cls := "d-flex align-items-center gap-2 mt-1",
+      span(cls    := "small text-muted text-nowrap", "Remaining"),
+      div(
+        styleAttr := "width: 7rem",
+        input(
+          cls          := "form-control form-control-sm text-end",
+          tpe          := "number",
+          stepAttr     := "0.01",
+          defaultValue := (remaining / 100.0).toString,
+          onMountCallback(ctx => amountRef = ctx.thisNode.ref),
+          onMountFocus,
+          saveAction.onEnter,
+        ),
+      ),
+      div(
+        cls       := "btn-group btn-group-sm",
+        saveAction.btn,
+        Loading.actionButton("Paid", setOverride(0L), "btn btn-outline-success btn-sm py-0"),
+        if isOverridden then Loading.actionButton(
+          "Clear",
+          () => dataService.clearCategoryBudgetOverride(s.category.id).map(_ => editingOverrideId.set(None)),
+          "btn btn-outline-secondary btn-sm py-0",
+        )
+        else emptyNode,
+        button(tpe := "button", cls := "btn btn-secondary btn-sm py-0", "×", onClick --> { _ => editingOverrideId.set(None) }),
+      ),
     )
   }
 

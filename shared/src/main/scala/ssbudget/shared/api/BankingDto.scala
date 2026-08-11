@@ -44,6 +44,26 @@ final case class ImportResult(accounts: List[AccountImportResult]) derives Codec
   */
 final case class TransactionListResponse(items: List[BankTransaction], total: Int, sums: List[Money]) derives Codec.AsObject
 
+/** Values the transaction-list `month` filter accepts beyond a `YYYY-MM` bucket. These two are resolved server-side to the same date windows that
+  * back `CategorySummary.currentPeriodSpentCents` / `lastPeriodSpentCents`, so drilling into a category budget lists exactly the transactions its
+  * figure was computed from. Shared because the backend, the month dropdown and the drill-down links all have to agree on the wire value.
+  */
+object MonthFilter {
+  val CurrentPeriod  = "current-period"
+  val PreviousPeriod = "previous-period"
+
+  /** No month filter at all. */
+  val All = "all"
+}
+
+/** Values the transaction-list `category` filter accepts besides a category id. Shared for the same reason as [[MonthFilter]]: the query string, the
+  * dropdown and the SQL that interprets them have to agree.
+  */
+object CategoryFilter {
+  val All           = "all"
+  val Uncategorized = "uncategorized" // no category AND not internal — the triage backlog
+}
+
 /** Assign (or clear, when None) a transaction's spending category. */
 final case class SetCategoryRequest(categoryId: Option[CategoryId]) derives Codec.AsObject
 
@@ -63,6 +83,7 @@ final case class UpdateCategory(name: String, color: Option[String], budgetType:
   *   - `currentPeriodSpentCents`: net spend since the current budget period started.
   *   - `lastPeriodSpentCents`: net spend over the previous (most recent closed) period; 0 if there is none.
   *   - `currency`: the primary currency (all category spend is converted to it).
+  *   - `overrideRemainingCents`: manual remaining-amount override for the CURRENT period, when the user set one (see [[remainingCents]]).
   *
   * Spend is NET (outflows minus inflows), so pure-inflow categories (salary, refunds) show a negative figure instead of 0, and refunds reduce a
   * category's spend.
@@ -73,7 +94,21 @@ final case class CategorySummary(
     currentPeriodSpentCents: Long,
     lastPeriodSpentCents: Long,
     currency: Currency,
-) derives Codec.AsObject
+    overrideRemainingCents: Option[Long] = None,
+) derives Codec.AsObject {
+
+  /** Money still expected to be spent in this category before the next paycheck. A manual override wins over the budget-type formula — the user knows
+    * something the transactions don't yet show (e.g. the bill was already paid). An override of 0 means the budget is covered, which is what makes an
+    * overridden-to-zero budget behave exactly like a paid one everywhere `remainingCents` is consulted.
+    */
+  def remainingCents(elapsed: Double): Long =
+    overrideRemainingCents.map(math.max(0L, _)).getOrElse {
+      CategoryBudgetType.remaining(category.budgetType.getOrElse(CategoryBudgetType.Steady), avgMonthlyCents, currentPeriodSpentCents, elapsed)
+    }
+}
+
+/** Manually set a category budget's remaining amount for the current period (cents in the primary currency; 0 = already covered). */
+final case class SetCategoryOverrideRequest(remainingCents: Long) derives Codec.AsObject
 
 /** Create a categorization rule. Priority is assigned server-side (appended last); criteria must be non-empty. */
 final case class CreateRuleRequest(name: String, categoryId: CategoryId, criteria: List[RuleCriterion]) derives Codec.AsObject

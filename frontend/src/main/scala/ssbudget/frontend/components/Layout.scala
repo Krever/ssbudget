@@ -13,7 +13,8 @@ object Layout {
       div(
         cls       := "main-content mx-auto pb-4",
         styleAttr := "max-width: 1600px",
-        child <-- Router.currentPageSignal.map(page => renderPage(page, apiClient)),
+        // Keyed on the page KIND, not the page: the Transactions page carries its filters in the URL, and a filter change must not remount it.
+        child <-- Router.currentPageSignal.distinctBy(Page.kindOf).map(page => renderPage(page, apiClient)),
       ),
     )
   }
@@ -27,7 +28,7 @@ object Layout {
       case Page.OneTimeExpenses => OneTimeExpensesPage()
       case Page.Banking         => BankingPage(apiClient)
       case Page.BankingCallback => BankingCallbackPage(apiClient)
-      case Page.Transactions    => TransactionsPage(apiClient)
+      case t: Page.Transactions => TransactionsPage(apiClient, t)
       case Page.Analytics       => AnalyticsPage(apiClient)
       case Page.Settings        => SettingsPage(apiClient)
       case Page.NotFound        => NotFoundPage()

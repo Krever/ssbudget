@@ -6,11 +6,14 @@ import org.scalajs.dom
 import ssbudget.frontend.components.{CategoryCombobox, RuleModal}
 import ssbudget.frontend.services.ApiClient
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
+import ssbudget.frontend.{Page, Router}
 import ssbudget.shared.api.{
   BankConnectionView,
+  CategoryFilter,
   CategorySummary,
   CreateCategory,
   ImportRulesRequest,
+  MonthFilter,
   RulesExport,
   SetCategoryRequest,
   SetNoteRequest,
@@ -27,13 +30,32 @@ import ssbudget.shared.model.{
   TransactionStatus,
 }
 
+import ssbudget.shared.rules.RuleMatcher
+
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.scalajs.js
 import scala.util.{Failure, Success}
 
 object TransactionsPage {
 
-  def apply(apiClient: ApiClient): HtmlElement = {
+  /** Filter defaults, used when the URL leaves a filter out. Triage-first: show what still needs a category. */
+  private val defaultCategory     = CategoryFilter.Uncategorized
+  private val defaultMonth        = MonthFilter.All
+  private val defaultHideInternal = true
+
+  /** Anchor for the drill-down scroll: the filter row, so both the filters that were just applied and the table land in view. */
+  private val filtersAnchorId = "tx-filters"
+
+  /** Fold state of the categories card. Persisted because it's a per-user layout preference: category management is occasional, so once it's folded
+    * away it should stay folded and leave the screen to the transaction list.
+    */
+  private val categoriesFoldKey = "ssbudget.transactions.categoriesCollapsed"
+
+  private def loadFlag(key: String): Boolean = Option(dom.window.localStorage.getItem(key)).contains("true")
+
+  private def saveFlag(key: String, value: Boolean): Unit = dom.window.localStorage.setItem(key, value.toString)
+
+  def apply(apiClient: ApiClient, initialPage: Page.Transactions): HtmlElement = {
     val txVar          = Var(List.empty[BankTransaction]) // current page (server-capped)
     val totalVar       = Var(0)                           // total matching the filters, before the cap
     val sumsVar        = Var(List.empty[Money])           // net sum per currency over the FULL match (not just the page)
@@ -44,10 +66,10 @@ object TransactionsPage {
     val monthsVar      = Var(List.empty[String])
     val loadingVar     = Var(true)
     val errorVar       = Var(Option.empty[String])
-    val monthFilter    = Var("all")
-    val accountFilter  = Var("")
-    val categoryFilter = Var("uncategorized")             // triage-first: default to what still needs a category
-    val hideInternal   = Var(true)                        // internal transfers between own accounts are hidden by default
+    val monthFilter    = Var(initialPage.month.getOrElse(defaultMonth))
+    val accountFilter  = Var(initialPage.account.getOrElse(""))
+    val categoryFilter = Var(initialPage.category.getOrElse(defaultCategory))
+    val hideInternal   = Var(initialPage.hideInternal.getOrElse(defaultHideInternal))
     val sortBy         = Var("date")                      // "date" | "amount"
     val sortAsc        = Var(false)                       // default: date descending (newest first)
     val ruleModalState = Var(Option.empty[RuleModal.Seed])
@@ -88,7 +110,7 @@ object TransactionsPage {
       apiClient.transactions
         .query(
           accountUid = Some(accountFilter.now()).filter(_.nonEmpty),
-          month = Some(monthFilter.now()).filter(_ != "all"),
+          month = Some(monthFilter.now()).filter(_ != MonthFilter.All),
           category = Some(categoryFilter.now()), // "all" | "uncategorized" | categoryId — server interprets
           hideInternal = hideInternal.now(),
           sort = sortBy.now(),
@@ -109,6 +131,39 @@ object TransactionsPage {
         .combineWith(hideInternal.signal)
         .combineWith(sortBy.signal)
         .combineWith(sortAsc.signal)
+
+    // The URL carries the shareable copy of the filter state; the Vars stay the working state the controls bind to. Both directions compare before
+    // writing, so a change settles after one hop instead of ping-ponging. Sort stays local — it's a view preference, not a filter.
+    // Filters left at their default are omitted, so the default view stays a bare `/transactions` and a drill-down URL carries only what it changed.
+    def filtersAsPage(): Page.Transactions =
+      Page.Transactions(
+        category = Some(categoryFilter.now()).filter(_ != defaultCategory),
+        month = Some(monthFilter.now()).filter(_ != defaultMonth),
+        account = Some(accountFilter.now()).filter(_.nonEmpty),
+        hideInternal = Some(hideInternal.now()).filter(_ != defaultHideInternal),
+      )
+
+    // One batched `Var.set` per direction: setting the Vars one at a time would fire `filtersTrigger` (and a fetch) once per filter, and the responses
+    // could then land out of order and leave the table showing a half-applied filter.
+    def applyPageToFilters(p: Page.Transactions): Unit = {
+      val category = p.category.getOrElse(defaultCategory)
+      val month    = p.month.getOrElse(defaultMonth)
+      val account  = p.account.getOrElse("")
+      val internal = p.hideInternal.getOrElse(defaultHideInternal)
+      val current  = (categoryFilter.now(), monthFilter.now(), accountFilter.now(), hideInternal.now())
+      if current != (category, month, account, internal) then Var.set(
+        categoryFilter -> category,
+        monthFilter    -> month,
+        accountFilter  -> account,
+        hideInternal   -> internal,
+      )
+    }
+
+    // Drill-down from the categories card: filter the table below to one category over one window, then bring it into view.
+    def drillDown(categoryId: CategoryId, month: String): Unit = {
+      Var.set(categoryFilter -> categoryId.value, monthFilter -> month)
+      Option(dom.document.getElementById(filtersAnchorId)).foreach(_.scrollIntoView(true))
+    }
 
     def setCategory(txId: ssbudget.shared.model.BankTransactionId, categoryId: Option[CategoryId]): Unit =
       apiClient.transactions.setCategory(txId, SetCategoryRequest(categoryId)).onComplete {
@@ -132,6 +187,13 @@ object TransactionsPage {
         loadMonths()
       },
       filtersTrigger --> Observer(_ => loadTransactions()),
+      // Filter edits use replaceState, not pushState: tweaking a filter shouldn't fill the history, so Back still returns to wherever you drilled down
+      // from. A drill-down link or Back/forward arrives on currentPageSignal and is read back into the Vars.
+      filtersTrigger.changes --> Observer { _ =>
+        val next = filtersAsPage()
+        if Router.currentPageSignal.now() != next then Router.replaceState(next)
+      },
+      Router.currentPageSignal.changes.collect { case p: Page.Transactions => p } --> Observer(applyPageToFilters),
       div(
         cls := "d-flex justify-content-between align-items-center mb-3",
         h4(cls    := "mb-0", "Transactions"),
@@ -140,7 +202,7 @@ object TransactionsPage {
       child.maybe <-- errorVar.signal.map(_.map { e =>
         div(cls := "alert alert-danger alert-dismissible", e, button(tpe := "button", cls := "btn-close", onClick --> { _ => errorVar.set(None) }))
       }),
-      categoriesCard(catsVar, summariesVar.signal, apiClient, loadCategories, loadSummaries, () => loadTransactions()),
+      categoriesCard(catsVar, summariesVar.signal, apiClient, loadCategories, loadSummaries, () => loadTransactions(), drillDown),
       rulesCard(
         rulesVar,
         catsVar.signal,
@@ -163,6 +225,8 @@ object TransactionsPage {
         setCategory,
         setNote,
         tx => ruleModalState.set(Some(RuleModal.fromTransaction(tx))),
+        rulesVar.signal,
+        rule => ruleModalState.set(Some(RuleModal.fromRule(rule))),
         apiClient,
         () => { loadCategories(); loadSummaries() },
       ),
@@ -202,17 +266,20 @@ object TransactionsPage {
       hideInternal: Var[Boolean],
   ): HtmlElement =
     div(
-      cls := "row g-2 align-items-end mb-2",
+      cls    := "row g-2 align-items-end mb-2",
+      idAttr := filtersAnchorId,
       div(
         cls := "col-auto",
         label(cls := "form-label small mb-1", "Category"),
         select(
           cls     := "form-select form-select-sm",
-          value <-- categoryFilter.signal,
           onChange.mapToValue --> categoryFilter.writer,
-          option(value := "uncategorized", "Uncategorized"),
-          option(value := "all", "All categories"),
+          option(value := CategoryFilter.Uncategorized, "Uncategorized"),
+          option(value := CategoryFilter.All, "All categories"),
           children <-- cats.map(_.map(c => option(value := c.id.value, c.name))),
+          // Declared AFTER the options and re-applied whenever the category list changes: a drill-down link arrives with a category id already
+          // selected, but the categories load asynchronously, and a <select> silently drops a value that matches no option yet.
+          value <-- categoryFilter.signal.combineWith(cats).map { case (selected, _) => selected },
         ),
       ),
       div(
@@ -236,8 +303,9 @@ object TransactionsPage {
           cls     := "form-select form-select-sm",
           value <-- monthFilter.signal,
           onChange.mapToValue --> monthFilter.writer,
-          option(value := "all", "All months"),
-          option(value := "current-period", "Current period"),
+          option(value := MonthFilter.All, "All months"),
+          option(value := MonthFilter.CurrentPeriod, "Current period"),
+          option(value := MonthFilter.PreviousPeriod, "Previous period"),
           children <-- months.map(_.map(m => option(value := m, m))),
         ),
       ),
@@ -246,12 +314,13 @@ object TransactionsPage {
         label(cls := "form-label small mb-1", "Account"),
         select(
           cls     := "form-select form-select-sm",
-          value <-- accountFilter.signal,
           onChange.mapToValue --> accountFilter.writer,
           option(value := "", "All accounts"),
           children <-- conns.map { cs =>
             cs.flatMap(_.accounts).map(_.ebAccountUid).distinct.map(uid => option(value := uid, accountLabel(cs, uid)))
           },
+          // Same as the category select: an account uid from the URL has to be re-applied once the connections (and so the options) have loaded.
+          value <-- accountFilter.signal.combineWith(conns).map { case (selected, _) => selected },
         ),
       ),
     )
@@ -268,6 +337,8 @@ object TransactionsPage {
       setCategory: (ssbudget.shared.model.BankTransactionId, Option[CategoryId]) => Unit,
       setNote: (ssbudget.shared.model.BankTransactionId, Option[String]) => Unit,
       onCreateRule: BankTransaction => Unit,
+      rules: Signal[List[ClassificationRule]],
+      onInspectRule: ClassificationRule => Unit,
       apiClient: ApiClient,
       onCategoryCreated: () => Unit,
   ): HtmlElement = {
@@ -305,12 +376,12 @@ object TransactionsPage {
           ),
           tbody(
             child <-- loading.map(l => if l then tr(td(colSpan := 6, cls := "text-center py-3", "Loading…")) else emptyNode),
-            // Rows depend only on txs + conns; the per-row category combobox subscribes to `cats` itself, so creating/renaming a category
-            // doesn't rebuild every row.
+            // Rows depend only on txs + conns; the per-row category combobox and rule badge subscribe to `cats`/`rules` themselves, so creating a
+            // category or editing a rule doesn't rebuild every row.
             children <-- txs
               .combineWith(conns)
               .map { case (ts, cs) =>
-                ts.map(t => transactionRow(t, cats, cs, setCategory, setNote, onCreateRule, apiClient, onCategoryCreated))
+                ts.map(t => transactionRow(t, cats, cs, setCategory, setNote, onCreateRule, rules, onInspectRule, apiClient, onCategoryCreated))
               },
           ),
         ),
@@ -335,6 +406,38 @@ object TransactionsPage {
     )
   }
 
+  /** The "rule" marker on a rule-categorized transaction, and the way in to the rule responsible for it.
+    *
+    * Which rule that is isn't stored on the transaction — it doesn't need to be. [[RuleEngineService]] re-resolves every non-manual row against the
+    * whole rule set after any rule change and after every import, so "the first matching rule by priority" IS the rule that assigned the category,
+    * and [[RuleMatcher.firstMatch]] reproduces it here from the rules the page already holds. The name goes in the tooltip rather than the badge to
+    * keep the column narrow; clicking opens the rule for inspection (and editing) in the same modal the rules card uses.
+    */
+  private def ruleBadge(
+      t: BankTransaction,
+      rules: Signal[List[ClassificationRule]],
+      onInspectRule: ClassificationRule => Unit,
+  ): Modifier[HtmlElement] =
+    // Tested outside the subscription: most rows aren't rule-categorized (the default view is uncategorized-only), and those must not subscribe to
+    // `rules` at all — otherwise every rule reload re-runs the matcher and swaps a node for all 500 rows to render nothing.
+    if !t.categorySource.contains(ssbudget.shared.model.CategorySource.Rule) then emptyNode
+    else
+      child <-- rules.map { rs =>
+        RuleMatcher.firstMatch(rs, t) match {
+          case Some(rule) =>
+            button(
+              tpe   := "button",
+              cls   := "badge text-bg-info border-0",
+              title := s"Categorized by rule “${rule.name}” — click to inspect",
+              onClick --> { _ => onInspectRule(rule) },
+              "rule",
+            )
+          // Only reachable if the page's rule list is behind the server's, since the engine keeps the two consistent.
+          case None       =>
+            span(cls := "badge text-bg-secondary", title := "Set by a rule that no longer matches — reload to refresh the rule list", "rule?")
+        }
+      }
+
   private def transactionRow(
       t: BankTransaction,
       cats: Signal[List[Category]],
@@ -342,11 +445,12 @@ object TransactionsPage {
       setCategory: (ssbudget.shared.model.BankTransactionId, Option[CategoryId]) => Unit,
       setNote: (ssbudget.shared.model.BankTransactionId, Option[String]) => Unit,
       onCreateRule: BankTransaction => Unit,
+      rules: Signal[List[ClassificationRule]],
+      onInspectRule: ClassificationRule => Unit,
       apiClient: ApiClient,
       onCategoryCreated: () => Unit,
   ): HtmlElement = {
     val amountCls   = if t.amountCents < 0 then "text-danger" else "text-success"
-    val description = t.counterpartyName.orElse(t.remittance).getOrElse(t.bankTransactionCode.getOrElse("—"))
     val statusBadge = t.status match {
       case TransactionStatus.Booked  => span(cls := "badge text-bg-light text-muted", "booked")
       case TransactionStatus.Pending => span(cls := "badge text-bg-warning", "pending")
@@ -399,7 +503,7 @@ object TransactionsPage {
       td(cls      := "text-muted small text-nowrap", Formatting.formatDate(t.bookedAt)),
       td(cls      := "small", accountLabel(conns, t.ebAccountUid)),
       td(
-        div(description, if t.internal then span(cls := "badge text-bg-light text-muted ms-2", "internal") else emptyNode),
+        div(t.description, if t.internal then span(cls := "badge text-bg-light text-muted ms-2", "internal") else emptyNode),
         t.remittance.filter(r => !t.counterpartyName.contains(r)).map(r => small(cls := "text-muted d-block", r)).getOrElse(emptyNode),
         noteBlock,
       ),
@@ -421,7 +525,7 @@ object TransactionsPage {
               placeholderText = "Category…",
             ),
           ),
-          if t.categorySource.contains(ssbudget.shared.model.CategorySource.Rule) then span(cls := "badge text-bg-info", "rule") else emptyNode,
+          ruleBadge(t, rules, onInspectRule),
           button(
             tpe   := "button",
             cls   := "btn btn-sm btn-outline-secondary text-nowrap",
@@ -466,11 +570,13 @@ object TransactionsPage {
       reloadCategories: () => Unit,
       reloadSummaries: () => Unit,
       reloadTransactions: () => Unit,
+      onDrillDown: (CategoryId, String) => Unit,
   ): HtmlElement = {
     val nameVar   = Var("")
     val editingId = Var(Option.empty[CategoryId]) // category whose name is being edited inline
     val editName  = Var("")
     val showHelp  = Var(false)                    // toggles the budget-type explanation
+    val collapsed = Var(loadFlag(categoriesFoldKey))
 
     def addCategory(): Unit = {
       val name = nameVar.now().trim
@@ -501,6 +607,25 @@ object TransactionsPage {
         case Failure(_) => ()
       }
 
+    // Drill-through cell: the period spend figures are links into the transaction table below, filtered to that category + window — like clicking a
+    // number in a pivot table. Only linked when there is something to show; a zero would drill into an empty list.
+    def spendCell(c: Category, cents: Option[Long], money: Long => String, month: String, extraCls: String): HtmlElement =
+      td(
+        cls := s"text-end font-monospace small $extraCls",
+        cents match {
+          case Some(v) if v != 0 =>
+            a(
+              cls   := "text-body",
+              href  := "#",
+              title := "Show these transactions",
+              onClick.preventDefault --> { _ => onDrillDown(c.id, month) },
+              money(v),
+            )
+          case Some(v)           => span(money(v))
+          case None              => span("—")
+        },
+      )
+
     // Row per category: average monthly spend + this-period spend + the budget-type selector that surfaces it on the budget page.
     def categoryRow(c: Category, summary: Option[CategorySummary]): HtmlElement = {
       val currency                   = summary.map(_.currency)
@@ -526,9 +651,10 @@ object TransactionsPage {
               )
           },
         ),
+        // Avg/mo isn't drillable: it spans many months, so there's no single window to filter to.
         td(cls := "text-end font-monospace small", summary.map(s => money(s.avgMonthlyCents)).getOrElse("—")),
-        td(cls := "text-end font-monospace small text-muted", summary.map(s => money(s.lastPeriodSpentCents)).getOrElse("—")),
-        td(cls := "text-end font-monospace small", summary.map(s => money(s.currentPeriodSpentCents)).getOrElse("—")),
+        spendCell(c, summary.map(_.lastPeriodSpentCents), money, MonthFilter.PreviousPeriod, "text-muted"),
+        spendCell(c, summary.map(_.currentPeriodSpentCents), money, MonthFilter.CurrentPeriod, ""),
         td(
           cls  := "text-center",
           select(
@@ -554,19 +680,7 @@ object TransactionsPage {
       )
     }
 
-    div(
-      cls := "card mb-3",
-      div(
-        cls := "card-header py-2 d-flex justify-content-between align-items-center",
-        span("Categories & monthly averages"),
-        button(
-          tpe := "button",
-          cls := "btn btn-sm btn-link p-0 text-decoration-none small",
-          child.text <-- showHelp.signal.map(o => if o then "Hide budget types" else "What are budget types?"),
-          onClick --> { _ => showHelp.update(!_) },
-        ),
-      ),
-      child.maybe <-- showHelp.signal.map(o => Option.when(o)(budgetTypeHelp)),
+    def tableBody: HtmlElement =
       div(
         cls := "card-body p-0",
         table(
@@ -579,8 +693,12 @@ object TransactionsPage {
                 "Avg / mo",
                 title := "Mean monthly net spend over the category's active span (first to last month with spend)",
               ),
-              th(cls  := "text-end", "Last period", title := "Net spend over the previous (most recent closed) period"),
-              th(cls  := "text-end", "This period"),
+              th(
+                cls   := "text-end",
+                "Last period",
+                title := "Net spend over the previous (most recent closed) period — click a figure to list its transactions",
+              ),
+              th(cls  := "text-end", "This period", title := "Net spend since this period started — click a figure to list its transactions"),
               th(
                 cls   := "text-center",
                 "Budget",
@@ -599,7 +717,9 @@ object TransactionsPage {
             },
           ),
         ),
-      ),
+      )
+
+    def addFooter: HtmlElement =
       div(
         cls := "card-footer py-2",
         div(
@@ -613,7 +733,39 @@ object TransactionsPage {
           ),
           button(cls    := "btn btn-outline-primary", "Add", onClick --> { _ => addCategory() }),
         ),
+      )
+
+    div(
+      cls := "card mb-3",
+      collapsed.signal.changes --> Observer[Boolean](saveFlag(categoriesFoldKey, _)),
+      div(
+        cls := "card-header py-2 d-flex justify-content-between align-items-center",
+        span(
+          cls       := "user-select-none",
+          styleAttr := "cursor: pointer; flex-grow: 1",
+          onClick --> { _ => collapsed.update(!_) },
+          child.text <-- collapsed.signal.map(c => if c then "▸ " else "▾ "),
+          "Categories & monthly averages",
+          // Keep a count on the header so the folded card still says something.
+          child.text <-- catsVar.signal.map(cs => if cs.isEmpty then "" else s" (${cs.size})"),
+        ),
+        // The help text explains the table, so it only belongs here while the table is showing.
+        child.maybe <-- collapsed.signal.map { c =>
+          Option.unless(c)(
+            button(
+              tpe := "button",
+              cls := "btn btn-sm btn-link p-0 text-decoration-none small",
+              child.text <-- showHelp.signal.map(o => if o then "Hide budget types" else "What are budget types?"),
+              onClick --> { _ => showHelp.update(!_) },
+            ),
+          )
+        },
       ),
+      // One binding for everything the fold hides, so the rule lives in a single place and the help block doesn't have to re-check it.
+      children <-- collapsed.signal.combineWith(showHelp.signal).map {
+        case (true, _)     => Nil
+        case (false, help) => (if help then List(budgetTypeHelp) else Nil) ++ List(tableBody, addFooter)
+      },
     )
   }
 

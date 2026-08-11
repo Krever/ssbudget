@@ -42,7 +42,7 @@ object NavBar {
             navItem(Page.Periods, "Periods", isOpen),
             navItem(Page.OneTimeExpenses, "One-Time", isOpen),
             navItem(Page.Banking, "Banking", isOpen),
-            navItem(Page.Transactions, "Transactions", isOpen),
+            navItem(Page.Transactions(), "Transactions", isOpen),
             navItem(Page.Analytics, "Analytics", isOpen),
           ),
           ul(
@@ -69,7 +69,8 @@ object NavBar {
       cls := "nav-item",
       a(
         cls <-- Router.currentPageSignal.map { currentPage =>
-          if currentPage == page then "nav-link active"
+          // Compare kinds, not pages: a filtered Transactions view still highlights the Transactions tab.
+          if Page.kindOf(currentPage) == Page.kindOf(page) then "nav-link active"
           else "nav-link"
         },
         href := Router.absoluteUrlForPage(page),

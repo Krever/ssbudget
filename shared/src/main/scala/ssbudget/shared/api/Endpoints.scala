@@ -281,6 +281,17 @@ object Endpoints {
 
     val delete: Secured[CategoryId, Unit] =
       secureEndpoint.delete.in("categories" / path[CategoryId]("id")).errorOut(stringBody)
+
+    // Manual remaining-amount override for the current period; both variants return the refreshed summaries so the client can just replace its state.
+    val setOverride: Secured[(CategoryId, SetCategoryOverrideRequest), List[CategorySummary]] =
+      secureEndpoint.put
+        .in("categories" / path[CategoryId]("id") / "override")
+        .in(jsonBody[SetCategoryOverrideRequest])
+        .out(jsonBody[List[CategorySummary]])
+        .errorOut(stringBody)
+
+    val clearOverride: Secured[CategoryId, List[CategorySummary]] =
+      secureEndpoint.delete.in("categories" / path[CategoryId]("id") / "override").out(jsonBody[List[CategorySummary]]).errorOut(stringBody)
   }
 
   object rules {
@@ -470,6 +481,8 @@ object Endpoints {
     categories.create,
     categories.update,
     categories.delete,
+    categories.setOverride,
+    categories.clearOverride,
     rules.list,
     rules.create,
     rules.update,
@@ -696,6 +709,16 @@ object Endpoints {
 
       val delete: Client[CategoryId, Unit] =
         baseEndpoint.delete.in("categories" / path[CategoryId]("id")).errorOut(stringBody)
+
+      val setOverride: Client[(CategoryId, SetCategoryOverrideRequest), List[CategorySummary]] =
+        baseEndpoint.put
+          .in("categories" / path[CategoryId]("id") / "override")
+          .in(jsonBody[SetCategoryOverrideRequest])
+          .out(jsonBody[List[CategorySummary]])
+          .errorOut(stringBody)
+
+      val clearOverride: Client[CategoryId, List[CategorySummary]] =
+        baseEndpoint.delete.in("categories" / path[CategoryId]("id") / "override").out(jsonBody[List[CategorySummary]]).errorOut(stringBody)
     }
 
     object rules {

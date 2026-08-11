@@ -306,6 +306,16 @@ class ApiClient(implicit ec: ExecutionContext) {
       val request = interpreter.toRequest(Endpoints.client.categories.delete, Some(baseUri))
       backend.send(request(id)).map(handleResponse)
     }
+
+    def setOverride(id: CategoryId, dto: SetCategoryOverrideRequest): Future[List[CategorySummary]] = {
+      val request = interpreter.toRequest(Endpoints.client.categories.setOverride, Some(baseUri))
+      backend.send(request((id, dto))).map(handleResponse)
+    }
+
+    def clearOverride(id: CategoryId): Future[List[CategorySummary]] = {
+      val request = interpreter.toRequest(Endpoints.client.categories.clearOverride, Some(baseUri))
+      backend.send(request(id)).map(handleResponse)
+    }
   }
 
   object rules {

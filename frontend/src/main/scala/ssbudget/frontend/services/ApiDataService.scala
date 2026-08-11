@@ -165,8 +165,8 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   override def budgetedCategories: Signal[List[CategorySummary]] =
     categorySummariesVar.signal.map(_.filter(_.category.budgetType.isDefined).sortBy(_.category.name))
 
-  /** Remaining category-budget spend expected before the next paycheck, per the category's budget type (see [[CategoryBudgetType.remaining]]), summed
-    * in the primary currency. Folded into predicted expenses.
+  /** Remaining category-budget spend expected before the next paycheck, per the category's budget type or the user's manual override (see
+    * [[CategorySummary.remainingCents]]), summed in the primary currency. Folded into predicted expenses.
     */
   override def categoryBudgetsRemaining: Signal[Money] =
     categorySummariesVar.signal
@@ -174,11 +174,26 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       .combineWith(primaryCurrency)
       .combineWith(periodElapsedFraction)
       .map { case (summaries, rates, primary, elapsed) =>
-        val amounts = summaries.flatMap { s =>
-          s.category.budgetType.map(bt => Money(CategoryBudgetType.remaining(bt, s.avgMonthlyCents, s.currentPeriodSpentCents, elapsed), s.currency))
-        }
+        val amounts = summaries.flatMap(s => s.category.budgetType.map(_ => Money(s.remainingCents(elapsed), s.currency)))
         sumInPrimary(amounts, rates, primary)
       }
+
+  override def setCategoryBudgetOverride(categoryId: CategoryId, remainingCents: Long): Future[Unit] =
+    client.categories.setOverride(categoryId, SetCategoryOverrideRequest(remainingCents)).map(categorySummariesVar.set)
+
+  override def clearCategoryBudgetOverride(categoryId: CategoryId): Future[Unit] =
+    client.categories.clearOverride(categoryId).map(categorySummariesVar.set)
+
+  override def categoryPeriodTransactions(categoryId: CategoryId, limit: Int): Future[TransactionListResponse] =
+    client.transactions.query(
+      accountUid = None,
+      month = Some(MonthFilter.CurrentPeriod),
+      category = Some(categoryId.value),
+      hideInternal = true, // the spend behind a category budget excludes own-account transfers, so the drill-down must too
+      sort = "date",
+      asc = false,
+      limit = Some(limit),
+    )
 
   override def unpaidPlannedExpenses: Signal[Money] =
     plannedExpenses

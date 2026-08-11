@@ -5,6 +5,7 @@ import cats.implicits.*
 import doobie.*
 import doobie.implicits.*
 import ssbudget.backend.db.DoobieMeta.given
+import ssbudget.shared.api.CategoryFilter
 import ssbudget.shared.model.*
 
 import java.time.Instant
@@ -154,9 +155,9 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
       month.map(m => fr"substr(booked_at, 1, 7) = $m"),
       from.map(f => fr"booked_at >= $f"),
       to.map(t => fr"booked_at < $t"),
-      category.filterNot(c => c == "all").map {
-        case "uncategorized" => fr"category_id IS NULL AND is_internal = 0"
-        case cid             => fr"category_id = ${CategoryId(cid)}"
+      category.filterNot(_ == CategoryFilter.All).map {
+        case CategoryFilter.Uncategorized => fr"category_id IS NULL AND is_internal = 0"
+        case cid                          => fr"category_id = ${CategoryId(cid)}"
       },
       Option.when(hideInternal)(fr"is_internal = 0"),
     ).flatten

@@ -20,10 +20,17 @@ object TestServers {
   @volatile private var _backendPort: Int                                  = 0
   @volatile private var _frontendPort: Int                                 = 0
   @volatile private var dbPath: Option[Path]                               = None
+  @volatile private var _repos: Option[Repositories]                       = None
 
   def backendPort: Int    = _backendPort
   def frontendPort: Int   = _frontendPort
   def frontendUrl: String = s"http://127.0.0.1:$_frontendPort"
+
+  /** The running backend's repositories, for seeding data the UI can't create itself. Bank transactions only ever arrive via an Enable Banking
+    * import, so anything that needs them (categorization rules, category spend, the drill-downs) has to be set up here.
+    */
+  def repos: Repositories =
+    _repos.getOrElse(throw new IllegalStateException("TestServers.startAll() must run before seeding via repos"))
 
   private def findAvailablePort(): Int = {
     Using(new ServerSocket(0)) { socket =>
@@ -37,6 +44,9 @@ object TestServers {
       println("Servers already running")
       return
     }
+
+    // Nothing owns the end of the run now that specs start the servers on demand, so tie teardown (vite child process + temp database) to JVM exit.
+    Runtime.getRuntime.addShutdownHook(new Thread(() => stopAll()))
 
     _backendPort = findAvailablePort()
     _frontendPort = findAvailablePort()
@@ -62,6 +72,7 @@ object TestServers {
 
     val serverIO: IO[Nothing] = Database.migrateAndTransactor(jdbcUrl).use { xa =>
       val repos = Repositories.fromTransactor(xa)
+      _repos = Some(repos)
       ServerBuilder.build(repos, xa, port, testMode = true, dbPath = dbPathStr).useForever
     }
 
