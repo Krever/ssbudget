@@ -702,7 +702,7 @@ object TransactionsPage {
               th(
                 cls   := "text-center",
                 "Budget",
-                title := "Budget type on the Budget page — Steady (time-based), Bill (one-off), or Subscription (fixed pool)",
+                title := "Budget type on the Dashboard — Steady (time-based), Bill (one-off), or Subscription (fixed pool)",
               ),
               th(),
             ),

@@ -52,6 +52,12 @@ trait BankTransactionRepository {
     */
   def spendByCategoryBetween(from: Instant, to: Option[Instant], includeInflows: Boolean = false): IO[List[(CategoryId, Currency, Long)]]
 
+  /** Non-internal inflow / outflow totals per currency over `[from, to)`: `(currency, inflow, outflow)`, both positive cents. Internal transfers are
+    * excluded, so money moved between own accounts is neither income nor spend. Uncategorized transactions ARE counted — this is cash flow, not a
+    * category breakdown.
+    */
+  def flowsBetween(from: Instant, to: Option[Instant]): IO[List[(Currency, Long, Long)]]
+
   /** Spend per (category, currency, YYYY-MM) over `[from, to)`, categorized + non-internal — a per-month breakdown. `includeInflows` as in
     * [[spendByCategoryBetween]] (false = gross outflow, e.g. for the analytics chart; true = net, for the budget average).
     */
@@ -182,6 +188,16 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
           FROM bank_transactions
           WHERE category_id IS NOT NULL AND is_internal = 0""" ++ debit ++ fr"AND booked_at >= $from" ++ upper ++
       fr"GROUP BY category_id, currency").query[(CategoryId, Currency, Long)].to[List].transact(xa)
+  }
+
+  override def flowsBetween(from: Instant, to: Option[Instant]): IO[List[(Currency, Long, Long)]] = {
+    val upper = to.fold(Fragment.empty)(t => fr"AND booked_at < $t")
+    (fr"""SELECT currency,
+            COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN amount_cents < 0 THEN -amount_cents ELSE 0 END), 0)
+          FROM bank_transactions
+          WHERE is_internal = 0 AND booked_at >= $from""" ++ upper ++
+      fr"GROUP BY currency").query[(Currency, Long, Long)].to[List].transact(xa)
   }
 
   override def monthlySpendByCategory(from: Instant, to: Instant, includeInflows: Boolean): IO[List[(CategoryId, Currency, String, Long)]] = {

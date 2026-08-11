@@ -6,7 +6,6 @@ sealed trait Page derives Codec.AsObject
 
 object Page {
   case object Dashboard       extends Page
-  case object Budget          extends Page
   case object Accounts        extends Page
   case object Periods         extends Page
   case object Banking         extends Page
@@ -15,9 +14,9 @@ object Page {
   case object Settings        extends Page
   case object NotFound        extends Page
 
-  /** Transactions page, with its filters as arguments so a filtered view can be linked to (the category drill-down from the Budget page) and survives
-    * a reload. `None` means "whatever the page defaults to", so a bare `/transactions` keeps the triage-first defaults: uncategorized, all months,
-    * all accounts, internal transfers hidden.
+  /** Transactions page, with its filters as arguments so a filtered view can be linked to (the category-budget drill-down on the Dashboard) and
+    * survives a reload. `None` means "whatever the page defaults to", so a bare `/transactions` keeps the triage-first defaults: uncategorized, all
+    * months, all accounts, internal transfers hidden.
     */
   case class Transactions(
       category: Option[String] = None, // "all" | "uncategorized" | a category id

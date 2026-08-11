@@ -133,19 +133,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   override def budgetedCategories: Signal[List[CategorySummary]] =
     categorySummariesVar.signal.map(_.filter(_.category.budgetType.isDefined).sortBy(_.category.name))
 
-  /** Remaining category-budget spend expected before the next paycheck, per the category's budget type or the user's manual override (see
-    * [[CategorySummary.remainingCents]]), summed in the primary currency. Folded into predicted expenses.
-    */
-  override def categoryBudgetsRemaining: Signal[Money] =
-    categorySummariesVar.signal
-      .combineWith(exchangeRatesVar.signal)
-      .combineWith(primaryCurrency)
-      .combineWith(periodElapsedFraction)
-      .map { case (summaries, rates, primary, elapsed) =>
-        val amounts = summaries.flatMap(s => s.category.budgetType.map(_ => Money(s.remainingCents(elapsed), s.currency)))
-        sumInPrimary(amounts, rates, primary)
-      }
-
   override def setCategoryBudgetOverride(categoryId: CategoryId, remainingCents: Long): Future[Unit] =
     client.categories.setOverride(categoryId, SetCategoryOverrideRequest(remainingCents)).map(categorySummariesVar.set)
 
@@ -164,25 +151,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     )
 
   override def savingsPeriodChange: Signal[Money] = savingsChangeVar.signal
-
-  // Savings is deliberately NOT subtracted here: moving money to savings already lowers the (spending-only) bankAccountBalance, so reserving it
-  // again would double-count. Actual savings movement is surfaced separately via `savingsPeriodChange` (informational).
-  override def freeMoney: Signal[Money] =
-    bankAccountBalance
-      .combineWith(unpaidPlannedExpenses)
-      .combineWith(categoryBudgetsRemaining)
-      .combineWith(pendingIncome)
-      .map { case (bankBalance, unpaid, catBudgets, income) => bankBalance - unpaid - catBudgets + income }
-
-  override def availableNow: Signal[Money] =
-    bankAccountBalance
-      .combineWith(unpaidPlannedExpenses)
-      .map { case (bankBalance, unpaid) => bankBalance - unpaid }
-
-  override def dailyBudget: Signal[Money] =
-    freeMoney
-      .combineWith(daysRemainingInPeriod)
-      .map { case (free, days) => if days > 0 then free / days else Money.zero(free.currency) }
 
   // Mutation methods
   private def upsertAccount(account: Account): Unit =

@@ -33,6 +33,12 @@ object TransactionSeed {
 
   def accountUid: String = "e2e-acc-uid"
 
+  /** An instant inside the previous calendar month. A category's budget is the mean over COMPLETED months, so a seed booked today produces no budget
+    * at all — anything testing a budget figure has to book its history here.
+    */
+  def lastMonth: Instant =
+    java.time.LocalDate.now(java.time.ZoneOffset.UTC).withDayOfMonth(1).minusDays(5).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
+
   /** Insert one booked outflow. `bookedAt` defaults to now, which puts it in the current period. */
   def addTransaction(
       counterparty: String,
@@ -66,7 +72,7 @@ object TransactionSeed {
     tx
   }
 
-  /** Create a category and return its id. A `budgetType` is what surfaces it on the Budget page's Category Budgets card. */
+  /** Create a category and return its id. A `budgetType` is what surfaces it as a line of the Dashboard's Plan. */
   def addCategory(name: String, budgetType: Option[CategoryBudgetType] = None): CategoryId = {
     val cat = Category(CategoryId(UUID.randomUUID().toString), name, None, budgetType)
     repos.categories.create(cat).unsafeRunSync()

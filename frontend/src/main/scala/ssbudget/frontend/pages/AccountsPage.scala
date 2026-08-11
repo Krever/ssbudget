@@ -241,7 +241,7 @@ object AccountsPage {
       ),
       div(
         cls := "card-footer py-2 text-muted small",
-        "Balances are edited from the Dashboard. To plan a contribution, add a planned expense on the Budget page.",
+        "Balances are edited from the Dashboard. To plan a contribution, add it there as a planned expense.",
       ),
     )
   }

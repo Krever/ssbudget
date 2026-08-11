@@ -142,11 +142,10 @@ class DatabaseSpec extends E2ESpec {
       bankCardAfter.getText should not include "New Account After Backup"
     }
 
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
+    openDashboard()
 
     eventually {
-      val plannedCard = findCard("Planned Items")
+      val plannedCard = findCard("Plan")
       plannedCard.getText should include("Original Expense")
       plannedCard.getText should not include "New Expense After Backup"
     }

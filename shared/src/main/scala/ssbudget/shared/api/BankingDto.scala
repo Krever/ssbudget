@@ -97,14 +97,35 @@ final case class CategorySummary(
     overrideRemainingCents: Option[Long] = None,
 ) derives Codec.AsObject {
 
-  /** Money still expected to be spent in this category before the next paycheck. A manual override wins over the budget-type formula — the user knows
-    * something the transactions don't yet show (e.g. the bill was already paid). An override of 0 means the budget is covered, which is what makes an
-    * overridden-to-zero budget behave exactly like a paid one everywhere `remainingCents` is consulted.
+  /** Which way this category's money flows: `1` when it is spent, `-1` when it arrives (its net spend, and so its budget, is negative). This is the
+    * ONE rule for direction in the app — everything else multiplies by it rather than re-deriving it from a sign somewhere.
     */
-  def remainingCents(elapsed: Double): Long =
-    overrideRemainingCents.map(math.max(0L, _)).getOrElse {
-      CategoryBudgetType.remaining(category.budgetType.getOrElse(CategoryBudgetType.Steady), avgMonthlyCents, currentPeriodSpentCents, elapsed)
+  def direction: Long = if avgMonthlyCents < 0 || (avgMonthlyCents == 0 && currentPeriodSpentCents < 0) then -1L else 1L
+
+  /** Whether this category's money flows IN. Drives wording and colour. */
+  def isIncome: Boolean = direction < 0
+
+  /** The budget, as a magnitude in the category's own direction: what is expected to be spent, or to arrive. */
+  def expectedMagnitude: Long = math.abs(avgMonthlyCents)
+
+  /** What has already moved this period in the category's own direction — spent for an expense, received for an income. Negative if it moved the
+    * other way (a refund on an expense category, say), which the budget formulas treat as no progress rather than as progress backwards.
+    */
+  def movedMagnitude: Long = currentPeriodSpentCents * direction
+
+  /** What is still expected to move this period, as a magnitude in the category's own direction. A manual override wins over the budget-type formula
+    * — the user knows something the transactions don't yet show (e.g. the bill was already paid) — and is stored signed, so it converts the same way.
+    */
+  def remainingMagnitude(elapsed: Double): Long =
+    overrideRemainingCents.map(_ * direction).getOrElse {
+      CategoryBudgetType.remaining(category.budgetType.getOrElse(CategoryBudgetType.Steady), expectedMagnitude, movedMagnitude, elapsed)
     }
+
+  /** Money still expected to move in this category before the next paycheck, SIGNED: positive is still to be spent, negative is still to arrive. This
+    * is the form the free-money sums add up; anything rendering a single category wants [[remainingMagnitude]] instead. An override of 0 means the
+    * budget is covered, which is what makes an overridden-to-zero budget behave exactly like a paid one wherever this is consulted.
+    */
+  def remainingCents(elapsed: Double): Long = remainingMagnitude(elapsed) * direction
 }
 
 /** Manually set a category budget's remaining amount for the current period (cents in the primary currency; 0 = already covered). */

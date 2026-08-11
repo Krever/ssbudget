@@ -74,8 +74,8 @@ class DashboardSpec extends E2ESpec {
     val btn = driver.findElement(By.xpath("//button[contains(text(),'Copy Summary')]"))
     btn.click()
 
-    // Button should show "Copied!" feedback
-    btn.getText shouldBe "Copied!"
+    // The label flips only once the clipboard write resolves, so poll for it rather than reading it in the same breath as the click.
+    eventually(driver.findElement(By.xpath("//button[contains(text(),'Copied')]")).getText shouldBe "Copied!")
 
     // Read clipboard via JavaScript
     val js        = driver.asInstanceOf[JavascriptExecutor]

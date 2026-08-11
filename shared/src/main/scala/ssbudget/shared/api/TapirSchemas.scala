@@ -92,6 +92,10 @@ object TapirSchemas {
   given Schema[RulePreviewRequest]         = Schema.derived[RulePreviewRequest]
   given Schema[RulePreviewResponse]        = Schema.derived[RulePreviewResponse]
 
+  // Period retrospective DTOs
+  given Schema[PeriodCategorySpend] = Schema.derived[PeriodCategorySpend]
+  given Schema[PeriodSummary]       = Schema.derived[PeriodSummary]
+
   // Analytics DTOs
   given Schema[CategorySpendSeries]       = Schema.derived[CategorySpendSeries]
   given Schema[CategorizationStats]       = Schema.derived[CategorizationStats]

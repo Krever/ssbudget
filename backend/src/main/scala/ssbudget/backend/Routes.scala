@@ -67,6 +67,7 @@ object Routes {
       // Periods
       route(Endpoints.periods.list)(_ => repos.periods.findAll.map(Right(_))),
       route(Endpoints.periods.startNew)(_ => startNewPeriod(repos)),
+      route(Endpoints.periods.summaries)(periodSummaries(repos)),
       // Savings
       route(Endpoints.savings.periodChange)(_ => savingsPeriodChange(repos)),
       // Exchange rates (all rates to primary currency)
@@ -329,6 +330,121 @@ object Routes {
       Right(Money(changes.map { case (delta, cur) => toPrimary(delta, cur) }.sum, primary))
     }
 
+  /** The primary currency and a converter into it, at the latest rates: `(cents, currency) => cents in primary`. Anything missing a rate is passed
+    * through unconverted (rare — the currency isn't enabled), which is the behaviour every caller here already relied on.
+    *
+    * Four earlier handlers open-code this same preamble; they are left alone deliberately, but new ones should use this.
+    */
+  private def primaryConverter(repos: Repositories): IO[(Currency, (Long, Currency) => Long)] =
+    for {
+      primaryOpt <- repos.currencySettings.findPrimary
+      enabled    <- repos.currencySettings.findAll
+      primary     = primaryOpt.map(_.code).getOrElse(Currency.PLN)
+      rateList   <- enabled.filterNot(_.code == primary).traverse(s => repos.exchangeRates.findLatest(s.code, primary))
+    } yield {
+      val rates                                       = rateList.flatten.map(r => r.fromCurrency -> r).toMap
+      def toPrimary(cents: Long, cur: Currency): Long =
+        if cur == primary then cents else rates.get(cur).map(_.convert(Money(cents, cur)).amountCents).getOrElse(cents)
+      (primary, toPrimary)
+    }
+
+  /** How many periods the retrospective summarizes when the client doesn't ask for a number. Each period costs a handful of aggregate queries, so
+    * this is capped rather than unbounded.
+    */
+  private val periodSummaryDefaultCount = 12
+
+  /** How many categories each period's spend breakdown lists. */
+  private val periodSummaryCategoryCap = 6
+
+  /** Per-period retrospective, newest first. See [[PeriodSummary]] for what each figure means and where it comes from. */
+  private def periodSummaries(repos: Repositories)(limitOpt: Option[Int]): Result[List[PeriodSummary]] =
+    for {
+      all       <- repos.periods.findAll
+      periods    = all.sortBy(_.startDate.toEpochMilli).reverse.take(limitOpt.filter(_ > 0).getOrElse(periodSummaryDefaultCount).min(60))
+      accounts  <- repos.accounts.findAll
+      defs      <- repos.expenseDefinitions.findAll
+      cats      <- repos.categories.findAll
+      converter <- primaryConverter(repos)
+      // Every period needs each account's balance at two instants. Read each account's snapshot history ONCE here and resolve the boundaries in memory:
+      // asking the repository per (account, boundary, period) was a query per cell of that grid.
+      snapshots <- accounts.traverse(acc => repos.balanceSnapshots.findByAccount(acc.id).map(acc.id -> _)).map(_.toMap)
+      summaries <- periods.traverse(periodSummary(repos, converter, accounts, defs, cats, snapshots))
+    } yield Right(summaries)
+
+  private def periodSummary(
+      repos: Repositories,
+      converter: (Currency, (Long, Currency) => Long),
+      accounts: List[Account],
+      defs: List[BudgetItemDefinition],
+      cats: List[Category],
+      snapshots: Map[AccountId, List[BalanceSnapshot]],
+  )(p: Period): IO[PeriodSummary] = {
+    val (primary, toPrimary) = converter
+
+    val (from, to) = periodWindow(p)
+    val spending   = accounts.filter(_.role == AccountRole.Spending)
+    val savings    = accounts.filter(_.role == AccountRole.Savings)
+
+    // Balances come from snapshots, which are stamped at real instants — so they use the period's exact bounds rather than the transaction window's day
+    // boundaries. A running period has no end, and its "balance at the end" is simply the account's live balance. `findByAccount` returns newest first,
+    // so the balance as of an instant is the first snapshot recorded at or before it.
+    def balanceAt(acc: Account, at: Option[Instant]): Option[Long] =
+      at.fold(Option(acc.balanceCents))(i => snapshots.getOrElse(acc.id, Nil).find(!_.recordedAt.isAfter(i)).map(_.amount))
+
+    val savingsDelta = savings.map { acc =>
+      (balanceAt(acc, Some(p.startDate)), balanceAt(acc, p.endDate)) match {
+        case (Some(start), Some(end)) => toPrimary(end - start, acc.currency)
+        // Nothing recorded before the period began, so what moved during it is unknowable — count zero rather than invent a baseline.
+        case _                        => 0L
+      }
+    }.sum
+    val endBalances  = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
+
+    for {
+      flows   <- repos.bankTransactions.flowsBetween(from, to)
+      catRows <- repos.bankTransactions.spendByCategoryBetween(from, to)
+      records <- repos.expenseRecords.findByPeriod(p.id)
+    } yield {
+      val byId                                                             = defs.map(d => d.id -> d).toMap
+      // A record whose definition has since been deleted carries neither an estimate nor a type, so it can't be attributed to expenses or income.
+      val withDefs                                                         = records.flatMap(r => byId.get(r.expenseDefId).map(r -> _))
+      val expenses                                                         = withDefs.filter(_._2.itemType == BudgetItemType.PlannedExpense)
+      val incomes                                                          = withDefs.filter(_._2.itemType == BudgetItemType.PlannedIncome)
+      def paidSum(rows: List[(ExpenseRecord, BudgetItemDefinition)]): Long = rows.map { case (r, d) => toPrimary(r.paidCents, d.currency) }.sum
+      val catIndex                                                         = cats.map(c => c.id -> c).toMap
+      val topCategories                                                    = catRows
+        .groupBy(_._1)
+        .view
+        .mapValues(_.map { case (_, cur, cents) => toPrimary(cents, cur) }.sum)
+        .toList
+        .flatMap { case (id, cents) => catIndex.get(id).map(PeriodCategorySpend(_, cents)) }
+        .filter(_.spentCents > 0)
+        .sortBy(-_.spentCents)
+        .take(periodSummaryCategoryCap)
+
+      PeriodSummary(
+        period = p,
+        days = periodDays(p),
+        currency = primary,
+        inflowCents = flows.map { case (cur, in, _) => toPrimary(in, cur) }.sum,
+        outflowCents = flows.map { case (cur, _, out) => toPrimary(out, cur) }.sum,
+        plannedPaidCents = paidSum(expenses),
+        plannedEstimateCents = expenses.map { case (_, d) => toPrimary(d.estimateCents, d.currency) }.sum,
+        incomeReceivedCents = paidSum(incomes),
+        plannedSettled = expenses.count(_._1.settled),
+        plannedTotal = expenses.size,
+        savingsChangeCents = savingsDelta,
+        // Partial by design: accounts without a snapshot that early are left out rather than sinking the whole figure to None.
+        endBalanceCents = Option.when(endBalances.exists(_.isDefined))(endBalances.flatten.sum),
+        topCategories = topCategories,
+      )
+    }
+  }
+
+  /** A period's length in whole days: its full span once closed, elapsed so far while it's running. */
+  private def periodDays(p: Period): Int =
+    java.time.temporal.ChronoUnit.DAYS.between(p.startDate, p.endDate.getOrElse(Instant.now())).toInt
+
   private def resetDatabase(repos: Repositories): Result[Unit] = {
     // This is a test-only endpoint to reset the database
     // In a real implementation, you'd want to be more careful here
@@ -455,7 +571,9 @@ object Routes {
   }
 
   /** Sets (`Some`) or clears (`None`) the manual remaining-amount override for a category budget in the CURRENT period, then returns the refreshed
-    * summaries. Negative amounts are clamped to 0 ("nothing left to pay"), which is also how a budget is marked as already paid.
+    * summaries. The amount is stored with its sign: positive is still to be spent, negative is still expected to come in (an income category — see
+    * [[CategoryBudgetType.remaining]]). 0 marks the budget as covered either way. `V17__category_budget_override.sql` predates income budgets and
+    * comments the column as `>= 0`; the signed convention here supersedes it (the column itself has no constraint).
     */
   private def setCategoryOverride(repos: Repositories)(id: CategoryId, remainingCents: Option[Long]): Result[List[CategorySummary]] =
     for {
@@ -466,7 +584,7 @@ object Routes {
                      case (_, None)               => IO.pure(Left("No active period"))
                      case (Some(_), Some(period)) =>
                        val write = remainingCents match {
-                         case Some(cents) => IO.realTimeInstant.flatMap(repos.categoryBudgetOverrides.upsert(period.id, id, math.max(0L, cents), _))
+                         case Some(cents) => IO.realTimeInstant.flatMap(repos.categoryBudgetOverrides.upsert(period.id, id, cents, _))
                          case None        => repos.categoryBudgetOverrides.delete(period.id, id)
                        }
                        write >> categorySummaries(repos)

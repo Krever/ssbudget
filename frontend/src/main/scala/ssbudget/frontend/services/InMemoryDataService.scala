@@ -143,10 +143,9 @@ object InMemoryDataService extends DataService {
       case None    => 0
     }
 
-  // Category budgets are not modelled in the in-memory mock; expose empty/zero stubs.
+  // Category budgets are not modelled in the in-memory mock; empty summaries make every derived budget figure zero.
   override def categorySummaries: Signal[List[CategorySummary]]  = Val(List.empty)
   override def budgetedCategories: Signal[List[CategorySummary]] = Val(List.empty)
-  override def categoryBudgetsRemaining: Signal[Money]           = primaryCurrency.map(Money.zero)
   override def savingsPeriodChange: Signal[Money]                = primaryCurrency.map(Money.zero)
 
   override def setCategoryBudgetOverride(categoryId: CategoryId, remainingCents: Long): Future[Unit] = Future.successful(())
@@ -169,22 +168,6 @@ object InMemoryDataService extends DataService {
         if total <= 0 then 1.0 else math.max(0.0, math.min(1.0, elapsed / total))
       case None    => 0.0
     }
-
-  override def freeMoney: Signal[Money] =
-    bankAccountBalance
-      .combineWith(unpaidPlannedExpenses)
-      .combineWith(pendingIncome)
-      .map { case (bankBalance, unpaid, income) => bankBalance - unpaid + income }
-
-  override def availableNow: Signal[Money] =
-    bankAccountBalance
-      .combineWith(unpaidPlannedExpenses)
-      .map { case (bankBalance, unpaid) => bankBalance - unpaid }
-
-  override def dailyBudget: Signal[Money] =
-    freeMoney
-      .combineWith(daysRemainingInPeriod)
-      .map { case (free, days) => if days > 0 then free / days else Money.zero(free.currency) }
 
   private def upsert(account: Account): Unit =
     accountsVar.update(DataService.upsertById(_, account)(_.id))

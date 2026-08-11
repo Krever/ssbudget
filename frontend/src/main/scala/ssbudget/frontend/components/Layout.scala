@@ -22,9 +22,8 @@ object Layout {
   private def renderPage(page: Page, apiClient: ApiClient): HtmlElement = {
     page match {
       case Page.Dashboard       => DashboardPage()
-      case Page.Budget          => BudgetPage()
       case Page.Accounts        => AccountsPage()
-      case Page.Periods         => PeriodsPage()
+      case Page.Periods         => PeriodsPage(apiClient)
       case Page.Banking         => BankingPage(apiClient)
       case Page.BankingCallback => BankingCallbackPage(apiClient)
       case t: Page.Transactions => TransactionsPage(apiClient, t)

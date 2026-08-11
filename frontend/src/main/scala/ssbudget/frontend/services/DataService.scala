@@ -63,7 +63,6 @@ trait DataService {
   // Category budgets (rolling 3-month average per category, computed server-side)
   def categorySummaries: Signal[List[CategorySummary]]
   def budgetedCategories: Signal[List[CategorySummary]] // only categories flagged as monthly budgets
-  def categoryBudgetsRemaining: Signal[Money]           // Σ remaining per budget (override wins), in primary currency
   def periodElapsedFraction: Signal[Double]             // 0..1 through the current period (for pace markers)
 
   // Manual remaining-amount override for a category budget, current period only (0 = already paid; clearing restores the computed value).
@@ -78,9 +77,6 @@ trait DataService {
     */
   def categoryPeriodTransactions(categoryId: CategoryId, limit: Int): Future[TransactionListResponse]
 
-  def freeMoney: Signal[Money]          // bankAccountBalance - predicted expenses + pending income (savings excluded)
-  def availableNow: Signal[Money]       // bankAccountBalance - unpaid planned only (conservative estimate)
-  def dailyBudget: Signal[Money]
   def bankAccountBalance: Signal[Money] // only bank accounts, not savings
   def totalBalance: Signal[Money]       // all accounts including savings (for accounts table footer)
   def daysRemainingInPeriod: Signal[Int]
@@ -101,11 +97,70 @@ trait DataService {
         DataService.sumInPrimary(amounts, rates, primary)
       }
 
+  /** Σ of the savings buckets, in the primary currency — the difference between [[bankAccountBalance]] (spendable) and [[totalBalance]]. */
+  final def savingsBalance: Signal[Money] =
+    savingsAccounts
+      .combineWith(exchangeRates)
+      .combineWith(primaryCurrency)
+      .map { case (accounts, rates, primary) => DataService.sumInPrimary(accounts.map(_.balance), rates, primary) }
+
   /** Σ remaining per planned expense — what still has to come out of the balance before the next paycheck. */
   final def unpaidPlannedExpenses: Signal[Money] = remainingOn(plannedExpenses)
 
   /** Σ remaining per planned income — what is still expected to come in. */
   final def pendingIncome: Signal[Money] = remainingOn(plannedIncomes)
+
+  /** Signed remaining per category budget, in the primary currency: positive is still to be spent, negative is still expected to arrive (see
+    * [[CategorySummary.remainingCents]]). Concrete here so the real service and the mock can't disagree about what feeds free money.
+    */
+  private def budgetRemainings: Signal[List[Money]] =
+    categorySummaries
+      .combineWith(periodElapsedFraction)
+      .map { case (summaries, elapsed) =>
+        summaries.flatMap(s => s.category.budgetType.map(_ => Money(s.remainingCents(elapsed), s.currency)))
+      }
+
+  private def sumBudgets(select: Long => Boolean, sign: Long): Signal[Money] =
+    budgetRemainings
+      .combineWith(exchangeRates)
+      .combineWith(primaryCurrency)
+      .map { case (amounts, rates, primary) =>
+        DataService.sumInPrimary(amounts.filter(m => select(m.amountCents)).map(m => Money(m.amountCents * sign, m.currency)), rates, primary)
+      }
+
+  /** Σ of what category budgets still expect to SPEND (income budgets excluded), as a positive amount. */
+  final def categoryBudgetsToSpend: Signal[Money] = sumBudgets(_ > 0, 1)
+
+  /** Σ of what category budgets still expect to RECEIVE (income budgets only), as a positive amount. */
+  final def categoryBudgetsToReceive: Signal[Money] = sumBudgets(_ < 0, -1)
+
+  /** Everything the plan still expects to leave the balance before the next paycheck — hand-declared items and category budgets together. */
+  final def stillToPay: Signal[Money] =
+    unpaidPlannedExpenses.combineWith(categoryBudgetsToSpend).map { case (planned, budgets) => planned + budgets }
+
+  /** Everything the plan still expects to arrive before the next paycheck, from both kinds of entry. */
+  final def stillToReceive: Signal[Money] =
+    pendingIncome.combineWith(categoryBudgetsToReceive).map { case (planned, budgets) => planned + budgets }
+
+  /** What's actually free to spend before the next paycheck: the spendable balance, plus what's still expected in, less what's still expected out.
+    *
+    * Savings are deliberately NOT subtracted: moving money to a savings bucket already lowers the (spending-only) [[bankAccountBalance]], so
+    * reserving it again would double-count. Actual savings movement is surfaced separately via [[savingsPeriodChange]] (informational).
+    *
+    * Concrete here, over the same two totals the Dashboard spells out, so the headline figure and the breakdown explaining it cannot drift apart.
+    */
+  final def freeMoney: Signal[Money] =
+    bankAccountBalance
+      .combineWith(stillToReceive)
+      .combineWith(stillToPay)
+      .map { case (balance, toReceive, toPay) => balance + toReceive - toPay }
+
+  /** A deliberately conservative variant for the shared summary: the balance less only what's planned by hand. */
+  final def availableNow: Signal[Money] =
+    bankAccountBalance.combineWith(unpaidPlannedExpenses).map { case (balance, unpaid) => balance - unpaid }
+
+  final def dailyBudget: Signal[Money] =
+    freeMoney.combineWith(daysRemainingInPeriod).map { case (free, days) => if days > 0 then free / days else Money.zero(free.currency) }
 }
 
 object DataService {

@@ -37,7 +37,6 @@ object NavBar {
           ul(
             cls := "navbar-nav me-auto",
             navItem(Page.Dashboard, "Dashboard", isOpen),
-            navItem(Page.Budget, "Budget", isOpen),
             navItem(Page.Accounts, "Accounts", isOpen),
             navItem(Page.Periods, "Periods", isOpen),
             navItem(Page.Banking, "Banking", isOpen),

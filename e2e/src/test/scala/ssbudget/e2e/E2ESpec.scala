@@ -36,6 +36,12 @@ object E2ESpec {
 
   /** How long element lookups keep retrying. Also the ceiling for [[Eventually]] assertions. */
   val implicitWait: Duration = Duration.ofSeconds(10)
+
+  /** Locates one entry of the Dashboard's Plan by name: the block holding its bar, state line and buttons. Lives here because `DemoScenarioSpec`
+    * builds its own driver and can't extend the trait, and one xpath with two owners would drift.
+    */
+  def planEntryXpath(name: String): String =
+    s"//span[contains(@class,'fw-semibold') and contains(.,'$name')]/ancestor::div[contains(@class,'mb-3')][1]"
 }
 
 trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with BeforeAndAfterEach with Eventually {
@@ -151,6 +157,12 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
 
   // ============ Setup Helpers ============
 
+  /** Open the Dashboard — the app's single working surface, home to the summary, accounts, planned items and category budgets. */
+  protected def openDashboard(): Unit = {
+    driver.get(baseUrl)
+    waitForPage("Dashboard")
+  }
+
   /** Ensure there's a current period, starting one if needed */
   protected def ensurePeriodExists(): Unit = {
     driver.get(s"$baseUrl/periods")
@@ -202,34 +214,41 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     eventually(findCard("Savings Accounts").getText should include(name))
   }
 
-  /** Add a planned expense */
-  protected def addPlannedExpense(name: String, amount: Double): Unit = {
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
+  /** One entry of the Dashboard's Plan, found by name: the block holding its bar, state line and buttons. Re-found on each call, because Laminar
+    * replaces the block on every update and a captured reference would go stale.
+    */
+  protected def planEntry(name: String): WebElement =
+    driver.findElement(By.xpath(E2ESpec.planEntryXpath(name)))
 
-    val card = findCard("Planned Items")
-    click(card, "+ Expense")
+  /** The name line of a Plan entry — for a category entry that's also the drill-down toggle. */
+  protected def planEntryName(name: String): WebElement =
+    driver.findElement(By.xpath(s"//span[contains(@class,'fw-semibold') and contains(.,'$name')]"))
 
-    val addRow = card.findElement(By.cssSelector("tr.table-primary"))
-    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
-    addRow.findElement(By.cssSelector("input[type='number']")).sendKeys(amount.toString)
-    click(addRow, "Add")
-    eventually(findCard("Planned Items").getText should include(name))
+  /** Turn off the Plan's "Hide done" switch, which otherwise hides settled entries and covered budgets. Idempotent. */
+  protected def showDonePlanEntries(): Unit = {
+    val toggle = driver.findElement(By.id("hideDone"))
+    if toggle.isSelected then {
+      toggle.click()
+      eventually(driver.findElement(By.id("hideDone")).isSelected shouldBe false)
+    }
   }
 
-  /** Add a planned income */
-  protected def addPlannedIncome(name: String, amount: Double): Unit = {
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
+  /** Add a manual entry to the Dashboard's Plan — an expense or an income, per `income`. */
+  private def addPlannedItem(name: String, amount: Double, income: Boolean): Unit = {
+    openDashboard()
 
-    val card = findCard("Planned Items")
-    click(card, "+ Income")
+    val card = findCard("Plan")
+    click(card, if income then "+ Income" else "+ Expense")
 
-    val addRow = card.findElement(By.cssSelector("tr.table-primary"))
-    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
-    addRow.findElement(By.cssSelector("input[type='number']")).sendKeys(amount.toString)
-    click(addRow, "Add")
-    eventually(findCard("Planned Items").getText should include(name))
+    val form = driver.findElement(By.id(if income then "plan-add-income" else "plan-add-expense"))
+    form.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
+    form.findElement(By.cssSelector("input[type='number']")).sendKeys(amount.toString)
+    click(form, "Add")
+    eventually(findCard("Plan").getText should include(name))
   }
+
+  protected def addPlannedExpense(name: String, amount: Double): Unit = addPlannedItem(name, amount, income = false)
+
+  protected def addPlannedIncome(name: String, amount: Double): Unit = addPlannedItem(name, amount, income = true)
 
 }

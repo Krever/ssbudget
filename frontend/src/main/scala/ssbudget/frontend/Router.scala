@@ -9,7 +9,6 @@ object Router
     extends com.raquo.waypoint.Router[Page](
       routes = List(
         Route.static(Page.Dashboard, root / endOfSegments),
-        Route.static(Page.Budget, root / "budget" / endOfSegments),
         Route.static(Page.Accounts, root / "accounts" / endOfSegments),
         Route.static(Page.Periods, root / "periods" / endOfSegments),
         Route.static(Page.Banking, root / "banking" / endOfSegments),
@@ -28,7 +27,6 @@ object Router
       ),
       getPageTitle = {
         case Page.Dashboard       => "SSBudget - Dashboard"
-        case Page.Budget          => "SSBudget - Budget"
         case Page.Accounts        => "SSBudget - Accounts"
         case Page.Periods         => "SSBudget - Periods"
         case Page.Banking         => "SSBudget - Bank Connections"

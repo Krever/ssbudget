@@ -146,6 +146,11 @@ class ApiClient(implicit ec: ExecutionContext) {
       val request = interpreter.toRequest(Endpoints.client.periods.startNew, Some(baseUri))
       backend.send(request(())).map(handleResponse)
     }
+
+    def summaries(limit: Option[Int] = None): Future[List[PeriodSummary]] = {
+      val request = interpreter.toRequest(Endpoints.client.periods.summaries, Some(baseUri))
+      backend.send(request(limit)).map(handleResponse)
+    }
   }
 
   object savings {

@@ -5,30 +5,19 @@ import ssbudget.shared.model.CategoryBudgetType
 
 import scala.jdk.CollectionConverters.*
 
-/** Drilling from a category into the transactions behind it, from both entry points: the Budget page's inline expansion and clicking a period spend
-  * figure on the Transactions page. Also covers that a filtered transactions URL is honoured on a cold load, since that's what the link out produces.
+/** Drilling from a category into the transactions behind it, from both entry points: the Dashboard's inline expansion of a category budget and
+  * clicking a period spend figure on the Transactions page. Also covers that a filtered transactions URL is honoured on a cold load, since that's
+  * what the link out produces.
   */
 class CategoryDrillDownSpec extends E2ESpec {
 
-  /** A budget with no spend has nothing left to reserve, so the card's default "Hide paid" filter would hide it. */
-  private def showAllBudgets(card: WebElement): Unit = {
-    val toggle = card.findElement(By.cssSelector("input#hidePaidBudgets"))
-    if toggle.isSelected then {
-      toggle.click()
-      eventually(card.findElement(By.cssSelector("input#hidePaidBudgets")).isSelected shouldBe false)
-    }
-  }
-
-  private def budgetRow(card: WebElement, categoryName: String): WebElement =
-    card.findElement(By.xpath(s".//span[contains(., '$categoryName')]"))
-
-  /** Open the Budget page's Category Budgets card with every budget visible. */
+  /** Open the Dashboard's Plan with every line visible, covered ones included — a budget with no spend has nothing left to reserve, so the default
+    * "Hide done" filter would hide it.
+    */
   private def openBudgetsCard(): WebElement = {
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
-    val card = findCard("Category Budgets")
-    showAllBudgets(card)
-    card
+    openDashboard()
+    showDonePlanEntries()
+    findCard("Plan")
   }
 
   "A Category Budget row" should "expand to show the transactions behind its spend" in {
@@ -38,11 +27,11 @@ class CategoryDrillDownSpec extends E2ESpec {
     TransactionSeed.addTransaction("Lidl E2E", -8810, categoryId = Some(categoryId))
 
     val card = openBudgetsCard()
-    textShouldAppear(budgetRow(card, "Drilldown Groceries"), "▸")
+    textShouldAppear(planEntry("Drilldown Groceries"), "▸")
 
-    budgetRow(card, "Drilldown Groceries").click()
+    planEntryName("Drilldown Groceries").click()
     eventually {
-      val text = findCard("Category Budgets").getText
+      val text = findCard("Plan").getText
       text should include("▾")
       text should include("Biedronka E2E")
       text should include("Lidl E2E")
@@ -56,8 +45,8 @@ class CategoryDrillDownSpec extends E2ESpec {
     TransactionSeed.addCategory("Drilldown Empty", Some(CategoryBudgetType.Steady))
 
     val card = openBudgetsCard()
-    budgetRow(card, "Drilldown Empty").click()
-    textShouldAppear(findCard("Category Budgets"), "No transactions this period")
+    planEntryName("Drilldown Empty").click()
+    textShouldAppear(findCard("Plan"), "No transactions this period")
   }
 
   it should "link out to the transactions list filtered to that category and period" in {
@@ -65,7 +54,7 @@ class CategoryDrillDownSpec extends E2ESpec {
     TransactionSeed.addCategory("Drilldown Rent", Some(CategoryBudgetType.Bill))
 
     val card = openBudgetsCard()
-    budgetRow(card, "Drilldown Rent").click()
+    planEntryName("Drilldown Rent").click()
     card.findElement(By.xpath(".//a[contains(text(),'open in Transactions')]")).click()
     waitForPage("Transactions")
 

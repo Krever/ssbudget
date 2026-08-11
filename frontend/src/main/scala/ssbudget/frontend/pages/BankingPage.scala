@@ -54,6 +54,7 @@ object BankingPage {
     val importingVar   = Var(Set.empty[String])      // connection ids currently importing transactions
     val jobsVar        = Var(List.empty[ImportJob])  // recent import/sync jobs (polled)
     val expandedJobs   = Var(Set.empty[ImportJobId]) // jobs whose per-account breakdown is expanded
+    val showAllJobs    = Var(false)                  // false = only the most recent few runs (see importActivityRowCap)
 
     // A background import/sync run is in progress → start buttons should reflect it (the server also refuses overlapping runs).
     val anyJobRunning: Signal[Boolean] = jobsVar.signal.map(_.exists(_.status == ImportJobStatus.Running))
@@ -235,7 +236,7 @@ object BankingPage {
           },
         ),
       ),
-      importActivityCard(jobsVar.signal, expandedJobs),
+      importActivityCard(jobsVar.signal, expandedJobs, showAllJobs),
       child.maybe <-- errorVar.signal.map(_.map { error =>
         div(
           cls := "alert alert-danger alert-dismissible",
@@ -271,10 +272,17 @@ object BankingPage {
     )
   }
 
-  /** Tracked import/sync runs (top level): the current run with live progress, plus history + stats. Each row expands into its per-account breakdown
-    * (second level). Fed by a polled job list.
+  /** How many past runs the Import activity card shows before the "Show all" toggle. The last handful answers "did my last sync work?"; the rest is
+    * archaeology and would otherwise push the whole page down.
     */
-  private def importActivityCard(jobs: Signal[List[ImportJob]], expandedJobs: Var[Set[ImportJobId]]): HtmlElement =
+  private val importActivityRowCap = 5
+
+  /** Tracked import/sync runs (top level): the current run with live progress, plus history + stats. Each row expands into its per-account breakdown
+    * (second level). Fed by a polled job list, capped to [[importActivityRowCap]] rows unless `showAll` is set.
+    */
+  private def importActivityCard(jobs: Signal[List[ImportJob]], expandedJobs: Var[Set[ImportJobId]], showAll: Var[Boolean]): HtmlElement = {
+    // Jobs arrive newest-first, so the cap keeps the most recent runs — including the one that's currently running.
+    val visibleJobs = jobs.combineWith(showAll.signal).map { case (js, all) => if all then js else js.take(importActivityRowCap) }
     div(
       cls := "card mb-4",
       div(
@@ -308,7 +316,7 @@ object BankingPage {
               th(cls := "pe-3", "Accounts"),
             ),
           ),
-          children <-- jobs.split(_.id)((id, _, jobSignal) => jobTbody(id, jobSignal, expandedJobs)),
+          children <-- visibleJobs.split(_.id)((id, _, jobSignal) => jobTbody(id, jobSignal, expandedJobs)),
           child <-- jobs.map(js =>
             if js.isEmpty then tbody(
               tr(td(colSpan := 6, cls := "p-3 text-muted small", "No imports yet — use “Sync all banks”, or a connection’s “Import tx”.")),
@@ -317,7 +325,22 @@ object BankingPage {
           ),
         ),
       ),
+      // Only worth a footer once something is actually hidden.
+      child <-- jobs.map(_.size).combineWith(showAll.signal).distinct.map { case (total, all) =>
+        if total <= importActivityRowCap then emptyNode
+        else
+          div(
+            cls := "card-footer py-1 text-center",
+            button(
+              tpe := "button",
+              cls := "btn btn-sm btn-link py-0 text-decoration-none",
+              if all then "Show fewer" else s"Show all $total runs",
+              onClick --> { _ => showAll.update(!_) },
+            ),
+          )
+      },
     )
+  }
 
   /** One job as its own <tbody>: a clickable summary row + (when expanded) a detail row with the per-account breakdown. */
   private def jobTbody(id: ImportJobId, job: Signal[ImportJob], expandedJobs: Var[Set[ImportJobId]]): HtmlElement =

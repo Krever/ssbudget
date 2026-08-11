@@ -113,6 +113,14 @@ object Endpoints {
         .in("periods" / "start")
         .out(jsonBody[Period])
         .errorOut(stringBody)
+
+    /** Per-period retrospective, newest first. `limit` caps how many periods are summarized (each costs a few aggregate queries). */
+    val summaries: Secured[Option[Int], List[PeriodSummary]] =
+      secureEndpoint.get
+        .in("periods" / "summaries")
+        .in(query[Option[Int]]("limit"))
+        .out(jsonBody[List[PeriodSummary]])
+        .errorOut(stringBody)
   }
 
   object savings {
@@ -512,6 +520,13 @@ object Endpoints {
 
       val startNew: Client[Unit, Period] =
         baseEndpoint.post.in("periods" / "start").out(jsonBody[Period]).errorOut(stringBody)
+
+      val summaries: Client[Option[Int], List[PeriodSummary]] =
+        baseEndpoint.get
+          .in("periods" / "summaries")
+          .in(query[Option[Int]]("limit"))
+          .out(jsonBody[List[PeriodSummary]])
+          .errorOut(stringBody)
     }
 
     object savings {

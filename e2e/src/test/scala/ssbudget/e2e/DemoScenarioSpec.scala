@@ -223,6 +223,10 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   private def findCard(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//span[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
+  /** One entry of the Dashboard's Plan, found by name. Re-found on each call, because Laminar replaces the block on every update. */
+  private def planEntry(name: String): WebElement =
+    driver.findElement(By.xpath(E2ESpec.planEntryXpath(name)))
+
   private def findCardByDiv(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//div[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
@@ -385,18 +389,18 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
 
     showPhase("📋 Planning Income & Expenses")
 
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
+    driver.get(baseUrl)
+    waitForPage("Dashboard")
     injectDemoStyles()
     pause()
 
-    val plannedCard = findCard("Planned Items")
+    val plannedCard = findCard("Plan")
 
     // Add income
     demoClickButton(plannedCard, "+ Income")
     pause(shortPause)
 
-    val incomeRow         = plannedCard.findElement(By.cssSelector("tr.table-primary"))
+    val incomeRow         = driver.findElement(By.id("plan-add-income"))
     val incomeNameInput   = incomeRow.findElement(By.cssSelector("input[type='text']"))
     demoClick(incomeNameInput)
     typeSlowly(incomeNameInput, "Monthly Salary")
@@ -415,10 +419,10 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     )
 
     expenses.foreach { case (name, amount) =>
-      demoClickButton(findCard("Planned Items"), "+ Expense")
+      demoClickButton(findCard("Plan"), "+ Expense")
       pause(shortPause)
 
-      val expenseRow     = findCard("Planned Items").findElement(By.cssSelector("tr.table-primary"))
+      val expenseRow     = driver.findElement(By.id("plan-add-expense"))
       val expNameInput   = expenseRow.findElement(By.cssSelector("input[type='text']"))
       demoClick(expNameInput)
       typeSlowly(expNameInput, name)
@@ -433,10 +437,10 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause()
 
     // Saving is planned like any other expense now: a planned item named after the bucket.
-    demoClickButton(findCard("Planned Items"), "+ Expense")
+    demoClickButton(findCard("Plan"), "+ Expense")
     pause(shortPause)
 
-    val savingRow       = findCard("Planned Items").findElement(By.cssSelector("tr.table-primary"))
+    val savingRow       = driver.findElement(By.id("plan-add-expense"))
     val savingNameInput = savingRow.findElement(By.cssSelector("input[type='text']"))
     demoClick(savingNameInput)
     typeSlowly(savingNameInput, "Emergency Fund top-up")
@@ -455,29 +459,23 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     injectDemoStyles()
 
     // Receive income first
-    val incomePayRow = findCard("Planned Items").findElement(
-      By.xpath(".//tr[.//td[contains(text(),'Monthly Salary')]]"),
-    )
-    demoClickButton(incomePayRow, "Receive")
+    demoClickButton(planEntry("Monthly Salary"), "Receive")
     pause(shortPause)
-    demoClickButton(findCard("Planned Items").findElement(By.cssSelector("tr.table-info")), "Receive")
+    // The editor opens inside the entry, in place of its state line.
+    demoClickButton(planEntry("Monthly Salary"), "Receive")
     pause()
 
     // Pay Rent in full, at the estimate
-    val rentRow = findCard("Planned Items").findElement(By.xpath(".//tr[.//td[contains(text(),'Rent')]]"))
-    demoClickButton(rentRow, "Pay")
+    demoClickButton(planEntry("Rent"), "Pay")
     pause(shortPause)
-    demoClickButton(findCard("Planned Items").findElement(By.cssSelector("tr.table-info")), "Pay")
+    demoClickButton(planEntry("Rent"), "Pay")
     pause()
 
     // Pay Utilities at the actual amount, which came in under the estimate — settling closes it at 320.50.
-    val utilitiesRow = findCard("Planned Items").findElement(
-      By.xpath(".//tr[.//td[contains(text(),'Utilities')]]"),
-    )
-    demoClickButton(utilitiesRow, "Pay")
+    demoClickButton(planEntry("Utilities"), "Pay")
     pause(shortPause)
 
-    val utilPayRow = findCard("Planned Items").findElement(By.cssSelector("tr.table-info"))
+    val utilPayRow = planEntry("Utilities")
     val utilInput  = utilPayRow.findElement(By.cssSelector("input[type='number']"))
     utilInput.clear()
     demoClick(utilInput)
@@ -487,13 +485,10 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause()
 
     // Part-pay the savings top-up: half now, the rest still counted as expected.
-    val savingPayRow = findCard("Planned Items").findElement(
-      By.xpath(".//tr[.//td[contains(text(),'Emergency Fund top-up')]]"),
-    )
-    demoClickButton(savingPayRow, "Pay")
+    demoClickButton(planEntry("Emergency Fund top-up"), "Pay")
     pause(shortPause)
 
-    val partPayRow = findCard("Planned Items").findElement(By.cssSelector("tr.table-info"))
+    val partPayRow = planEntry("Emergency Fund top-up")
     val partInput  = partPayRow.findElement(By.cssSelector("input[type='number']"))
     partInput.clear()
     demoClick(partInput)

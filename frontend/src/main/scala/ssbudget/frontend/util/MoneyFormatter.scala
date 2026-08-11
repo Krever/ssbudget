@@ -26,9 +26,12 @@ object MoneyFormatter {
   /** Format cents in the primary currency */
   def formatPrimary(cents: Long): HtmlElement = format(cents, primaryCurrencyVar.now())
 
+  /** Format cents as a bare amount, no currency code (e.g. "1,234.56") — for the left half of a pair whose code follows on the right. */
+  def formatBare(cents: Long): String = f"${cents / 100.0}%,.2f"
+
   /** Format money as a simple string (e.g., "1,234.56 PLN") */
   def formatSimple(money: Money): String = {
-    f"${money.amountCents / 100.0}%,.2f ${money.currency.code}"
+    s"${formatBare(money.amountCents)} ${money.currency.code}"
   }
 
   /** Format cents as a simple string */

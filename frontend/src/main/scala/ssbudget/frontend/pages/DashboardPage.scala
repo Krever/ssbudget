@@ -2,9 +2,10 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
-import ssbudget.frontend.components.{Badges, Loading}
+import ssbudget.frontend.components.{Badges, Loading, PlanCard}
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
+import ssbudget.frontend.{Page, Router}
 import ssbudget.shared.model.*
 
 import java.time.format.DateTimeFormatter
@@ -13,6 +14,10 @@ import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Failure, Success}
 
+/** The one working surface: the free-money headline, the arithmetic behind it, the balances it starts from, and the plan of everything still expected
+  * to move. The period is deliberately reduced to a hairline strip: it frames the numbers but is never the thing you came here to read (its detail
+  * and history live on the Periods page).
+  */
 object DashboardPage {
 
   private val dataService = DataService.instance
@@ -80,64 +85,103 @@ object DashboardPage {
           ),
         ),
       ),
+      headlineCard(),
       div(
         cls := "row g-3",
-        div(
-          cls   := "col-lg-5",
-          summaryPanel(),
-          periodCard(),
-        ),
-        div(cls := "col-lg-7", accountsQuickView()),
+        // Left: why the headline is what it is, and the balances behind it. Right: the plan — everything still expected to move.
+        div(cls := "col-lg-5", freeMoneyCard(), accountsCard()),
+        div(cls := "col-lg-7", PlanCard()),
       ),
     )
   }
 
-  private def summaryPanel(): HtmlElement = {
+  /** The whole budget as one equation, read left to right: what's in the accounts, what's actually free of it, and what that is per remaining day. */
+  private def headlineCard(): HtmlElement =
     div(
       cls := "card mb-3",
       div(
         cls := "card-body py-2",
-        // Quick summary row
         div(
-          cls  := "row align-items-center mb-2",
-          div(
-            cls   := "col-auto",
-            div(cls := "text-muted small", "BALANCE"),
-            div(cls := "fs-4 fw-bold font-monospace", MoneyFormatter.formatChild(dataService.bankAccountBalance)),
-          ),
-          div(cls := "col-auto fs-4 text-muted", "→"),
-          div(
-            cls   := "col-auto",
-            div(cls := "text-muted small", "FREE"),
-            div(cls := "fs-5 font-monospace text-success fw-bold", MoneyFormatter.formatChild(dataService.freeMoney)),
-          ),
-          div(cls := "col-auto fs-4 text-muted", "÷"),
-          div(
-            cls   := "col-auto",
-            div(
-              cls   := "text-muted small",
-              child.text <-- dataService.daysRemainingInPeriod.map(d => s"$d DAYS"),
-            ),
-            div(cls := "fs-5 font-monospace text-primary fw-bold", MoneyFormatter.formatChild(dataService.dailyBudget)),
-          ),
+          cls := "d-flex align-items-end flex-wrap gap-3",
+          figure("BALANCE", MoneyFormatter.formatChild(dataService.bankAccountBalance), "fw-bold"),
+          operator("→"),
+          figure("FREE", MoneyFormatter.formatChild(dataService.freeMoney), "fw-bold text-success"),
+          operator("÷"),
+          figure("DAYS LEFT", child.text <-- dataService.daysRemainingInPeriod.map(_.toString), ""),
+          operator("="),
+          figure("PER DAY", MoneyFormatter.formatChild(dataService.dailyBudget), "fw-bold text-primary"),
         ),
-        // Accounting breakdown
-        hr(cls := "my-2"),
-        div(
-          cls  := "font-monospace small",
-          accountingRow("Balance", dataService.bankAccountBalance, positive = true, bold = true),
-          accountingRow("+ Pending Income", dataService.pendingIncome, positive = true),
-          accountingRow("- Planned Expenses", dataService.unpaidPlannedExpenses, positive = false),
-          accountingRow("- Category Budgets", dataService.categoryBudgetsRemaining, positive = false),
-          hr(cls := "my-1"),
-          accountingRow("= Free Money", dataService.freeMoney, positive = true, bold = true),
-          hr(cls := "my-1"),
-          // Informational only (not part of Free Money): actual net change in savings balances this period (+saved / −withdrawn).
-          accountingRow("Savings this period", dataService.savingsPeriodChange, positive = true),
-        ),
+        periodStrip(),
       ),
     )
-  }
+
+  private def figure(label: String, value: Modifier[HtmlElement], valueCls: String): HtmlElement =
+    div(
+      div(cls := "text-muted small lh-1", label),
+      div(cls := s"fs-4 font-monospace lh-sm $valueCls", value),
+    )
+
+  private def operator(symbol: String): HtmlElement =
+    div(cls := "fs-5 text-muted pb-1", symbol)
+
+  /** The period, at the weight it deserves on this page: a hairline of progress and one line of text that links out to the full history. */
+  private def periodStrip(): HtmlElement =
+    div(
+      cls := "mt-2",
+      child <-- dataService.currentPeriod.map {
+        case Some(period) =>
+          div(
+            div(
+              cls       := "progress",
+              styleAttr := "height: 3px",
+              div(
+                cls  := "progress-bar bg-secondary",
+                role := "progressbar",
+                styleAttr <-- dataService.daysRemainingInPeriod.map(_ => s"width: ${Formatting.periodProgress(period.startDate)}%"),
+              ),
+            ),
+            div(
+              cls       := "d-flex justify-content-between small text-muted mt-1",
+              span(s"Period started ${Formatting.formatDate(period.startDate)} · day ${Formatting.daysElapsed(period.startDate) + 1}"),
+              a(
+                cls := "text-muted text-decoration-none",
+                Router.linkTo(Page.Periods),
+                child.text <-- dataService.daysRemainingInPeriod.map(d => s"$d days left · periods →"),
+              ),
+            ),
+          )
+        case None         =>
+          div(
+            cls := "d-flex justify-content-between small text-muted",
+            span("No active period"),
+            a(cls := "text-muted text-decoration-none", Router.linkTo(Page.Periods), "start one →"),
+          )
+      },
+    )
+
+  /** How the headline's FREE figure is arrived at — the same arithmetic spelled out line by line, so a surprising number can be traced to its cause.
+    */
+  private def freeMoneyCard(): HtmlElement =
+    div(
+      cls := "card mb-3",
+      div(cls := "card-header py-2", span("Free money")),
+      div(
+        cls   := "card-body py-2 font-monospace small",
+        accountingRow("Balance", dataService.bankAccountBalance, positive = true, bold = true),
+        // The same two figures the Plan card totals, under the same names: whichever kind of entry they came from doesn't change the arithmetic, and
+        // splitting them by provenance here only asked the reader to add up four numbers instead of two.
+        accountingRow("+ Still to receive", dataService.stillToReceive, positive = true),
+        accountingRow("- Still to pay", dataService.stillToPay, positive = false),
+        hr(cls := "my-1"),
+        accountingRow("= Free money", dataService.freeMoney, positive = true, bold = true),
+      ),
+      // Informational only (not part of Free Money): actual net change in savings balances this period (+saved / −withdrawn).
+      div(
+        cls   := "card-footer py-1 d-flex justify-content-between small text-muted",
+        span("Savings this period"),
+        span(cls := "font-monospace", MoneyFormatter.formatChild(dataService.savingsPeriodChange)),
+      ),
+    )
 
   private def accountingRow(label: String, amount: Signal[Money], positive: Boolean, bold: Boolean = false): HtmlElement = {
     val textCls = if positive then "text-success" else "text-danger"
@@ -149,48 +193,15 @@ object DashboardPage {
     )
   }
 
-  private def periodCard(): HtmlElement = {
+  private def accountsCard(): HtmlElement = {
     div(
-      cls := "card",
-      div(cls := "card-header py-2", "Current Period"),
-      div(
-        cls   := "card-body py-2",
-        child <-- dataService.currentPeriod.map {
-          case Some(period) =>
-            div(
-              div(
-                cls       := "d-flex justify-content-between mb-2",
-                span(s"Started: ${Formatting.formatDate(period.startDate)}"),
-                span(cls := "text-muted", child.text <-- dataService.daysRemainingInPeriod.map(d => s"$d days remaining")),
-              ),
-              div(
-                cls       := "progress",
-                styleAttr := "height: 8px",
-                div(
-                  cls  := "progress-bar",
-                  role := "progressbar",
-                  styleAttr <-- dataService.daysRemainingInPeriod.map { _ =>
-                    s"width: ${Formatting.periodProgress(period.startDate)}%"
-                  },
-                ),
-              ),
-            )
-          case None         => div(cls := "text-muted", "No active period")
-        },
-      ),
-    )
-  }
-
-  private def accountsQuickView(): HtmlElement = {
-    div(
-      cls := "card",
+      cls := "card mb-3",
       div(
         cls := "card-header py-2 d-flex justify-content-between align-items-center",
         div(
           cls := "d-flex align-items-baseline gap-2",
           span("Accounts"),
           child.maybe <-- lastSyncedAt.map(_.map(t => small(cls := "text-muted", s"synced ${Formatting.formatDateTime(t)}"))),
-          child.maybe <-- syncMessage.signal.map(_.map { case (ok, msg) => small(cls := (if ok then "text-success" else "text-danger"), msg) }),
         ),
         div(
           cls := "btn-group btn-group-sm",
@@ -232,6 +243,14 @@ object DashboardPage {
       ),
       div(
         cls := "card-body p-0",
+        // The sync outcome belongs next to the balances it changed, not squeezed into the header where a long message wraps the buttons.
+        child.maybe <-- syncMessage.signal.map(_.map { case (ok, msg) =>
+          div(
+            cls := s"px-2 py-1 small border-bottom d-flex justify-content-between ${if ok then "text-success" else "text-danger"}",
+            span(msg),
+            button(tpe := "button", cls := "btn-close btn-close-sm", onClick --> { _ => syncMessage.set(None) }),
+          )
+        }),
         table(
           cls := "table table-sm table-hover mb-0",
           thead(tr(th("Account"), th(cls := "text-end", "Balance"))),
@@ -253,10 +272,25 @@ object DashboardPage {
           ),
         ),
       ),
+      // Each bucket on its own line, then their sum: "Spending" alone is the headline's BALANCE, and naming the savings subtotal explicitly is what
+      // makes it obvious that the grand total is the two added together rather than savings-plus-something.
       div(
-        cls := "card-footer py-2 d-flex justify-content-between",
-        span(cls := "fw-bold", "Total"),
-        span(cls := "font-monospace fw-bold", MoneyFormatter.formatChild(dataService.totalBalance)),
+        cls := "card-footer py-2",
+        div(
+          cls := "d-flex justify-content-between",
+          span(cls := "fw-bold", "Spending"),
+          span(cls := "font-monospace fw-bold", MoneyFormatter.formatChild(dataService.bankAccountBalance)),
+        ),
+        div(
+          cls := "d-flex justify-content-between small text-muted",
+          span("Savings"),
+          span(cls := "font-monospace", MoneyFormatter.formatChild(dataService.savingsBalance)),
+        ),
+        div(
+          cls := "d-flex justify-content-between small text-muted border-top",
+          span("Total"),
+          span(cls := "font-monospace", MoneyFormatter.formatChild(dataService.totalBalance)),
+        ),
       ),
     )
   }
