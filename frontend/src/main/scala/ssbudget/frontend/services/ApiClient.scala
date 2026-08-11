@@ -148,23 +148,6 @@ class ApiClient(implicit ec: ExecutionContext) {
     }
   }
 
-  object savingsTransactions {
-    def listCurrent(): Future[List[SavingsTransaction]] = {
-      val request = interpreter.toRequest(Endpoints.client.savingsTransactions.listCurrent, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
-    }
-
-    def create(dto: CreateSavingsTransaction): Future[SavingsTransaction] = {
-      val request = interpreter.toRequest(Endpoints.client.savingsTransactions.create, Some(baseUri))
-      backend.send(request(dto)).map(handleResponse)
-    }
-
-    def delete(id: SavingsTransactionId): Future[Unit] = {
-      val request = interpreter.toRequest(Endpoints.client.savingsTransactions.delete, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
-    }
-  }
-
   object savings {
     def periodChange(): Future[Money] = {
       val request = interpreter.toRequest(Endpoints.client.savings.periodChange, Some(baseUri))
@@ -369,28 +352,6 @@ class ApiClient(implicit ec: ExecutionContext) {
     def overview(months: Option[Int]): Future[AnalyticsResponse] = {
       val request = interpreter.toRequest(Endpoints.client.analytics.overview, Some(baseUri))
       backend.send(request(months)).map(handleResponse)
-    }
-  }
-
-  object oneTimeExpenses {
-    def list(): Future[List[OneTimeExpense]] = {
-      val request = interpreter.toRequest(Endpoints.client.oneTimeExpenses.list, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
-    }
-
-    def create(dto: CreateOneTimeExpense): Future[OneTimeExpense] = {
-      val request = interpreter.toRequest(Endpoints.client.oneTimeExpenses.create, Some(baseUri))
-      backend.send(request(dto)).map(handleResponse)
-    }
-
-    def update(id: OneTimeExpenseId, dto: UpdateOneTimeExpense): Future[OneTimeExpense] = {
-      val request = interpreter.toRequest(Endpoints.client.oneTimeExpenses.update, Some(baseUri))
-      backend.send(request((id, dto))).map(handleResponse)
-    }
-
-    def delete(id: OneTimeExpenseId): Future[Unit] = {
-      val request = interpreter.toRequest(Endpoints.client.oneTimeExpenses.delete, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
     }
   }
 

@@ -148,7 +148,7 @@ class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAft
     val linkId = repos.bankConnections.findLinksByConnection(conn.id).unsafeRunSync().head.id
 
     // 3. Create an app account and link the bank account to it.
-    repos.accounts.create(Account(accountId, "Main PLN", Currency.PLN, AccountRole.Spending, 0L, None, BalanceSource.Manual, None)).unsafeRunSync()
+    repos.accounts.create(Account(accountId, "Main PLN", Currency.PLN, AccountRole.Spending, 0L, BalanceSource.Manual, None)).unsafeRunSync()
     banking.linkAccount(linkId, LinkAccountRequest(BankLinkTarget.Account(accountId))).unsafeRunSync() shouldBe a[Right[?, ?]]
 
     // 4. Sync pulls details + balances (WireMock) and mirrors the balance onto the account.

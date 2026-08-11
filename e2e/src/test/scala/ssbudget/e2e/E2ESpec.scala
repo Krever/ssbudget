@@ -189,7 +189,7 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   }
 
   /** Add a savings account */
-  protected def addSavingsAccount(name: String, targetAmount: Option[Int] = None): Unit = {
+  protected def addSavingsAccount(name: String): Unit = {
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
@@ -198,9 +198,6 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
 
     val addRow = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
-    targetAmount.foreach { amount =>
-      addRow.findElement(By.cssSelector("input[type='number']")).sendKeys(amount.toString)
-    }
     click(addRow, "Add")
     eventually(findCard("Savings Accounts").getText should include(name))
   }
@@ -235,18 +232,4 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     eventually(findCard("Planned Items").getText should include(name))
   }
 
-  /** Add an estimated expense */
-  protected def addEstimatedExpense(name: String, amount: Double): Unit = {
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
-
-    val card = findCard("Estimated Expenses")
-    click(card, "+ Add")
-
-    val addRow = card.findElement(By.cssSelector("tr.table-primary"))
-    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
-    addRow.findElement(By.cssSelector("input[type='number']")).sendKeys(amount.toString)
-    click(addRow, "Add")
-    eventually(findCard("Estimated Expenses").getText should include(name))
-  }
 }

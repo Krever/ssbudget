@@ -9,7 +9,6 @@ object Page {
   case object Budget          extends Page
   case object Accounts        extends Page
   case object Periods         extends Page
-  case object OneTimeExpenses extends Page
   case object Banking         extends Page
   case object BankingCallback extends Page
   case object Analytics       extends Page

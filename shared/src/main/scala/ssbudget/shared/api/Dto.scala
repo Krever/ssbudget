@@ -8,10 +8,9 @@ final case class CreateAccount(
     name: String,
     currency: Currency,
     role: AccountRole,
-    savingsTarget: Option[Long], // only meaningful for Savings accounts
 ) derives Codec.AsObject
 
-final case class UpdateAccount(name: String, currency: Currency, savingsTarget: Option[Long]) derives Codec.AsObject
+final case class UpdateAccount(name: String, currency: Currency) derives Codec.AsObject
 
 /** Set an account's balance directly. Rejected server-side unless the account's balanceSource is Manual. */
 final case class UpdateAccountBalance(newBalanceCents: Long) derives Codec.AsObject
@@ -30,13 +29,11 @@ final case class UpdateBudgetItem(
     currency: Currency,
 ) derives Codec.AsObject
 
-final case class PayBudgetItem(amountCents: Long) derives Codec.AsObject
-
-final case class CreateSavingsTransaction(accountId: AccountId, amount: Long, note: Option[String]) derives Codec.AsObject
-
-final case class CreateOneTimeExpense(name: String, amountCents: Long, currency: Currency, date: Option[java.time.Instant]) derives Codec.AsObject
-
-final case class UpdateOneTimeExpense(name: String, amountCents: Long, currency: Currency, date: java.time.Instant) derives Codec.AsObject
+/** Record a payment against a planned item in the current period. `amountCents` is ADDED to whatever was already paid this period, so instalments
+  * accumulate. `settle = true` closes the item (nothing more expected, whatever the estimate said); `false` records a part-payment and leaves the
+  * remainder outstanding.
+  */
+final case class PayBudgetItem(amountCents: Long, settle: Boolean) derives Codec.AsObject
 
 // Response DTOs
 final case class IdResponse(id: String) derives Codec.AsObject

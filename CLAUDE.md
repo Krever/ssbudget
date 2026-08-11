@@ -21,44 +21,41 @@ Think "Google Sheets for personal budget" not "enterprise dashboard with cards e
 - Ends when next paycheck arrives
 - All calculations are relative to current period
 
-### Expense Types
+### Budget Items
 
-1. **Planned Expenses** - Fixed monthly bills (rent, subscriptions, etc.)
-   - Have an estimated amount
-   - Get marked as "paid" with actual amount
-   - Unpaid ones contribute their estimate to predicted expenses
-   - Estimate can be: fixed value, last month's actual, or historical average
+**Planned Items** - anything you expect to move this period, expense or income (rent, subscriptions, salary, a savings top-up)
+- Have an estimated amount
+- Are paid in one go or in instalments: each payment ADDS to the period's paid total
+- `settled` is what closes an item — "nothing more expected this period", however little was actually paid. A bill that comes in
+  cheaper than its estimate settles at the lower amount instead of leaving a residual
+- Remaining (`estimate - paid`, or 0 once settled) is what feeds predicted expenses
+- There is deliberately no automatic scaling: an item is either expected in full, part-paid, or settled
 
-2. **Estimated Expenses** - Variable ongoing costs (groceries, fuel, etc.)
-   - Have a monthly estimate
-   - Never explicitly "paid" - consumed implicitly over time
-   - Scale with remaining period (10 days left = 1/3 of monthly estimate)
-   - Can toggle whether included in remaining balance calculation
+Variable spend (groceries, fuel) is **not** modelled here — it comes from **Category Budgets**, which derive expected spend from
+real bank transactions (Steady / Bill / Subscription, with a per-period manual override).
 
 ### Savings
 
-**Savings Accounts** - Buckets for accumulating money (emergency fund, vacation, etc.)
-- Have a currency and current balance
-- Balance is editable directly (for corrections/initial setup)
-- Can have an optional monthly target (planned savings amount)
-- Transactions (inflows/outflows) modify the balance
+**Savings Accounts** - buckets for accumulating money (emergency fund, vacation, etc.)
+- Have a currency and a current balance; excluded from spendable balance
+- Balance is editable directly (manual accounts) or driven by a bank sync
+- No targets and no ledger: to plan a contribution, add a **planned expense** named after the bucket
 
-**Savings Transactions** - Individual money movements
-- Positive = inflow (contributing to savings)
-- Negative = outflow (withdrawing from savings)
-- Can have multiple per period (e.g., +500, -100, -200)
-- Optional note for context
+`savingsPeriodChange` (current balance − balance at period start, from balance snapshots) is reported on the Dashboard as
+information only; it is not part of the free-money calculation.
 
 ### Key Calculation
 ```
-Free Money = Total Balance - Predicted Expenses - Remaining Savings
+Free Money = Spending Balance - Predicted Expenses + Pending Income
 Daily Budget = Free Money / Days Until Period End
 ```
 
 Where:
-- `Predicted Expenses = Sum(unpaid planned estimates) + Scaled(estimated expenses)`
-- `Remaining Savings = Sum(plannedMonthly - period contributions) for accounts with targets`
-- Period contributions = sum of transactions for current period per savings account
+- `Predicted Expenses = Sum(remaining per planned expense) + Sum(remaining per category budget)`
+- `Pending Income = Sum(remaining per planned income)`
+- `remaining` for a planned item = `0` if settled, else `max(0, estimate - paid so far)`
+- Savings is NOT subtracted: moving money to a savings bucket already lowers the spending balance, so reserving it again
+  would double-count
 
 ## Tech Stack
 
@@ -90,34 +87,30 @@ Where:
 ## Data Model (Conceptual)
 
 ```
-ExpenseDefinition:
-  - id, name, type (planned|estimated)
-  - estimateMode (fixed|lastMonth|average)
-  - fixedEstimate (optional)
-  - includeInBalance (for estimated type)
+BudgetItemDefinition (table: expense_definitions):
+  - id, name, itemType (planned_expense|planned_income)
+  - estimateMode (fixed|lastMonth|average)   -- vestigial; always Fixed in practice
+  - fixedEstimate (optional), currency
 
 Period:
   - id, startDate, endDate (nullable until closed)
 
-ExpenseRecord (for planned expenses):
-  - periodId, expenseDefId, paidAmount (nullable), paidDate
+ExpenseRecord (one per planned item per period):
+  - periodId, expenseDefId
+  - paidAmount (nullable, ACCUMULATED across instalments), paidAt (last payment)
+  - settled (no further payment expected this period; what closes the item)
 
 BalanceSnapshot:
-  - accountId, amount, currency, timestamp
+  - accountId, amount, currency, timestamp   -- append-only history
 
-Account:
-  - id, name, currency (PLN|EUR)
+Account (spending accounts and savings buckets, unified):
+  - id, name, currency
+  - role (spending|savings)
+  - balanceCents, balanceSource (manual|bank|card_group), balanceUpdatedAt
 
-SavingsAccount:
-  - id, name, currency (PLN|EUR)
-  - currentBalance (cents, editable directly)
-  - plannedMonthly (optional target per period)
-
-SavingsTransaction:
-  - id, accountId, periodId
-  - amount (positive = inflow/saving, negative = outflow/withdrawal)
-  - note (optional)
-  - createdAt
+Category / CategoryBudgetOverride:
+  - category: id, name, color, budgetType (steady|bill|subscription)
+  - override: (periodId, categoryId) -> remainingCents   -- per-period manual remaining
 
 ExchangeRate:
   - fromCurrency, toCurrency, rate, fetchedAt
@@ -286,7 +279,7 @@ This project uses incremental development across multiple Claude sessions:
 | HTTP client        | tapir-sttp-client         | Type-safe, shares endpoint defs with backend     |
 | Scala version      | 3.5.2                     | Scala 3.8.1 has Scala.js compiler bug (js.async) |
 | UI philosophy      | Spreadsheet-like          | Concise, direct edit, minimal clicks             |
-| Savings accounts   | Separate entity           | Different behavior from bank accounts (editable balance, targets) |
+| Savings accounts   | Same table, `role` flag   | Just buckets with a balance; excluded from spendable, no targets  |
 
 ## Laminar/Airstream Gotchas
 

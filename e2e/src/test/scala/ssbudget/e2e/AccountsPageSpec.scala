@@ -90,7 +90,6 @@ class AccountsPageSpec extends E2ESpec {
 
     val addRow = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("New Savings")
-    addRow.findElement(By.cssSelector("input[type='number']")).sendKeys("200")
     click(addRow, "Add")
 
     eventually(rows(savingsCard).size shouldBe (initialCount + 1))
@@ -109,8 +108,8 @@ class AccountsPageSpec extends E2ESpec {
     rows(savingsCard).size shouldBe initialCount
   }
 
-  it should "edit savings account" in {
-    addSavingsAccount("Edit Savings Test", Some(500))
+  it should "rename a savings account" in {
+    addSavingsAccount("Edit Savings Test")
 
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
@@ -122,12 +121,12 @@ class AccountsPageSpec extends E2ESpec {
     val editRow = savingsCard.findElement(By.cssSelector("tbody tr.table-warning"))
     editRow.isDisplayed shouldBe true
 
-    val targetInput = editRow.findElement(By.cssSelector("input[type='number']"))
-    targetInput.clear()
-    targetInput.sendKeys("999")
+    val nameInput = editRow.findElement(By.cssSelector("input[type='text']"))
+    nameInput.clear()
+    nameInput.sendKeys("Renamed Savings")
     click(editRow, "Save")
 
-    textShouldAppear(savingsCard, "999")
+    textShouldAppear(savingsCard, "Renamed Savings")
   }
 
   it should "delete savings account" in {

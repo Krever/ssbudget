@@ -128,14 +128,12 @@ object DashboardPage {
           accountingRow("Balance", dataService.bankAccountBalance, positive = true, bold = true),
           accountingRow("+ Pending Income", dataService.pendingIncome, positive = true),
           accountingRow("- Planned Expenses", dataService.unpaidPlannedExpenses, positive = false),
-          accountingRow("- Estimated Expenses", dataService.scaledEstimatedExpenses, positive = false),
           accountingRow("- Category Budgets", dataService.categoryBudgetsRemaining, positive = false),
           hr(cls := "my-1"),
           accountingRow("= Free Money", dataService.freeMoney, positive = true, bold = true),
           hr(cls := "my-1"),
           // Informational only (not part of Free Money): actual net change in savings balances this period (+saved / −withdrawn).
           accountingRow("Savings this period", dataService.savingsPeriodChange, positive = true),
-          accountingRow("One-Time Expenses", dataService.periodOneTimeExpensesTotal, positive = false),
         ),
       ),
     )

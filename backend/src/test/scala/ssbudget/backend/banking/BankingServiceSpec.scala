@@ -36,7 +36,7 @@ class BankingServiceSpec extends RepositorySpec {
   }
 
   private def account(id: String, currency: Currency = Currency.PLN): Account =
-    Account(AccountId(id), s"Account $id", currency, AccountRole.Spending, 0L, None, BalanceSource.Manual, Some(now))
+    Account(AccountId(id), s"Account $id", currency, AccountRole.Spending, 0L, BalanceSource.Manual, Some(now))
 
   private def activeConnection(repos: Repositories, id: String): IO[Unit] =
     repos.bankConnections.create(

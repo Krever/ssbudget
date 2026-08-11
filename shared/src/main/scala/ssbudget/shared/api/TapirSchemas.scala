@@ -11,8 +11,6 @@ object TapirSchemas {
   given Schema[PeriodId]             = Schema.string.map[PeriodId]((s: String) => Some(PeriodId(s)))(_.value)
   given Schema[BalanceSnapshotId]    = Schema.string.map[BalanceSnapshotId]((s: String) => Some(BalanceSnapshotId(s)))(_.value)
   given Schema[ExpenseRecordId]      = Schema.string.map[ExpenseRecordId]((s: String) => Some(ExpenseRecordId(s)))(_.value)
-  given Schema[SavingsTransactionId] = Schema.string.map[SavingsTransactionId]((s: String) => Some(SavingsTransactionId(s)))(_.value)
-  given Schema[OneTimeExpenseId]     = Schema.string.map[OneTimeExpenseId]((s: String) => Some(OneTimeExpenseId(s)))(_.value)
   given Schema[BankConnectionId]     = Schema.string.map[BankConnectionId]((s: String) => Some(BankConnectionId(s)))(_.value)
   given Schema[BankAccountLinkId]    = Schema.string.map[BankAccountLinkId]((s: String) => Some(BankAccountLinkId(s)))(_.value)
   given Schema[CardGroupId]          = Schema.string.map[CardGroupId]((s: String) => Some(CardGroupId(s)))(_.value)
@@ -24,7 +22,6 @@ object TapirSchemas {
   // Enums and value types
   given Schema[Currency]           = Schema.string.map[Currency]((s: String) => Some(Currency(s)))(_.code)
   given Schema[BudgetItemType]     = Schema.derivedEnumeration[BudgetItemType].defaultStringBased
-  given Schema[EstimateMode]       = Schema.derivedEnumeration[EstimateMode].defaultStringBased
   given Schema[ConnectionStatus]   = Schema.derivedEnumeration[ConnectionStatus].defaultStringBased
   given Schema[AccountRole]        = Schema.derivedEnumeration[AccountRole].defaultStringBased
   given Schema[BalanceSource]      = Schema.derivedEnumeration[BalanceSource].defaultStringBased
@@ -48,8 +45,6 @@ object TapirSchemas {
   given Schema[BudgetItemDefinition] = Schema.derived[BudgetItemDefinition]
   given Schema[ExpenseRecord]        = Schema.derived[ExpenseRecord]
   given Schema[Period]               = Schema.derived[Period]
-  given Schema[SavingsTransaction]   = Schema.derived[SavingsTransaction]
-  given Schema[OneTimeExpense]       = Schema.derived[OneTimeExpense]
   given Schema[ExchangeRate]         = Schema.derived[ExchangeRate]
   given Schema[Money]                = Schema.derived[Money]
   given Schema[BankConnection]       = Schema.derived[BankConnection]
@@ -59,16 +54,13 @@ object TapirSchemas {
   given Schema[BankTransaction]      = Schema.derived[BankTransaction]
 
   // DTO types
-  given Schema[CreateAccount]            = Schema.derived[CreateAccount]
-  given Schema[UpdateAccount]            = Schema.derived[UpdateAccount]
-  given Schema[UpdateAccountBalance]     = Schema.derived[UpdateAccountBalance]
-  given Schema[CreateBudgetItem]         = Schema.derived[CreateBudgetItem]
-  given Schema[UpdateBudgetItem]         = Schema.derived[UpdateBudgetItem]
-  given Schema[PayBudgetItem]            = Schema.derived[PayBudgetItem]
-  given Schema[CreateSavingsTransaction] = Schema.derived[CreateSavingsTransaction]
-  given Schema[IdResponse]               = Schema.derived[IdResponse]
-  given Schema[CreateOneTimeExpense]     = Schema.derived[CreateOneTimeExpense]
-  given Schema[UpdateOneTimeExpense]     = Schema.derived[UpdateOneTimeExpense]
+  given Schema[CreateAccount]        = Schema.derived[CreateAccount]
+  given Schema[UpdateAccount]        = Schema.derived[UpdateAccount]
+  given Schema[UpdateAccountBalance] = Schema.derived[UpdateAccountBalance]
+  given Schema[CreateBudgetItem]     = Schema.derived[CreateBudgetItem]
+  given Schema[UpdateBudgetItem]     = Schema.derived[UpdateBudgetItem]
+  given Schema[PayBudgetItem]        = Schema.derived[PayBudgetItem]
+  given Schema[IdResponse]           = Schema.derived[IdResponse]
 
   // Banking DTOs
   given Schema[Aspsp]                      = Schema.derived[Aspsp]

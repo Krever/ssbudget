@@ -113,7 +113,7 @@ object AccountsPage {
       () => {
         val name = Option(nameRef).map(_.value.trim).getOrElse("")
         if name.nonEmpty then dataService
-          .updateAccount(account.id, name, currencyValue.now(), account.savingsTarget)
+          .updateAccount(account.id, name, currencyValue.now())
           .map(_ => editingAccountId.set(None))
         else scala.concurrent.Future.successful(())
       },
@@ -221,7 +221,7 @@ object AccountsPage {
         table(
           cls := "table table-sm table-hover mb-0",
           thead(
-            tr(th("Account"), th("Currency"), th("Balance"), th("Target/mo"), th("Actions")),
+            tr(th("Account"), th("Currency"), th("Balance"), th("Actions")),
           ),
           tbody(
             children <-- dataService.savingsAccounts
@@ -241,7 +241,7 @@ object AccountsPage {
       ),
       div(
         cls := "card-footer py-2 text-muted small",
-        "Savings transactions are managed from the Budget page",
+        "Balances are edited from the Dashboard. To plan a contribution, add a planned expense on the Budget page.",
       ),
     )
   }
@@ -250,7 +250,6 @@ object AccountsPage {
     if editingId.contains(account.id) then editSavingsRow(account)
     else {
       val balanceEl = MoneyFormatter.format(account.balanceCents, account.currency)
-      val targetEl  = account.savingsTarget.fold[HtmlElement](span("-"))(t => MoneyFormatter.format(t, account.currency))
       val actions   =
         if account.isManual then td(
           button(cls := "btn btn-outline-secondary btn-sm", "Edit", onClick --> { _ => editingSavingsId.set(Some(account.id)) }),
@@ -261,28 +260,21 @@ object AccountsPage {
         td(account.name, Badges.source(account.balanceSource)),
         td(span(cls := "badge text-bg-success", account.currency.code)),
         td(cls := "font-monospace", balanceEl),
-        td(cls := "font-monospace text-muted", targetEl),
         actions,
       )
     }
   }
 
   private def editSavingsRow(account: Account): HtmlElement = {
-    var nameRef: org.scalajs.dom.html.Input   = null
-    var targetRef: org.scalajs.dom.html.Input = null
-    val currencyValue                         = Var(account.currency)
+    var nameRef: org.scalajs.dom.html.Input = null
+    val currencyValue                       = Var(account.currency)
 
     val saveAction = Loading.actionGroup(
       "Save",
       () => {
-        val name      = Option(nameRef).map(_.value.trim).getOrElse("")
-        val targetTxt = Option(targetRef).map(_.value.trim).getOrElse("")
-        if name.nonEmpty then {
-          val targetCents = if targetTxt.isEmpty then None else Some((targetTxt.toDoubleOption.getOrElse(0.0) * 100).toLong)
-          dataService.updateAccount(account.id, name, currencyValue.now(), targetCents).map(_ => editingSavingsId.set(None))
-        } else {
-          scala.concurrent.Future.successful(())
-        }
+        val name = Option(nameRef).map(_.value.trim).getOrElse("")
+        if name.nonEmpty then dataService.updateAccount(account.id, name, currencyValue.now()).map(_ => editingSavingsId.set(None))
+        else scala.concurrent.Future.successful(())
       },
       "btn btn-primary btn-sm",
     )
@@ -312,17 +304,6 @@ object AccountsPage {
       ),
       td(cls := "text-muted small", "Balance: Dashboard"),
       td(
-        input(
-          cls          := "form-control form-control-sm text-end",
-          tpe          := "number",
-          stepAttr     := "0.01",
-          placeholder  := "No target",
-          defaultValue := account.savingsTarget.fold("")(t => (t / 100.0).toString),
-          onMountCallback(ctx => targetRef = ctx.thisNode.ref),
-          saveAction.onEnter,
-        ),
-      ),
-      td(
         div(
           cls := "btn-group btn-group-sm",
           saveAction.btn,
@@ -338,21 +319,15 @@ object AccountsPage {
   }
 
   private def addSavingsRow(currencies: List[Currency], primaryCurrency: Currency): HtmlElement = {
-    var nameRef: org.scalajs.dom.html.Input   = null
-    var targetRef: org.scalajs.dom.html.Input = null
-    val currencyValue                         = Var(primaryCurrency)
+    var nameRef: org.scalajs.dom.html.Input = null
+    val currencyValue                       = Var(primaryCurrency)
 
     val addAction = Loading.actionGroup(
       "Add",
       () => {
-        val name      = Option(nameRef).map(_.value.trim).getOrElse("")
-        val targetTxt = Option(targetRef).map(_.value.trim).getOrElse("")
-        if name.nonEmpty then {
-          val targetCents = if targetTxt.isEmpty then None else Some((targetTxt.toDoubleOption.getOrElse(0.0) * 100).toLong)
-          dataService.addSavingsAccount(name, currencyValue.now(), targetCents).map(_ => addingSavings.set(false))
-        } else {
-          scala.concurrent.Future.successful(())
-        }
+        val name = Option(nameRef).map(_.value.trim).getOrElse("")
+        if name.nonEmpty then dataService.addSavingsAccount(name, currencyValue.now()).map(_ => addingSavings.set(false))
+        else scala.concurrent.Future.successful(())
       },
       "btn btn-success btn-sm",
     )
@@ -377,16 +352,6 @@ object AccountsPage {
         ),
       ),
       td(cls := "text-muted small", "Balance: 0"),
-      td(
-        input(
-          cls         := "form-control form-control-sm",
-          tpe         := "number",
-          stepAttr    := "0.01",
-          placeholder := "Target/mo",
-          onMountCallback(ctx => targetRef = ctx.thisNode.ref),
-          addAction.onEnter,
-        ),
-      ),
       td(
         div(
           cls := "btn-group btn-group-sm",

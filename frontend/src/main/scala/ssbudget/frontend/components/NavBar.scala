@@ -40,7 +40,6 @@ object NavBar {
             navItem(Page.Budget, "Budget", isOpen),
             navItem(Page.Accounts, "Accounts", isOpen),
             navItem(Page.Periods, "Periods", isOpen),
-            navItem(Page.OneTimeExpenses, "One-Time", isOpen),
             navItem(Page.Banking, "Banking", isOpen),
             navItem(Page.Transactions(), "Transactions", isOpen),
             navItem(Page.Analytics, "Analytics", isOpen),

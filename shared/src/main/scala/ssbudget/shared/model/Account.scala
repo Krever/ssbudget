@@ -12,7 +12,7 @@ object AccountId extends StringId[AccountId]
 /** What an account is used for in the budget. */
 enum AccountRole {
   case Spending // a spendable account; its balance counts toward the free-money calculation
-  case Savings  // a savings bucket; excluded from spendable balance, may have a monthly target
+  case Savings  // a savings bucket; excluded from spendable balance
 }
 
 object AccountRole {
@@ -55,7 +55,7 @@ object BalanceSource {
 }
 
 /** A money container: a spending account or a savings bucket. The current balance and its provenance live here uniformly; [[BalanceSnapshot]] rows
-  * are append-only history.
+  * are append-only history. Intended saving is modelled as a planned expense, not as a target on the bucket.
   */
 final case class Account(
     id: AccountId,
@@ -63,7 +63,6 @@ final case class Account(
     currency: Currency,
     role: AccountRole,
     balanceCents: Long,               // current balance
-    savingsTarget: Option[Long],      // monthly savings target in cents; only meaningful when role == Savings
     balanceSource: BalanceSource,     // Manual = user-editable; Bank/CardGroup = driven externally, read-only
     balanceUpdatedAt: Option[Instant], // when the balance was last set
 ) derives Codec.AsObject {

@@ -127,7 +127,7 @@ object BankingPage {
 
     def createAndLink(linkId: BankAccountLinkId, defaultName: String, currency: Currency): Unit = {
       errorVar.set(None)
-      apiClient.accounts.create(CreateAccount(defaultName, currency, AccountRole.Spending, None)).onComplete {
+      apiClient.accounts.create(CreateAccount(defaultName, currency, AccountRole.Spending)).onComplete {
         case Success(account) =>
           loadAccounts()
           link(linkId, BankLinkTarget.Account(account.id))
@@ -168,7 +168,7 @@ object BankingPage {
 
     def createAndLinkGroup(groupId: CardGroupId, name: String, currency: Currency): Unit = {
       errorVar.set(None)
-      apiClient.accounts.create(CreateAccount(name, currency, AccountRole.Spending, None)).onComplete {
+      apiClient.accounts.create(CreateAccount(name, currency, AccountRole.Spending)).onComplete {
         case Success(account) =>
           loadAccounts()
           linkGroup(groupId, Some(account.id))

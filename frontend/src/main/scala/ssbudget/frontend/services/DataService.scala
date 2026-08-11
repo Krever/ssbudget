@@ -19,13 +19,17 @@ trait DataService {
   def updateAccountBalance(accountId: AccountId, amountCents: Long): Future[Unit] // manual-source accounts only
 
   // Budget items
-  def budgetItems: Signal[List[BudgetItemDefinition]]
-  def budgetRecords: Signal[List[ExpenseRecord]]
   def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long, currency: Currency): Future[Unit]
   def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long, currency: Currency): Future[Unit]
   def deleteBudgetItem(itemId: ExpenseDefId): Future[Unit]
-  def markBudgetItemAsPaid(itemId: ExpenseDefId, amountCents: Long): Future[Unit]
-  def unmarkBudgetItemAsPaid(itemId: ExpenseDefId): Future[Unit]
+
+  /** Record a payment against a planned item this period. `amountCents` ADDS to what's already paid; `settle = true` closes the item, `false` leaves
+    * the remainder outstanding.
+    */
+  def payBudgetItem(itemId: ExpenseDefId, amountCents: Long, settle: Boolean): Future[Unit]
+
+  /** Undo all payment progress for the item this period. */
+  def resetBudgetItemPayment(itemId: ExpenseDefId): Future[Unit]
 
   // Periods
   def periods: Signal[List[Period]]
@@ -44,29 +48,15 @@ trait DataService {
   def setPrimaryCurrency(code: String): Future[Unit]
   def refreshExchangeRates(): Future[Unit]
 
-  // Savings accounts (role == Savings)
+  // Savings accounts (role == Savings). Buckets with a balance only — intended saving is modelled as a planned expense.
   def savingsAccounts: Signal[List[Account]]
-  def savingsTransactions: Signal[List[SavingsTransaction]]
-  def currentPeriodSavingsTransactions: Signal[List[SavingsTransaction]]
-  def addSavingsAccount(name: String, currency: Currency, savingsTarget: Option[Long]): Future[Unit]
-  def updateAccount(id: AccountId, name: String, currency: Currency, savingsTarget: Option[Long]): Future[Unit]
-  def addSavingsTransaction(accountId: AccountId, amount: Long, note: Option[String]): Future[Unit]
-  def deleteSavingsTransaction(id: SavingsTransactionId): Future[Unit]
-  def remainingSavingsTarget: Signal[Money]     // planned - actual contributions (Planned Savings card only; no longer in free money)
-  def periodSavingsTotal: Signal[Money]         // cumulative logged savings transactions in current period
-  def savingsPeriodChange: Signal[Money]        // actual net savings-balance change this period (current - period start); informational
-  def periodOneTimeExpensesTotal: Signal[Money] // cumulative one-time expenses in current period
-
-  // One-time expenses
-  def oneTimeExpenses: Signal[List[OneTimeExpense]]
-  def addOneTimeExpense(name: String, amountCents: Long, currency: Currency, date: Option[java.time.Instant]): Future[Unit]
-  def updateOneTimeExpense(id: OneTimeExpenseId, name: String, amountCents: Long, currency: Currency, date: java.time.Instant): Future[Unit]
-  def deleteOneTimeExpense(id: OneTimeExpenseId): Future[Unit]
+  def addSavingsAccount(name: String, currency: Currency): Future[Unit]
+  def updateAccount(id: AccountId, name: String, currency: Currency): Future[Unit]
+  def savingsPeriodChange: Signal[Money] // actual net savings-balance change this period (current - period start); informational
 
   // Derived signals
   def currentPeriod: Signal[Option[Period]]
   def plannedExpenses: Signal[List[BudgetItemDefinition]]
-  def estimatedExpenses: Signal[List[BudgetItemDefinition]]
   def plannedIncomes: Signal[List[BudgetItemDefinition]]
   def currentPeriodRecords: Signal[List[ExpenseRecord]]
 
@@ -88,16 +78,34 @@ trait DataService {
     */
   def categoryPeriodTransactions(categoryId: CategoryId, limit: Int): Future[TransactionListResponse]
 
-  def unpaidPlannedExpenses: Signal[Money]
-  def scaledEstimatedExpenses: Signal[Money]
-  def pendingIncome: Signal[Money]
-  def predictedExpenses: Signal[Money]
   def freeMoney: Signal[Money]          // bankAccountBalance - predicted expenses + pending income (savings excluded)
   def availableNow: Signal[Money]       // bankAccountBalance - unpaid planned only (conservative estimate)
   def dailyBudget: Signal[Money]
   def bankAccountBalance: Signal[Money] // only bank accounts, not savings
   def totalBalance: Signal[Money]       // all accounts including savings (for accounts table footer)
   def daysRemainingInPeriod: Signal[Int]
+
+  /** Σ of what's still expected across `items`: per item, its estimate minus what's already been paid this period, zero once settled. Concrete on the
+    * trait so the real service and the mock can't disagree about the rule that drives free money.
+    */
+  private def remainingOn(items: Signal[List[BudgetItemDefinition]]): Signal[Money] =
+    items
+      .combineWith(currentPeriodRecords)
+      .combineWith(exchangeRates)
+      .combineWith(primaryCurrency)
+      .map { case (items, records, rates, primary) =>
+        val amounts = items.map { item =>
+          val record = records.find(_.expenseDefId == item.id)
+          Money(ExpenseRecord.remainingFor(record, item.estimateCents), item.currency)
+        }
+        DataService.sumInPrimary(amounts, rates, primary)
+      }
+
+  /** Σ remaining per planned expense — what still has to come out of the balance before the next paycheck. */
+  final def unpaidPlannedExpenses: Signal[Money] = remainingOn(plannedExpenses)
+
+  /** Σ remaining per planned income — what is still expected to come in. */
+  final def pendingIncome: Signal[Money] = remainingOn(plannedIncomes)
 }
 
 object DataService {
@@ -114,4 +122,15 @@ object DataService {
   def upsertById[A, K](xs: List[A], item: A)(key: A => K): List[A] =
     if xs.exists(a => key(a) == key(item)) then xs.map(a => if key(a) == key(item) then item else a)
     else xs :+ item
+
+  /** Total `amounts` in `primary`, converting anything else at the latest rate (falling back to 1:1 when a rate is missing). */
+  def sumInPrimary(amounts: Seq[Money], rates: Map[Currency, Double], primary: Currency): Money = {
+    val total = amounts.foldLeft(0L) { (acc, money) =>
+      val converted =
+        if money.currency == primary then money.amountCents
+        else rates.get(money.currency).map(rate => (money.amountCents * rate).toLong).getOrElse(money.amountCents)
+      acc + converted
+    }
+    Money(total, primary)
+  }
 }

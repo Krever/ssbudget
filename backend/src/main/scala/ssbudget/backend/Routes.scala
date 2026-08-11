@@ -67,16 +67,8 @@ object Routes {
       // Periods
       route(Endpoints.periods.list)(_ => repos.periods.findAll.map(Right(_))),
       route(Endpoints.periods.startNew)(_ => startNewPeriod(repos)),
-      // Savings transactions
-      route(Endpoints.savingsTransactions.listCurrent)(_ => listCurrentPeriodSavingsTransactions(repos)),
-      route(Endpoints.savingsTransactions.create)(createSavingsTransaction(repos)),
-      route(Endpoints.savingsTransactions.delete)(deleteSavingsTransaction(repos)),
+      // Savings
       route(Endpoints.savings.periodChange)(_ => savingsPeriodChange(repos)),
-      // One-time expenses
-      route(Endpoints.oneTimeExpenses.list)(_ => repos.oneTimeExpenses.findAll.map(Right(_))),
-      route(Endpoints.oneTimeExpenses.create)(createOneTimeExpense(repos)),
-      route(Endpoints.oneTimeExpenses.update) { case (id, dto) => updateOneTimeExpense(repos)(id, dto) },
-      route(Endpoints.oneTimeExpenses.delete)(deleteOneTimeExpense(repos)),
       // Exchange rates (all rates to primary currency)
       route(Endpoints.exchangeRates.getAll)(_ => getAllExchangeRates(repos)),
       // Currency settings
@@ -144,17 +136,10 @@ object Routes {
     } yield Right(records)
   }
 
-  private def listCurrentPeriodSavingsTransactions(repos: Repositories): Result[List[SavingsTransaction]] = {
-    for {
-      currentPeriod <- repos.periods.findCurrent
-      txns          <- currentPeriod.fold(IO.pure(List.empty[SavingsTransaction]))(p => repos.savingsTransactions.findByPeriodId(p.id))
-    } yield Right(txns)
-  }
-
   private def createAccount(repos: Repositories)(dto: CreateAccount): Result[Account] = {
     val accountId = AccountId(UUID.randomUUID().toString)
     val now       = Instant.now()
-    val account   = Account(accountId, dto.name, dto.currency, dto.role, 0L, dto.savingsTarget, BalanceSource.Manual, Some(now))
+    val account   = Account(accountId, dto.name, dto.currency, dto.role, 0L, BalanceSource.Manual, Some(now))
     repos.accounts.create(account).as(Right(account))
   }
 
@@ -163,7 +148,7 @@ object Routes {
       existingOpt <- repos.accounts.findById(id)
       result      <- existingOpt match {
                        case Some(existing) =>
-                         val updated = existing.copy(name = dto.name, currency = dto.currency, savingsTarget = dto.savingsTarget)
+                         val updated = existing.copy(name = dto.name, currency = dto.currency)
                          repos.accounts.update(updated).as(Right(updated))
                        case None           => IO.pure(Left(s"Account not found: ${id.value}"))
                      }
@@ -196,7 +181,6 @@ object Routes {
                   case _                      =>
                     for {
                       _ <- repos.balanceSnapshots.deleteByAccountId(id)
-                      _ <- repos.savingsTransactions.deleteByAccountId(id)
                       _ <- repos.accounts.delete(id)
                     } yield Right(())
                 }
@@ -205,18 +189,18 @@ object Routes {
 
   private def createBudgetItem(repos: Repositories)(dto: CreateBudgetItem): Result[BudgetItemDefinition] = {
     val itemId = ExpenseDefId(UUID.randomUUID().toString)
-    val item   = BudgetItemDefinition(itemId, dto.name, dto.itemType, EstimateMode.Fixed, Some(dto.estimateCents), dto.currency)
+    val item   = BudgetItemDefinition(itemId, dto.name, dto.itemType, dto.estimateCents, dto.currency)
 
     for {
       _             <- repos.expenseDefinitions.create(item)
-      // If it's a planned expense or income, create an expense record for the current period
+      // Open a record for the current period so the item can be paid straight away
       currentPeriod <- repos.periods.findCurrent
       _             <- currentPeriod match {
-                         case Some(period) if dto.itemType == BudgetItemType.PlannedExpense || dto.itemType == BudgetItemType.PlannedIncome =>
+                         case Some(period) =>
                            val recordId = ExpenseRecordId(UUID.randomUUID().toString)
-                           val record   = ExpenseRecord(recordId, period.id, itemId, None, None)
+                           val record   = ExpenseRecord(recordId, period.id, itemId, None, None, settled = false)
                            repos.expenseRecords.create(record)
-                         case _                                                                                                             => IO.unit
+                         case None         => IO.unit
                        }
     } yield Right(item)
   }
@@ -227,7 +211,7 @@ object Routes {
       result      <- existingOpt match {
                        case Some(existing) =>
                          val updated =
-                           existing.copy(name = dto.name, itemType = dto.itemType, fixedEstimate = Some(dto.estimateCents), currency = dto.currency)
+                           existing.copy(name = dto.name, itemType = dto.itemType, estimateCents = dto.estimateCents, currency = dto.currency)
                          repos.expenseDefinitions.update(updated).as(Right(updated))
                        case None           =>
                          IO.pure(Left(s"Budget item not found: ${id.value}"))
@@ -243,6 +227,9 @@ object Routes {
     } yield Right(())
   }
 
+  /** Record a payment against a planned item in the current period. The amount ADDS to what's already been paid, so paying in instalments
+    * accumulates; `settle` is what closes the item (see [[PayBudgetItem]]).
+    */
   private def payExpenseRecord(repos: Repositories)(expenseDefId: ExpenseDefId, dto: PayBudgetItem): Result[ExpenseRecord] = {
     for {
       currentPeriod <- repos.periods.findCurrent
@@ -252,12 +239,8 @@ object Routes {
                              recordOpt <- repos.expenseRecords.findByPeriodAndExpense(period.id, expenseDefId)
                              record    <- recordOpt match {
                                             case Some(record) =>
-                                              val now = Instant.now()
-                                              repos.expenseRecords
-                                                .markAsPaid(record.id, dto.amountCents, now)
-                                                .as(
-                                                  record.copy(paidAmount = Some(dto.amountCents), paidAt = Some(now)),
-                                                )
+                                              val updated = record.withPayment(dto.amountCents, Instant.now(), dto.settle)
+                                              repos.expenseRecords.savePayment(updated).as(updated)
                                             case None         =>
                                               IO.raiseError(
                                                 new Exception(s"Expense record not found for period ${period.id.value} and expense ${expenseDefId.value}"),
@@ -270,6 +253,7 @@ object Routes {
     } yield result
   }
 
+  /** Undo all payment progress for the current period: back to nothing paid, nothing settled. */
   private def unpayExpenseRecord(repos: Repositories)(expenseDefId: ExpenseDefId): Result[ExpenseRecord] = {
     for {
       currentPeriod <- repos.periods.findCurrent
@@ -279,13 +263,8 @@ object Routes {
                              recordOpt <- repos.expenseRecords.findByPeriodAndExpense(period.id, expenseDefId)
                              record    <- recordOpt match {
                                             case Some(record) =>
-                                              // Set paid_amount and paid_at to NULL
-                                              val updated = record.copy(paidAmount = None, paidAt = None)
-                                              // We need to update the record - let's use markAsPaid with special handling
-                                              // Actually, we need to add an unpay method to the repository
-                                              // For now, we'll delete and recreate
-                                              repos.expenseRecords.delete(record.id) *>
-                                                repos.expenseRecords.create(updated).as(updated)
+                                              val reset = record.cleared
+                                              repos.expenseRecords.savePayment(reset).as(reset)
                                             case None         =>
                                               IO.raiseError(new Exception(s"Expense record not found"))
                                           }
@@ -307,46 +286,14 @@ object Routes {
       _             <- currentPeriod.fold(IO.unit)(p => repos.periods.close(p.id, now))
       // Create new period
       _             <- repos.periods.create(newPeriod)
-      // Create expense records for all planned expenses and incomes
+      // Every budget item is a planned item (expense or income), so each one gets a fresh record for the new period.
       budgetItems   <- repos.expenseDefinitions.findAll
-      plannedItems   = budgetItems.filter(i => i.itemType == BudgetItemType.PlannedExpense || i.itemType == BudgetItemType.PlannedIncome)
-      _             <- plannedItems.traverse { item =>
+      _             <- budgetItems.traverse { item =>
                          val recordId = ExpenseRecordId(UUID.randomUUID().toString)
-                         val record   = ExpenseRecord(recordId, newPeriodId, item.id, None, None)
+                         val record   = ExpenseRecord(recordId, newPeriodId, item.id, None, None, settled = false)
                          repos.expenseRecords.create(record)
                        }
     } yield Right(newPeriod)
-  }
-
-  private def createSavingsTransaction(repos: Repositories)(dto: CreateSavingsTransaction): Result[SavingsTransaction] = {
-    for {
-      currentPeriod <- repos.periods.findCurrent
-      accountOpt    <- repos.accounts.findById(dto.accountId)
-      result        <- (currentPeriod, accountOpt) match {
-                         case (Some(period), Some(account)) if account.role == AccountRole.Savings =>
-                           val txnId = SavingsTransactionId(UUID.randomUUID().toString)
-                           val now   = Instant.now()
-                           val txn   = SavingsTransaction(txnId, dto.accountId, period.id, dto.amount, dto.note, now)
-                           // Savings transactions are informational only; they never modify the account balance.
-                           repos.savingsTransactions.create(txn).as(Right(txn))
-                         case (Some(_), Some(_))                                                   =>
-                           IO.pure(Left(s"Account is not a savings account: ${dto.accountId.value}"))
-                         case (None, _)                                                            =>
-                           IO.pure(Left("No current period found"))
-                         case (_, None)                                                            =>
-                           IO.pure(Left(s"Savings account not found: ${dto.accountId.value}"))
-                       }
-    } yield result
-  }
-
-  private def deleteSavingsTransaction(repos: Repositories)(id: SavingsTransactionId): Result[Unit] = {
-    for {
-      txnOpt <- repos.savingsTransactions.findById(id)
-      result <- txnOpt match {
-                  case Some(_) => repos.savingsTransactions.delete(id).as(Right(()))
-                  case None    => IO.pure(Left(s"Savings transaction not found: ${id.value}"))
-                }
-    } yield result
   }
 
   /** Net change in savings-account balances over the current period: Σ (current balance − balance as of the period start) across savings accounts,
@@ -381,31 +328,6 @@ object Routes {
         if cur == primary then cents else rateMap.get(cur).map(_.convert(Money(cents, cur)).amountCents).getOrElse(cents)
       Right(Money(changes.map { case (delta, cur) => toPrimary(delta, cur) }.sum, primary))
     }
-
-  private def createOneTimeExpense(repos: Repositories)(dto: CreateOneTimeExpense): Result[OneTimeExpense] = {
-    val id      = OneTimeExpenseId(UUID.randomUUID().toString)
-    val date    = dto.date.getOrElse(Instant.now())
-    val expense = OneTimeExpense(id, dto.name, dto.amountCents, dto.currency, date)
-
-    repos.oneTimeExpenses.create(expense).as(Right(expense))
-  }
-
-  private def updateOneTimeExpense(repos: Repositories)(id: OneTimeExpenseId, dto: UpdateOneTimeExpense): Result[OneTimeExpense] = {
-    for {
-      existingOpt <- repos.oneTimeExpenses.findById(id)
-      result      <- existingOpt match {
-                       case Some(_) =>
-                         val updated = OneTimeExpense(id, dto.name, dto.amountCents, dto.currency, dto.date)
-                         repos.oneTimeExpenses.update(updated).as(Right(updated))
-                       case None    =>
-                         IO.pure(Left(s"One-time expense not found: ${id.value}"))
-                     }
-    } yield result
-  }
-
-  private def deleteOneTimeExpense(repos: Repositories)(id: OneTimeExpenseId): Result[Unit] = {
-    repos.oneTimeExpenses.delete(id).as(Right(()))
-  }
 
   private def resetDatabase(repos: Repositories): Result[Unit] = {
     // This is a test-only endpoint to reset the database

@@ -7,7 +7,8 @@ A personal budget tracker built to answer one question: **"How much can I spend 
 Traditional budget apps obsess over categories and past spending. SSBudget focuses on the future.
 
 SSBudget takes a different approach:
-- Define your **fixed expenses** (rent, bills), **savings goals**, and **estimated variable costs** (groceries, fuel)
+- Define your **planned items** — the fixed expenses (rent, bills), incomes and savings top-ups you expect this period
+- Let **category budgets** derive your variable spend (groceries, fuel) from real bank transactions
 - Update account balances and mark previously planned payments throughout the period
 - Get your remaining free cash — your budget until the next paycheck
   

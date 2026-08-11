@@ -28,13 +28,13 @@ trait AccountRepository {
 
 class AccountRepositoryImpl(xa: Transactor[IO]) extends AccountRepository {
 
-  private val columns = fr"id, name, currency, role, balance_cents, savings_target, balance_source, balance_updated_at"
+  private val columns = fr"id, name, currency, role, balance_cents, balance_source, balance_updated_at"
 
   override def create(account: Account): IO[Unit] = {
     sql"""
-      INSERT INTO accounts (id, name, currency, role, balance_cents, savings_target, balance_source, balance_updated_at)
+      INSERT INTO accounts (id, name, currency, role, balance_cents, balance_source, balance_updated_at)
       VALUES (${account.id}, ${account.name}, ${account.currency}, ${account.role}, ${account.balanceCents},
-              ${account.savingsTarget}, ${account.balanceSource}, ${account.balanceUpdatedAt})
+              ${account.balanceSource}, ${account.balanceUpdatedAt})
     """.update.run.transact(xa).void
   }
 
@@ -50,7 +50,7 @@ class AccountRepositoryImpl(xa: Transactor[IO]) extends AccountRepository {
   override def update(account: Account): IO[Unit] = {
     sql"""
       UPDATE accounts
-      SET name = ${account.name}, currency = ${account.currency}, savings_target = ${account.savingsTarget}
+      SET name = ${account.name}, currency = ${account.currency}
       WHERE id = ${account.id}
     """.update.run.transact(xa).void
   }

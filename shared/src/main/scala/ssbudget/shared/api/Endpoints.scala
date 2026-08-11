@@ -115,26 +115,6 @@ object Endpoints {
         .errorOut(stringBody)
   }
 
-  object savingsTransactions {
-    val listCurrent: Secured[Unit, List[SavingsTransaction]] =
-      secureEndpoint.get
-        .in("savings-transactions" / "current")
-        .out(jsonBody[List[SavingsTransaction]])
-        .errorOut(stringBody)
-
-    val create: Secured[CreateSavingsTransaction, SavingsTransaction] =
-      secureEndpoint.post
-        .in("savings-transactions")
-        .in(jsonBody[CreateSavingsTransaction])
-        .out(jsonBody[SavingsTransaction])
-        .errorOut(stringBody)
-
-    val delete: Secured[SavingsTransactionId, Unit] =
-      secureEndpoint.delete
-        .in("savings-transactions" / path[SavingsTransactionId]("id"))
-        .errorOut(stringBody)
-  }
-
   object savings {
     // Net change in savings-account balances over the current period (current balance − balance at period start), in the primary currency.
     val periodChange: Secured[Unit, Money] =
@@ -337,33 +317,6 @@ object Endpoints {
         .errorOut(stringBody)
   }
 
-  object oneTimeExpenses {
-    val list: Secured[Unit, List[OneTimeExpense]] =
-      secureEndpoint.get
-        .in("one-time-expenses")
-        .out(jsonBody[List[OneTimeExpense]])
-        .errorOut(stringBody)
-
-    val create: Secured[CreateOneTimeExpense, OneTimeExpense] =
-      secureEndpoint.post
-        .in("one-time-expenses")
-        .in(jsonBody[CreateOneTimeExpense])
-        .out(jsonBody[OneTimeExpense])
-        .errorOut(stringBody)
-
-    val update: Secured[(OneTimeExpenseId, UpdateOneTimeExpense), OneTimeExpense] =
-      secureEndpoint.put
-        .in("one-time-expenses" / path[OneTimeExpenseId]("id"))
-        .in(jsonBody[UpdateOneTimeExpense])
-        .out(jsonBody[OneTimeExpense])
-        .errorOut(stringBody)
-
-    val delete: Secured[OneTimeExpenseId, Unit] =
-      secureEndpoint.delete
-        .in("one-time-expenses" / path[OneTimeExpenseId]("id"))
-        .errorOut(stringBody)
-  }
-
   object exchangeRates {
     val getAll: Secured[Unit, List[ExchangeRate]] =
       secureEndpoint.get
@@ -443,14 +396,7 @@ object Endpoints {
     expenseRecords.unpay,
     periods.list,
     periods.startNew,
-    savingsTransactions.listCurrent,
-    savingsTransactions.create,
-    savingsTransactions.delete,
     savings.periodChange,
-    oneTimeExpenses.list,
-    oneTimeExpenses.create,
-    oneTimeExpenses.update,
-    oneTimeExpenses.delete,
     exchangeRates.getAll,
     currencies.getSettings,
     currencies.enable,
@@ -566,21 +512,6 @@ object Endpoints {
 
       val startNew: Client[Unit, Period] =
         baseEndpoint.post.in("periods" / "start").out(jsonBody[Period]).errorOut(stringBody)
-    }
-
-    object savingsTransactions {
-      val listCurrent: Client[Unit, List[SavingsTransaction]] =
-        baseEndpoint.get.in("savings-transactions" / "current").out(jsonBody[List[SavingsTransaction]]).errorOut(stringBody)
-
-      val create: Client[CreateSavingsTransaction, SavingsTransaction] =
-        baseEndpoint.post
-          .in("savings-transactions")
-          .in(jsonBody[CreateSavingsTransaction])
-          .out(jsonBody[SavingsTransaction])
-          .errorOut(stringBody)
-
-      val delete: Client[SavingsTransactionId, Unit] =
-        baseEndpoint.delete.in("savings-transactions" / path[SavingsTransactionId]("id")).errorOut(stringBody)
     }
 
     object savings {
@@ -761,24 +692,6 @@ object Endpoints {
           .in(query[Option[Int]]("months"))
           .out(jsonBody[AnalyticsResponse])
           .errorOut(stringBody)
-    }
-
-    object oneTimeExpenses {
-      val list: Client[Unit, List[OneTimeExpense]] =
-        baseEndpoint.get.in("one-time-expenses").out(jsonBody[List[OneTimeExpense]]).errorOut(stringBody)
-
-      val create: Client[CreateOneTimeExpense, OneTimeExpense] =
-        baseEndpoint.post.in("one-time-expenses").in(jsonBody[CreateOneTimeExpense]).out(jsonBody[OneTimeExpense]).errorOut(stringBody)
-
-      val update: Client[(OneTimeExpenseId, UpdateOneTimeExpense), OneTimeExpense] =
-        baseEndpoint.put
-          .in("one-time-expenses" / path[OneTimeExpenseId]("id"))
-          .in(jsonBody[UpdateOneTimeExpense])
-          .out(jsonBody[OneTimeExpense])
-          .errorOut(stringBody)
-
-      val delete: Client[OneTimeExpenseId, Unit] =
-        baseEndpoint.delete.in("one-time-expenses" / path[OneTimeExpenseId]("id")).errorOut(stringBody)
     }
 
     object exchangeRates {

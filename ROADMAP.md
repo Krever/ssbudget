@@ -99,6 +99,9 @@ Development is split into phases. Each phase should result in a usable increment
 ## Phase 3.5: Savings Support
 **Goal**: Add savings accounts with targets and transaction tracking.
 
+> **Superseded (see Phase 10).** Targets and the savings transaction ledger were removed; savings accounts are now just buckets with a
+> balance, and an intended contribution is modelled as a planned expense. The items below record what was built at the time.
+
 *Savings accounts* are separate from regular bank accounts - they represent buckets for accumulating money (emergency fund, vacation, etc.). They have editable balances and optional monthly targets. Transactions track inflows/outflows.
 
 - [x] **3.5.1 Savings Data Layer**
@@ -285,6 +288,33 @@ Development is split into phases. Each phase should result in a usable increment
 
 ---
 
+## Phase 10: Trim the Product Surface
+**Goal**: Cut features that earn less than they cost, and make planned items expressive enough to absorb what's dropped.
+
+Three concepts went away because each was either duplicated by category budgets or better expressed as a planned item:
+
+- [x] **10.1 Drop estimated expenses**
+  - `BudgetItemType.EstimatedExpense` and all automatic time-scaling removed
+  - Variable spend is covered by Category Budgets, which derive expectations from real transactions
+  - Migration deletes `estimated_expense` definitions and their records
+
+- [x] **10.2 Drop one-time expenses**
+  - Model, table, repository, endpoints, page and nav entry removed
+  - To be superseded later by tags on transactions
+
+- [x] **10.3 Drop planned savings**
+  - `accounts.savings_target` and the whole `savings_transactions` ledger removed
+  - Savings accounts keep only a balance; plan a contribution as a planned expense instead
+  - `savingsPeriodChange` (from balance snapshots) remains as Dashboard information
+
+- [x] **10.4 Partial payment of planned items**
+  - `expense_records.settled` added; `paid_amount` now ACCUMULATES across instalments
+  - "Pay" settles (closing the item at whatever was actually paid), "Part" banks an instalment and leaves the remainder
+  - Remaining (`estimate - paid`, 0 once settled) is what feeds predicted expenses
+  - Free money no longer has an estimated-expenses term
+
+---
+
 ## Future Ideas (Not Planned)
 
 - Expense forecasting
@@ -309,4 +339,5 @@ Development is split into phases. Each phase should result in a usable increment
 | 6       | 2026-01-28 | 5     | 5.1-5.5          | Password + passkey auth, 50 backend + 70 e2e tests |
 | 7       | 2026-01-29 | 8     | 8.1              | Multi-currency support, 32 currencies, Frankfurter API, 86 e2e tests |
 | 8       | 2026-01-29 | 8     | 8.4              | Database backup/restore via SQLite backup API, 3 functional e2e tests |
+| 9       | 2026-08-11 | 10    | 10.1-10.4        | Trimmed estimated + one-time expenses and planned savings; planned items gained partial payment |
 

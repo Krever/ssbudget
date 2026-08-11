@@ -5,7 +5,33 @@ import scala.jdk.CollectionConverters.*
 
 class BudgetPageSpec extends E2ESpec {
 
-  "Budget page" should "load planned items and estimated expenses cards" in {
+  /** The planned-item row for `name`, re-found on each call: Laminar replaces rows on every update, so a captured reference goes stale. */
+  private def plannedRow(name: String): org.openqa.selenium.WebElement =
+    findCard("Planned Items").findElement(By.xpath(s".//tr[.//td[contains(text(),'$name')]]"))
+
+  /** Turn off "Pending only". Settled items are hidden by it, and asserting against the whole card instead would match the "Paid" column HEADER — a
+    * false positive that makes a payment test pass without a payment.
+    */
+  private def showAllItems(): Unit = {
+    val toggle = driver.findElement(By.id("showPendingOnly"))
+    if toggle.isSelected then toggle.click()
+  }
+
+  /** Open `name`'s payment editor and submit it with `submit` ("Pay"/"Receive" to settle, "Part" for an instalment). `amount = None` keeps the
+    * pre-filled remainder.
+    */
+  private def payPlanned(name: String, submit: String, amount: Option[String] = None): Unit = {
+    click(plannedRow(name), "Pay")
+    val payRow = findCard("Planned Items").findElement(By.cssSelector("tr.table-info"))
+    amount.foreach { a =>
+      val input = payRow.findElement(By.cssSelector("input[type='number']"))
+      input.clear()
+      input.sendKeys(a)
+    }
+    click(payRow, submit)
+  }
+
+  "Budget page" should "load the planned items and category budgets cards" in {
     ensurePeriodExists()
 
     driver.get(s"$baseUrl/budget")
@@ -13,7 +39,7 @@ class BudgetPageSpec extends E2ESpec {
 
     val cardTexts = driver.findElements(By.cssSelector(".card")).asScala.map(_.getText).toList
     cardTexts.exists(_.contains("Planned Items")) shouldBe true
-    cardTexts.exists(_.contains("Estimated Expenses")) shouldBe true
+    cardTexts.exists(_.contains("Category Budgets")) shouldBe true
   }
 
   it should "add a new planned expense" in {
@@ -57,13 +83,11 @@ class BudgetPageSpec extends E2ESpec {
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
-    val card       = findCard("Planned Items")
-    val pendingRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Pay Test Expense')]]"))
+    payPlanned("Pay Test Expense", "Pay")
 
-    click(pendingRow, "Pay")
-    click(card.findElement(By.cssSelector("tr.table-info")), "Save")
-
-    textShouldAppear(card, "Paid")
+    showAllItems()
+    textShouldAppear(plannedRow("Pay Test Expense"), "Paid")
+    textShouldAppear(plannedRow("Pay Test Expense"), "100.00")
   }
 
   it should "pay expense with overridden amount" in {
@@ -73,169 +97,59 @@ class BudgetPageSpec extends E2ESpec {
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
-    val card       = findCard("Planned Items")
-    val pendingRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Override Pay Expense')]]"))
+    payPlanned("Override Pay Expense", "Pay", Some("99.99"))
 
-    click(pendingRow, "Pay")
-    val editRow = card.findElement(By.cssSelector("tr.table-info"))
-    val input   = editRow.findElement(By.cssSelector("input[type='number']"))
-    input.clear()
-    input.sendKeys("99.99")
-    click(editRow, "Save")
-
-    textShouldAppear(card, "99.99")
+    // Settling under the estimate closes the item at the actual amount rather than leaving a 0.01 residual.
+    showAllItems()
+    textShouldAppear(plannedRow("Override Pay Expense"), "99.99")
+    textShouldAppear(plannedRow("Override Pay Expense"), "Paid")
   }
 
-  it should "add and delete an estimated expense" in {
+  it should "part-pay an expense, leaving the remainder outstanding" in {
     ensurePeriodExists()
+    addPlannedExpense("Part Pay Expense", 200.00)
 
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
-    val card = findCard("Estimated Expenses")
-    click(card, "+ Add")
+    payPlanned("Part Pay Expense", "Part", Some("50"))
 
-    val addRow = card.findElement(By.cssSelector("tr.table-primary"))
-    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("To Delete Expense")
-    addRow.findElement(By.cssSelector("input[type='number']")).sendKeys("100")
-    click(addRow, "Add")
-
-    rowShouldExist(card, "To Delete Expense")
-
-    val toDelete = card.findElement(By.xpath(".//tr[.//td[contains(text(),'To Delete Expense')]]"))
-    click(toDelete, "Edit")
-    click(card.findElement(By.cssSelector("tr.table-warning")), "Del")
-
-    rowShouldNotExist(card, "To Delete Expense")
+    // Still open, with 50 paid and 150 of the 200 estimate still expected — a part-paid item stays visible under "Pending only".
+    textShouldAppear(plannedRow("Part Pay Expense"), "Partial")
+    textShouldAppear(plannedRow("Part Pay Expense"), "50.00")
+    textShouldAppear(plannedRow("Part Pay Expense"), "150.00")
   }
 
-  // ============ Planned Savings ============
-
-  it should "show planned savings card" in {
+  it should "settle the remainder of a part-paid expense" in {
     ensurePeriodExists()
+    addPlannedExpense("Settle Rest Expense", 200.00)
 
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
-    val cardTexts = driver.findElements(By.cssSelector(".card")).asScala.map(_.getText).toList
-    cardTexts.exists(_.contains("Planned Savings")) shouldBe true
+    // First instalment: 50 of 200.
+    payPlanned("Settle Rest Expense", "Part", Some("50"))
+    textShouldAppear(plannedRow("Settle Rest Expense"), "Partial")
+
+    // The editor pre-fills the REMAINDER (150), and paying it accumulates to the full 200 rather than overwriting the instalment.
+    payPlanned("Settle Rest Expense", "Pay")
+
+    showAllItems()
+    textShouldAppear(plannedRow("Settle Rest Expense"), "Paid")
+    textShouldAppear(plannedRow("Settle Rest Expense"), "200.00")
   }
 
-  it should "show savings accounts with targets" in {
+  it should "reset a part-payment back to pending" in {
     ensurePeriodExists()
-    addSavingsAccount("Budget Savings Test", Some(500))
+    addPlannedExpense("Reset Part Expense", 100.00)
 
     driver.get(s"$baseUrl/budget")
     waitForPage("Budget")
 
-    val card = findCard("Planned Savings")
-    textShouldAppear(card, "Budget Savings Test")
-    textShouldAppear(card, "Target")
-    textShouldAppear(card, "Saved")
-    textShouldAppear(card, "Remaining")
-  }
+    payPlanned("Reset Part Expense", "Part", Some("30"))
+    textShouldAppear(plannedRow("Reset Part Expense"), "Partial")
 
-  it should "expand savings account to show transactions" in {
-    ensurePeriodExists()
-    addSavingsAccount("Expand Test Savings", Some(500))
-
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
-
-    val card       = findCard("Planned Savings")
-    // Find a savings account row and click to expand
-    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Expand Test Savings')]]"))
-    savingsRow.click()
-
-    // Should see "+ Add" button in expanded view
-    card.findElement(By.xpath(".//button[contains(text(),'+ Add')]")).isDisplayed shouldBe true
-  }
-
-  it should "add a savings transaction" in {
-    ensurePeriodExists()
-    addSavingsAccount("Add Txn Savings", Some(500))
-
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
-
-    val card       = findCard("Planned Savings")
-    // Expand the savings account
-    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Add Txn Savings')]]"))
-    savingsRow.click()
-
-    // Click + Add to show transaction form
-    click(card, "+ Add")
-
-    // Fill in transaction
-    val addRow      = card.findElement(By.cssSelector("tr.table-info"))
-    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("Test deposit")
-    val amountInput = addRow.findElement(By.cssSelector("input[type='number']"))
-    amountInput.clear()
-    amountInput.sendKeys("50")
-    click(addRow, "Add")
-
-    // Transaction should appear
-    textShouldAppear(card, "Test deposit")
-  }
-
-  it should "delete a savings transaction" in {
-    ensurePeriodExists()
-    addSavingsAccount("Delete Txn Savings", Some(500))
-
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
-
-    val card       = findCard("Planned Savings")
-    // Expand the savings account
-    val savingsRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'Delete Txn Savings')]]"))
-    savingsRow.click()
-
-    // Add a transaction to delete
-    click(card, "+ Add")
-    val addRow      = card.findElement(By.cssSelector("tr.table-info"))
-    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("To delete txn")
-    val amountInput = addRow.findElement(By.cssSelector("input[type='number']"))
-    amountInput.clear()
-    amountInput.sendKeys("10")
-    click(addRow, "Add")
-
-    textShouldAppear(card, "To delete txn")
-
-    // Find and delete the transaction
-    val txnRow = card.findElement(By.xpath(".//tr[.//td[contains(text(),'To delete txn')]]"))
-    click(txnRow, "×")
-
-    textShouldDisappear(card, "To delete txn")
-  }
-
-  it should "collapse expanded savings account" in {
-    ensurePeriodExists()
-    addSavingsAccount("Collapse Test Savings", Some(500))
-
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
-
-    val card = findCard("Planned Savings")
-    // Expand
-    card.findElement(By.xpath(".//tr[.//td[contains(text(),'Collapse Test Savings')]]")).click()
-
-    card.findElements(By.xpath(".//button[contains(text(),'+ Add')]")).size() shouldBe 1
-
-    // Collapse - need to re-find element as DOM was updated
-    card.findElement(By.xpath(".//tr[.//td[contains(text(),'Collapse Test Savings')]]")).click()
-
-    card.findElements(By.xpath(".//button[contains(text(),'+ Add')]")).size() shouldBe 0
-  }
-
-  it should "show remaining to save in footer" in {
-    ensurePeriodExists()
-    addSavingsAccount("Footer Savings Test", Some(500))
-
-    driver.get(s"$baseUrl/budget")
-    waitForPage("Budget")
-
-    val card       = findCard("Planned Savings")
-    val footerText = card.findElement(By.cssSelector(".card-footer")).getText
-    footerText should include("Remaining to Save")
+    click(plannedRow("Reset Part Expense"), "Reset")
+    textShouldAppear(plannedRow("Reset Part Expense"), "Pending")
   }
 }

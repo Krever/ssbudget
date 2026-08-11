@@ -17,8 +17,6 @@ object DoobieMeta {
   given Meta[PeriodId]             = Meta[String].timap(PeriodId.apply)(_.value)
   given Meta[ExpenseRecordId]      = Meta[String].timap(ExpenseRecordId.apply)(_.value)
   given Meta[BalanceSnapshotId]    = Meta[String].timap(BalanceSnapshotId.apply)(_.value)
-  given Meta[SavingsTransactionId] = Meta[String].timap(SavingsTransactionId.apply)(_.value)
-  given Meta[OneTimeExpenseId]     = Meta[String].timap(OneTimeExpenseId.apply)(_.value)
   given Meta[BankConnectionId]     = Meta[String].timap(BankConnectionId.apply)(_.value)
   given Meta[BankAccountLinkId]    = Meta[String].timap(BankAccountLinkId.apply)(_.value)
   given Meta[CardGroupId]          = Meta[String].timap(CardGroupId.apply)(_.value)
@@ -52,25 +50,12 @@ object DoobieMeta {
     Write[(String, Option[String])].contramap(t => (BankLinkTarget.kind(t), BankLinkTarget.idValue(t)))
 
   given Meta[BudgetItemType] = Meta[String].tiemap {
-    case "planned_expense"   => BudgetItemType.PlannedExpense.asRight
-    case "estimated_expense" => BudgetItemType.EstimatedExpense.asRight
-    case "planned_income"    => BudgetItemType.PlannedIncome.asRight
-    case other               => Left(s"Unknown budget item type: $other")
+    case "planned_expense" => BudgetItemType.PlannedExpense.asRight
+    case "planned_income"  => BudgetItemType.PlannedIncome.asRight
+    case other             => Left(s"Unknown budget item type: $other")
   } {
-    case BudgetItemType.PlannedExpense   => "planned_expense"
-    case BudgetItemType.EstimatedExpense => "estimated_expense"
-    case BudgetItemType.PlannedIncome    => "planned_income"
-  }
-
-  given Meta[EstimateMode] = Meta[String].tiemap {
-    case "fixed"      => EstimateMode.Fixed.asRight
-    case "last_month" => EstimateMode.LastMonth.asRight
-    case "average"    => EstimateMode.Average.asRight
-    case other        => Left(s"Unknown estimate mode: $other")
-  } {
-    case EstimateMode.Fixed     => "fixed"
-    case EstimateMode.LastMonth => "last_month"
-    case EstimateMode.Average   => "average"
+    case BudgetItemType.PlannedExpense => "planned_expense"
+    case BudgetItemType.PlannedIncome  => "planned_income"
   }
 
   // Date/Time types (stored as TEXT in SQLite)

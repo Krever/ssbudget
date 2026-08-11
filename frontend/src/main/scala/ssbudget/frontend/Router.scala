@@ -12,7 +12,6 @@ object Router
         Route.static(Page.Budget, root / "budget" / endOfSegments),
         Route.static(Page.Accounts, root / "accounts" / endOfSegments),
         Route.static(Page.Periods, root / "periods" / endOfSegments),
-        Route.static(Page.OneTimeExpenses, root / "one-time-expenses" / endOfSegments),
         Route.static(Page.Banking, root / "banking" / endOfSegments),
         Route.static(Page.BankingCallback, root / "banking" / "callback" / endOfSegments),
         // Filters live in the query string, so a filtered list is linkable (category drill-down) and survives a reload.
@@ -32,7 +31,6 @@ object Router
         case Page.Budget          => "SSBudget - Budget"
         case Page.Accounts        => "SSBudget - Accounts"
         case Page.Periods         => "SSBudget - Periods"
-        case Page.OneTimeExpenses => "SSBudget - One-Time Expenses"
         case Page.Banking         => "SSBudget - Bank Connections"
         case Page.BankingCallback => "SSBudget - Connecting..."
         case _: Page.Transactions => "SSBudget - Transactions"

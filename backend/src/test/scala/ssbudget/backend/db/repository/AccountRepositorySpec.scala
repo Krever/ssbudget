@@ -26,7 +26,7 @@ class AccountRepositorySpec extends RepositorySpec {
   "findAll returns all accounts ordered by name" in {
     val repo = new AccountRepositoryImpl(xa)
     val acc1 = spendingAccount("acc-1", "Zebra", Currency.PLN)
-    val acc2 = savingsAccount("acc-2", "Alpha", Currency.EUR, 5000, Some(1000))
+    val acc2 = savingsAccount("acc-2", "Alpha", Currency.EUR, 5000)
     val acc3 = spendingAccount("acc-3", "Beta", Currency.PLN)
 
     for {
@@ -40,7 +40,7 @@ class AccountRepositorySpec extends RepositorySpec {
   "findByRole returns only accounts of that role" in {
     val repo = new AccountRepositoryImpl(xa)
     val acc1 = spendingAccount("acc-1", "Spending", Currency.PLN)
-    val acc2 = savingsAccount("acc-2", "Savings", Currency.PLN, 5000, Some(1000))
+    val acc2 = savingsAccount("acc-2", "Savings", Currency.PLN, 5000)
 
     for {
       _        <- repo.create(acc1)
@@ -53,10 +53,10 @@ class AccountRepositorySpec extends RepositorySpec {
     }
   }
 
-  "update modifies name, currency and savings target but not balance" in {
+  "update modifies name and currency but not balance" in {
     val repo    = new AccountRepositoryImpl(xa)
-    val account = savingsAccount("acc-1", "Old Name", Currency.PLN, 100000, None)
-    val updated = account.copy(name = "New Name", currency = Currency.EUR, savingsTarget = Some(25000))
+    val account = savingsAccount("acc-1", "Old Name", Currency.PLN, 100000)
+    val updated = account.copy(name = "New Name", currency = Currency.EUR)
 
     for {
       _     <- repo.create(account)
@@ -112,7 +112,7 @@ class AccountRepositorySpec extends RepositorySpec {
   "existsWithCurrency reflects any account role" in {
     val repo = new AccountRepositoryImpl(xa)
     for {
-      _      <- repo.create(savingsAccount("acc-1", "Fund", Currency.EUR, 0, None))
+      _      <- repo.create(savingsAccount("acc-1", "Fund", Currency.EUR, 0))
       hasEur <- repo.existsWithCurrency(Currency.EUR)
       hasUsd <- repo.existsWithCurrency(Currency.USD)
     } yield {

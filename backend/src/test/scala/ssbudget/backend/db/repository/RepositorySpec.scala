@@ -21,10 +21,10 @@ trait RepositorySpec extends AsyncFreeSpec with AsyncIOSpec with Matchers with B
   private val fixedAt = Instant.parse("2024-01-01T00:00:00Z")
 
   protected def spendingAccount(id: String, name: String, currency: Currency, cents: Long = 0L): Account =
-    Account(AccountId(id), name, currency, AccountRole.Spending, cents, None, BalanceSource.Manual, Some(fixedAt))
+    Account(AccountId(id), name, currency, AccountRole.Spending, cents, BalanceSource.Manual, Some(fixedAt))
 
-  protected def savingsAccount(id: String, name: String, currency: Currency, cents: Long, target: Option[Long]): Account =
-    Account(AccountId(id), name, currency, AccountRole.Savings, cents, target, BalanceSource.Manual, Some(fixedAt))
+  protected def savingsAccount(id: String, name: String, currency: Currency, cents: Long): Account =
+    Account(AccountId(id), name, currency, AccountRole.Savings, cents, BalanceSource.Manual, Some(fixedAt))
 
   override def beforeEach(): Unit = {
     // Use shared-cache mode with a unique name so each test gets its own isolated database

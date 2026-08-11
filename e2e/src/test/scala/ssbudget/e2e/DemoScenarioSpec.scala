@@ -366,38 +366,18 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     showPhase("💰 Adding Savings Accounts")
     injectDemoStyles()
 
-    // Add savings account with target
-    val savingsCard = findCard("Savings Accounts")
-    demoClickButton(savingsCard, "+ Add")
-    pause(shortPause)
+    List("Emergency Fund", "Vacation Fund").foreach { name =>
+      demoClickButton(findCard("Savings Accounts"), "+ Add")
+      pause(shortPause)
 
-    val savingsAddRow    = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
-    val savingsNameInput = savingsAddRow.findElement(By.cssSelector("input[type='text']"))
-    demoClick(savingsNameInput)
-    typeSlowly(savingsNameInput, "Emergency Fund")
-    val targetInput      = savingsAddRow.findElement(By.cssSelector("input[type='number']"))
-    targetInput.clear()
-    demoClick(targetInput)
-    typeSlowly(targetInput, "500")
-    pause(shortPause)
-    demoClickButton(savingsAddRow, "Add")
-    pause()
-
-    // Add vacation fund
-    demoClickButton(savingsCard, "+ Add")
-    pause(shortPause)
-
-    val vacationAddRow    = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
-    val vacationNameInput = vacationAddRow.findElement(By.cssSelector("input[type='text']"))
-    demoClick(vacationNameInput)
-    typeSlowly(vacationNameInput, "Vacation Fund")
-    val vacationTarget    = vacationAddRow.findElement(By.cssSelector("input[type='number']"))
-    vacationTarget.clear()
-    demoClick(vacationTarget)
-    typeSlowly(vacationTarget, "300")
-    pause(shortPause)
-    demoClickButton(vacationAddRow, "Add")
-    pause()
+      val addRow    = findCard("Savings Accounts").findElement(By.cssSelector("tbody tr.table-success"))
+      val nameInput = addRow.findElement(By.cssSelector("input[type='text']"))
+      demoClick(nameInput)
+      typeSlowly(nameInput, name)
+      pause(shortPause)
+      demoClickButton(addRow, "Add")
+      pause()
+    }
 
     // ========================================
     // PART 4: Plan Budget
@@ -452,100 +432,23 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
 
     pause()
 
-    showPhase("📊 Adding Estimated Expenses")
-    injectDemoStyles()
+    // Saving is planned like any other expense now: a planned item named after the bucket.
+    demoClickButton(findCard("Planned Items"), "+ Expense")
+    pause(shortPause)
 
-    // Add estimated expenses
-    val estimatedCard = findCard("Estimated Expenses")
-
-    val estimated = List(
-      ("Groceries", "1200"),
-      ("Fuel", "400"),
-      ("Dining Out", "300"),
-    )
-
-    estimated.foreach { case (name, amount) =>
-      demoClickButton(findCard("Estimated Expenses"), "+ Add")
-      pause(shortPause)
-
-      val estRow         = findCard("Estimated Expenses").findElement(By.cssSelector("tr.table-primary"))
-      val estNameInput   = estRow.findElement(By.cssSelector("input[type='text']"))
-      demoClick(estNameInput)
-      typeSlowly(estNameInput, name)
-      val estAmountInput = estRow.findElement(By.cssSelector("input[type='number']"))
-      demoClick(estAmountInput)
-      typeSlowly(estAmountInput, amount)
-      pause(shortPause)
-      demoClickButton(estRow, "Add")
-      pause(shortPause)
-    }
-
+    val savingRow       = findCard("Planned Items").findElement(By.cssSelector("tr.table-primary"))
+    val savingNameInput = savingRow.findElement(By.cssSelector("input[type='text']"))
+    demoClick(savingNameInput)
+    typeSlowly(savingNameInput, "Emergency Fund top-up")
+    val savingAmount    = savingRow.findElement(By.cssSelector("input[type='number']"))
+    demoClick(savingAmount)
+    typeSlowly(savingAmount, "500")
+    pause(shortPause)
+    demoClickButton(savingRow, "Add")
     pause()
 
     // ========================================
-    // PART 5: Track Savings
-    // ========================================
-
-    showPhase("🐷 Tracking Savings")
-    injectDemoStyles()
-
-    // Expand Emergency Fund and add transaction
-    val emergencyRow = findCard("Planned Savings").findElement(
-      By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]"),
-    )
-    demoClick(emergencyRow)
-    pause()
-
-    demoClickButton(findCard("Planned Savings"), "+ Add")
-    pause(shortPause)
-
-    val txnRow       = findCard("Planned Savings").findElement(By.cssSelector("tr.table-info"))
-    val txnNoteInput = txnRow.findElement(By.cssSelector("input[type='text']"))
-    demoClick(txnNoteInput)
-    typeSlowly(txnNoteInput, "Monthly deposit")
-    val txnAmount    = txnRow.findElement(By.cssSelector("input[type='number']"))
-    txnAmount.clear()
-    demoClick(txnAmount)
-    typeSlowly(txnAmount, "500")
-    pause(shortPause)
-    demoClickButton(txnRow, "Add")
-    pause()
-
-    // Collapse Emergency Fund
-    findCard("Planned Savings")
-      .findElement(By.xpath(".//tr[.//td[contains(text(),'Emergency Fund')]]"))
-      .click()
-    pause(shortPause)
-
-    // Expand Vacation Fund
-    val vacationSavingsRow = findCard("Planned Savings")
-      .findElement(By.xpath(".//tr[.//td[contains(text(),'Vacation Fund')]]"))
-    demoClick(vacationSavingsRow)
-    pause()
-
-    demoClickButton(findCard("Planned Savings"), "+ Add")
-    pause(shortPause)
-
-    val vacTxnRow       = findCard("Planned Savings").findElement(By.cssSelector("tr.table-info"))
-    val vacTxnNoteInput = vacTxnRow.findElement(By.cssSelector("input[type='text']"))
-    demoClick(vacTxnNoteInput)
-    typeSlowly(vacTxnNoteInput, "Vacation savings")
-    val vacTxnAmount    = vacTxnRow.findElement(By.cssSelector("input[type='number']"))
-    vacTxnAmount.clear()
-    demoClick(vacTxnAmount)
-    typeSlowly(vacTxnAmount, "200")
-    pause(shortPause)
-    demoClickButton(vacTxnRow, "Add")
-    pause()
-
-    // Collapse
-    findCard("Planned Savings")
-      .findElement(By.xpath(".//tr[.//td[contains(text(),'Vacation Fund')]]"))
-      .click()
-    pause()
-
-    // ========================================
-    // PART 6: Pay Bills
+    // PART 5: Pay Bills
     // ========================================
 
     showPhase("✅ Paying Bills")
@@ -557,17 +460,17 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     )
     demoClickButton(incomePayRow, "Receive")
     pause(shortPause)
-    demoClickButton(findCard("Planned Items").findElement(By.cssSelector("tr.table-info")), "Save")
+    demoClickButton(findCard("Planned Items").findElement(By.cssSelector("tr.table-info")), "Receive")
     pause()
 
-    // Pay Rent
+    // Pay Rent in full, at the estimate
     val rentRow = findCard("Planned Items").findElement(By.xpath(".//tr[.//td[contains(text(),'Rent')]]"))
     demoClickButton(rentRow, "Pay")
     pause(shortPause)
-    demoClickButton(findCard("Planned Items").findElement(By.cssSelector("tr.table-info")), "Save")
+    demoClickButton(findCard("Planned Items").findElement(By.cssSelector("tr.table-info")), "Pay")
     pause()
 
-    // Pay Utilities with different amount
+    // Pay Utilities at the actual amount, which came in under the estimate — settling closes it at 320.50.
     val utilitiesRow = findCard("Planned Items").findElement(
       By.xpath(".//tr[.//td[contains(text(),'Utilities')]]"),
     )
@@ -580,11 +483,27 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     demoClick(utilInput)
     typeSlowly(utilInput, "320.50")
     pause(shortPause)
-    demoClickButton(utilPayRow, "Save")
+    demoClickButton(utilPayRow, "Pay")
+    pause()
+
+    // Part-pay the savings top-up: half now, the rest still counted as expected.
+    val savingPayRow = findCard("Planned Items").findElement(
+      By.xpath(".//tr[.//td[contains(text(),'Emergency Fund top-up')]]"),
+    )
+    demoClickButton(savingPayRow, "Pay")
+    pause(shortPause)
+
+    val partPayRow = findCard("Planned Items").findElement(By.cssSelector("tr.table-info"))
+    val partInput  = partPayRow.findElement(By.cssSelector("input[type='number']"))
+    partInput.clear()
+    demoClick(partInput)
+    typeSlowly(partInput, "250")
+    pause(shortPause)
+    demoClickButton(partPayRow, "Part")
     pause()
 
     // ========================================
-    // PART 7: Update Balances & View Dashboard
+    // PART 6: Update Balances & View Dashboard
     // ========================================
 
     showPhase("📈 Viewing Dashboard")
@@ -641,7 +560,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause(longPause)
 
     // ========================================
-    // PART 8: View Periods
+    // PART 7: View Periods
     // ========================================
 
     showPhase("🏁 Demo Complete!")
