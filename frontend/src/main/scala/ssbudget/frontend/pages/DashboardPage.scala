@@ -2,7 +2,7 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
-import ssbudget.frontend.components.{Badges, Loading, PlanCard}
+import ssbudget.frontend.components.{Badges, Loading, PlanCard, TriageCard}
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -92,6 +92,8 @@ object DashboardPage {
         div(cls := "col-lg-5", freeMoneyCard(), accountsCard()),
         div(cls := "col-lg-7", PlanCard()),
       ),
+      // Full width, below the two columns: triage rows are the one thing here that needs room for a bank description to stay readable.
+      TriageCard(api),
     )
   }
 

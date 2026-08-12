@@ -150,6 +150,23 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       limit = Some(limit),
     )
 
+  override def uncategorizedTransactions(limit: Int): Future[TransactionListResponse] =
+    client.transactions.query(
+      accountUid = None,
+      month = None,        // the backlog is whatever was never categorized, whenever it was booked
+      category = Some(CategoryFilter.Uncategorized),
+      hideInternal = true, // own-account transfers are never categorized, so they aren't a backlog
+      sort = "date",
+      asc = false,
+      limit = Some(limit),
+    )
+
+  override def setTransactionCategory(txId: BankTransactionId, categoryId: Option[CategoryId]): Future[Unit] =
+    client.transactions
+      .setCategory(txId, SetCategoryRequest(categoryId))
+      // The category budgets are derived from categorized spend, so the figures on screen are stale until they're re-read.
+      .flatMap(_ => client.categories.summaries().map(categorySummariesVar.set))
+
   override def savingsPeriodChange: Signal[Money] = savingsChangeVar.signal
 
   // Mutation methods

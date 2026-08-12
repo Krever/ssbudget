@@ -155,6 +155,12 @@ object InMemoryDataService extends DataService {
   override def categoryPeriodTransactions(categoryId: CategoryId, limit: Int): Future[TransactionListResponse] =
     Future.successful(TransactionListResponse(Nil, 0, Nil))
 
+  override def uncategorizedTransactions(limit: Int): Future[TransactionListResponse] =
+    Future.successful(TransactionListResponse(Nil, 0, Nil))
+
+  override def setTransactionCategory(txId: BankTransactionId, categoryId: Option[CategoryId]): Future[Unit] =
+    Future.unit
+
   override def periodElapsedFraction: Signal[Double] =
     currentPeriod.map {
       case Some(p) =>

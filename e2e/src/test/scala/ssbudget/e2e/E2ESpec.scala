@@ -107,6 +107,18 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   protected def txTable: WebElement =
     driver.findElement(By.xpath("//table[.//th[text()='Description']]"))
 
+  /** The open rule modal (create or edit). One locator with two owners — the Transactions page and the Dashboard's triage card both open it. */
+  protected def ruleModal: WebElement =
+    driver.findElement(By.cssSelector(".modal.show, .modal.d-block"))
+
+  /** Choose a category in a [[CategoryCombobox]] anywhere under `scope`: type enough to filter, then click the suggestion. Works for every placement
+    * of the combobox (transaction row, triage row, rule modal), which is why it matches the placeholder loosely.
+    */
+  protected def pickCategory(scope: WebElement, name: String): Unit = {
+    scope.findElement(By.xpath(".//input[contains(@placeholder,'ategory')]")).sendKeys(name)
+    click(scope, name)
+  }
+
   /** Visible text of every selected `<option>` under `parent` — for asserting which filters a page landed on. */
   protected def selectedOptionTexts(parent: WebElement): List[String] =
     parent.findElements(By.cssSelector("option")).asScala.toList.filter(_.isSelected).map(_.getText)

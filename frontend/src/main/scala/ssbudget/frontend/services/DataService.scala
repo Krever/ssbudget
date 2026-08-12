@@ -77,6 +77,15 @@ trait DataService {
     */
   def categoryPeriodTransactions(categoryId: CategoryId, limit: Int): Future[TransactionListResponse]
 
+  /** The transactions still waiting for a category, newest first — the triage backlog. Whole history, not just this period: an old transaction is no
+    * less uncategorized. Internal transfers are excluded, since they're never categorized. As above, `limit` caps the rows while `total` stays the
+    * full count.
+    */
+  def uncategorizedTransactions(limit: Int): Future[TransactionListResponse]
+
+  /** Assign (or clear, when None) a transaction's category. Category spend feeds the budgets, so this also refreshes what they're computed from. */
+  def setTransactionCategory(txId: BankTransactionId, categoryId: Option[CategoryId]): Future[Unit]
+
   def bankAccountBalance: Signal[Money] // only bank accounts, not savings
   def totalBalance: Signal[Money]       // all accounts including savings (for accounts table footer)
   def daysRemainingInPeriod: Signal[Int]

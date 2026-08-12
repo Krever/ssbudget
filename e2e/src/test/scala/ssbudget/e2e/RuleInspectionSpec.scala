@@ -48,7 +48,7 @@ class RuleInspectionSpec extends E2ESpec {
     row.findElement(ruleBadge).click()
 
     // The rules modal, populated with the rule behind this transaction rather than a blank new-rule form.
-    val modal = driver.findElement(By.cssSelector(".modal.show, .modal.d-block"))
+    val modal = ruleModal
     textShouldAppear(modal, "Edit rule")
 
     // Its name and the condition it matches on are both loaded (criteria render as editable inputs, so they're values not text).
