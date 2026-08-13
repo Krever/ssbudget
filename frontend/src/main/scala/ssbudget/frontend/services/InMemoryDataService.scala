@@ -146,7 +146,7 @@ object InMemoryDataService extends DataService {
   // Category budgets are not modelled in the in-memory mock; empty summaries make every derived budget figure zero.
   override def categorySummaries: Signal[List[CategorySummary]]  = Val(List.empty)
   override def budgetedCategories: Signal[List[CategorySummary]] = Val(List.empty)
-  override def savingsPeriodChange: Signal[Money]                = primaryCurrency.map(Money.zero)
+  override def savingsBaselines: Signal[Map[AccountId, Money]]   = Val(Map.empty)
 
   override def setCategoryBudgetOverride(categoryId: CategoryId, remainingCents: Long): Future[Unit] = Future.successful(())
   override def clearCategoryBudgetOverride(categoryId: CategoryId): Future[Unit]                     = Future.successful(())

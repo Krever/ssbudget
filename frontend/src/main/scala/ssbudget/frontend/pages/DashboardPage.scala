@@ -177,12 +177,6 @@ object DashboardPage {
         hr(cls := "my-1"),
         accountingRow("= Free money", dataService.freeMoney, positive = true, bold = true),
       ),
-      // Informational only (not part of Free Money): actual net change in savings balances this period (+saved / −withdrawn).
-      div(
-        cls   := "card-footer py-1 d-flex justify-content-between small text-muted",
-        span("Savings this period"),
-        span(cls := "font-monospace", MoneyFormatter.formatChild(dataService.savingsPeriodChange)),
-      ),
     )
 
   private def accountingRow(label: String, amount: Signal[Money], positive: Boolean, bold: Boolean = false): HtmlElement = {
@@ -253,60 +247,71 @@ object DashboardPage {
             button(tpe := "button", cls := "btn-close btn-close-sm", onClick --> { _ => syncMessage.set(None) }),
           )
         }),
+        // Two self-contained groups, each closed by its own total the way a spreadsheet sums a block — spending and savings are different kinds of
+        // money, so their figures never share a row or add up to a grand total. The spending total is the headline's BALANCE; the savings total
+        // carries the group's Δ sum (net saved/withdrawn this period, in the primary currency). The Δ column is savings-only (see
+        // AccountPeriodBaseline), so its header lives on the savings group heading rather than in the table head over rows it never applies to.
         table(
           cls := "table table-sm table-hover mb-0",
-          thead(tr(th("Account"), th(cls := "text-end", "Balance"))),
+          thead(tr(th("Account"), th(), th(cls := "text-end", "Balance"))),
           tbody(
-            // Spending accounts
+            groupHeading("— Spending —"),
             children <-- dataService.spendingAccounts
               .combineWith(isEditingBalances.signal)
               .map { case (accounts, isEditing) =>
                 accounts.map(account => accountQuickRow(account, isEditing))
               },
-            // Separator
-            tr(cls := "table-secondary", td(colSpan := 2, cls := "py-1 small text-muted", "— Savings —")),
-            // Savings accounts
+            subtotalRow("spending", None, dataService.bankAccountBalance),
+            groupHeading("— Savings —", deltaHeader = "Δ period"),
             children <-- dataService.savingsAccounts
+              .combineWith(dataService.savingsPeriodDeltas)
               .combineWith(isEditingBalances.signal)
-              .map { case (accounts, isEditing) =>
-                accounts.map(account => accountQuickRow(account, isEditing))
+              .map { case (accounts, deltas, isEditing) =>
+                accounts.map(account => accountQuickRow(account, isEditing, deltas.get(account.id)))
               },
+            subtotalRow("savings", Some(dataService.savingsPeriodChange), dataService.savingsBalance),
           ),
-        ),
-      ),
-      // Each bucket on its own line, then their sum: "Spending" alone is the headline's BALANCE, and naming the savings subtotal explicitly is what
-      // makes it obvious that the grand total is the two added together rather than savings-plus-something.
-      div(
-        cls := "card-footer py-2",
-        div(
-          cls := "d-flex justify-content-between",
-          span(cls := "fw-bold", "Spending"),
-          span(cls := "font-monospace fw-bold", MoneyFormatter.formatChild(dataService.bankAccountBalance)),
-        ),
-        div(
-          cls := "d-flex justify-content-between small text-muted",
-          span("Savings"),
-          span(cls := "font-monospace", MoneyFormatter.formatChild(dataService.savingsBalance)),
-        ),
-        div(
-          cls := "d-flex justify-content-between small text-muted border-top",
-          span("Total"),
-          span(cls := "font-monospace", MoneyFormatter.formatChild(dataService.totalBalance)),
         ),
       ),
     )
   }
 
-  private def accountQuickRow(account: Account, isEditing: Boolean): HtmlElement = {
+  private def groupHeading(label: String, deltaHeader: String = ""): HtmlElement = {
+    // Styling must sit on the cells: table-secondary sets its text colour directly on them, so classes on the row don't take.
+    val cell = cls := "py-1 small text-muted"
+    tr(cls := "table-secondary", td(cell, label), td(cell, cls := "text-end", deltaHeader), td(cell))
+  }
+
+  private val deltaCellCls = "text-end font-monospace small"
+
+  /** A balance change this period: signed, coloured, converted like a balance — but silent when absent or when nothing moved (a column of +0.00 would
+    * drown the few real movements).
+    */
+  private def deltaSpan(delta: Money): HtmlElement =
+    if delta.amountCents == 0 then span() else MoneyFormatter.formatDelta(delta)
+
+  private def subtotalRow(group: String, delta: Option[Signal[Money]], balance: Signal[Money]): HtmlElement =
+    tr(
+      // table-group-divider doubles the top border, marking where the rows stop and their sum begins.
+      cls                     := "fw-bold table-group-divider",
+      dataAttr("group-total") := group,
+      td("Total"),
+      td(cls := deltaCellCls, delta.map(d => child <-- d.map(deltaSpan))),
+      td(cls := "text-end font-monospace", MoneyFormatter.formatChild(balance)),
+    )
+
+  private def accountQuickRow(account: Account, isEditing: Boolean, delta: Option[Money] = None): HtmlElement = {
     val nameCell    = td(account.name, Badges.source(account.balanceSource))
+    val deltaCell   = td(cls := deltaCellCls, delta.map(deltaSpan))
     val balanceView = MoneyFormatter.format(account.balanceCents, account.currency)
 
     if isEditing && !account.isManual then
     // Bank/card-driven balance: not manually editable, updated via Sync banks.
-    tr(nameCell, td(cls := "text-end font-monospace text-muted", balanceView))
+    tr(nameCell, deltaCell, td(cls := "text-end font-monospace text-muted", balanceView))
     else if isEditing then tr(
       cls := "table-info",
       nameCell,
+      deltaCell,
       td(
         div(
           cls := "input-group input-group-sm",
@@ -321,7 +326,7 @@ object DashboardPage {
         ),
       ),
     )
-    else tr(nameCell, td(cls := "text-end font-monospace", balanceView))
+    else tr(nameCell, deltaCell, td(cls := "text-end font-monospace", balanceView))
   }
 
   private def startEditingBalances(): Unit = {

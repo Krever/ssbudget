@@ -53,6 +53,12 @@ object Endpoints {
         .errorOut(stringBody)
   }
 
+  object savings {
+    // Balance at the current period's start per savings account (see AccountPeriodBaseline); accounts with no recorded history are omitted.
+    val periodBaselines: Secured[Unit, List[AccountPeriodBaseline]] =
+      secureEndpoint.get.in("savings" / "period-baselines").out(jsonBody[List[AccountPeriodBaseline]]).errorOut(stringBody)
+  }
+
   object budgetItems {
     val list: Secured[Unit, List[BudgetItemDefinition]] =
       secureEndpoint.get
@@ -121,12 +127,6 @@ object Endpoints {
         .in(query[Option[Int]]("limit"))
         .out(jsonBody[List[PeriodSummary]])
         .errorOut(stringBody)
-  }
-
-  object savings {
-    // Net change in savings-account balances over the current period (current balance − balance at period start), in the primary currency.
-    val periodChange: Secured[Unit, Money] =
-      secureEndpoint.get.in("savings" / "period-change").out(jsonBody[Money]).errorOut(stringBody)
   }
 
   object banking {
@@ -404,7 +404,7 @@ object Endpoints {
     expenseRecords.unpay,
     periods.list,
     periods.startNew,
-    savings.periodChange,
+    savings.periodBaselines,
     exchangeRates.getAll,
     currencies.getSettings,
     currencies.enable,
@@ -481,6 +481,11 @@ object Endpoints {
         baseEndpoint.delete.in("accounts" / path[AccountId]("id")).errorOut(stringBody)
     }
 
+    object savings {
+      val periodBaselines: Client[Unit, List[AccountPeriodBaseline]] =
+        baseEndpoint.get.in("savings" / "period-baselines").out(jsonBody[List[AccountPeriodBaseline]]).errorOut(stringBody)
+    }
+
     object budgetItems {
       val list: Client[Unit, List[BudgetItemDefinition]] =
         baseEndpoint.get.in("budget-items").out(jsonBody[List[BudgetItemDefinition]]).errorOut(stringBody)
@@ -527,11 +532,6 @@ object Endpoints {
           .in(query[Option[Int]]("limit"))
           .out(jsonBody[List[PeriodSummary]])
           .errorOut(stringBody)
-    }
-
-    object savings {
-      val periodChange: Client[Unit, Money] =
-        baseEndpoint.get.in("savings" / "period-change").out(jsonBody[Money]).errorOut(stringBody)
     }
 
     object banking {

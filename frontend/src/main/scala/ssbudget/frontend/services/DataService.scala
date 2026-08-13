@@ -52,7 +52,9 @@ trait DataService {
   def savingsAccounts: Signal[List[Account]]
   def addSavingsAccount(name: String, currency: Currency): Future[Unit]
   def updateAccount(id: AccountId, name: String, currency: Currency): Future[Unit]
-  def savingsPeriodChange: Signal[Money] // actual net savings-balance change this period (current - period start); informational
+
+  // Balance at period start per savings account, in the account's own currency (see AccountPeriodBaseline); no recorded history -> no entry.
+  def savingsBaselines: Signal[Map[AccountId, Money]]
 
   // Derived signals
   def currentPeriod: Signal[Option[Period]]
@@ -87,7 +89,7 @@ trait DataService {
   def setTransactionCategory(txId: BankTransactionId, categoryId: Option[CategoryId]): Future[Unit]
 
   def bankAccountBalance: Signal[Money] // only bank accounts, not savings
-  def totalBalance: Signal[Money]       // all accounts including savings (for accounts table footer)
+  def totalBalance: Signal[Money]       // all accounts including savings (AccountsPage bank-accounts card total)
   def daysRemainingInPeriod: Signal[Int]
 
   /** Σ of what's still expected across `items`: per item, its estimate minus what's already been paid this period, zero once settled. Concrete on the
@@ -112,6 +114,24 @@ trait DataService {
       .combineWith(exchangeRates)
       .combineWith(primaryCurrency)
       .map { case (accounts, rates, primary) => DataService.sumInPrimary(accounts.map(_.balance), rates, primary) }
+
+  /** Per savings-account balance change this period, in the account's own currency: current balance − [[savingsBaselines]]. Derived from the live
+    * accounts signal, so it stays fresh as balances are edited or synced. No baseline → no entry (the change is unknowable, not zero). Informational.
+    */
+  final def savingsPeriodDeltas: Signal[Map[AccountId, Money]] =
+    savingsAccounts
+      .combineWith(savingsBaselines)
+      .map { case (accounts, baselines) =>
+        accounts.flatMap(acc => baselines.get(acc.id).map(b => acc.id -> Money(acc.balanceCents - b.amountCents, acc.currency))).toMap
+      }
+
+  /** Net change in savings-account balances this period (+saved / −withdrawn), in the primary currency: Σ of [[savingsPeriodDeltas]]. Informational.
+    */
+  final def savingsPeriodChange: Signal[Money] =
+    savingsPeriodDeltas
+      .combineWith(exchangeRates)
+      .combineWith(primaryCurrency)
+      .map { case (deltas, rates, primary) => DataService.sumInPrimary(deltas.values.toSeq, rates, primary) }
 
   /** Σ remaining per planned expense — what still has to come out of the balance before the next paycheck. */
   final def unpaidPlannedExpenses: Signal[Money] = remainingOn(plannedExpenses)

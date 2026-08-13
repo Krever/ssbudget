@@ -97,6 +97,13 @@ class ApiClient(implicit ec: ExecutionContext) {
     }
   }
 
+  object savings {
+    def periodBaselines(): Future[List[AccountPeriodBaseline]] = {
+      val request = interpreter.toRequest(Endpoints.client.savings.periodBaselines, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+  }
+
   object budgetItems {
     def list(): Future[List[BudgetItemDefinition]] = {
       val request = interpreter.toRequest(Endpoints.client.budgetItems.list, Some(baseUri))
@@ -150,13 +157,6 @@ class ApiClient(implicit ec: ExecutionContext) {
     def summaries(limit: Option[Int] = None): Future[List[PeriodSummary]] = {
       val request = interpreter.toRequest(Endpoints.client.periods.summaries, Some(baseUri))
       backend.send(request(limit)).map(handleResponse)
-    }
-  }
-
-  object savings {
-    def periodChange(): Future[Money] = {
-      val request = interpreter.toRequest(Endpoints.client.savings.periodChange, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
     }
   }
 

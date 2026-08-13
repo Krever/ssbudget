@@ -239,9 +239,9 @@ object PeriodsPage {
   /** Major-unit amount without a currency code — the card header states the currency once, so repeating it in every cell just adds noise. */
   private def money(cents: Long): String = MoneyFormatter.formatBare(cents)
 
-  private def signed(cents: Long): String = if cents > 0 then s"+${money(cents)}" else money(cents)
+  private def signed(cents: Long): String = MoneyFormatter.formatSigned(cents)
 
-  private def amountCls(cents: Long): String = if cents < 0 then "text-danger" else "text-success"
+  private def amountCls(cents: Long): String = MoneyFormatter.amountCls(cents)
 
   private def expectedEndDate(): String = {
     val today     = LocalDate.now(ZoneId.of("UTC"))

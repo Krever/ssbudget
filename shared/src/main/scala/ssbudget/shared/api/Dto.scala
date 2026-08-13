@@ -15,6 +15,12 @@ final case class UpdateAccount(name: String, currency: Currency) derives Codec.A
 /** Set an account's balance directly. Rejected server-side unless the account's balanceSource is Manual. */
 final case class UpdateAccountBalance(newBalanceCents: Long) derives Codec.AsObject
 
+/** A savings account's balance as of the current period's start (else its earliest recorded balance), in the account's own currency. The client
+  * derives the period delta as current balance − baseline, so the Δ stays fresh as balances are edited or synced, with no re-fetch to coordinate.
+  * Savings only: a spending account's balance moves with every purchase, so its period delta carries no signal.
+  */
+final case class AccountPeriodBaseline(accountId: AccountId, baseline: Money) derives Codec.AsObject
+
 final case class CreateBudgetItem(
     name: String,
     itemType: BudgetItemType,

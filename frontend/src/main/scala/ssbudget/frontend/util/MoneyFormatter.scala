@@ -29,6 +29,12 @@ object MoneyFormatter {
   /** Format cents as a bare amount, no currency code (e.g. "1,234.56") — for the left half of a pair whose code follows on the right. */
   def formatBare(cents: Long): String = f"${cents / 100.0}%,.2f"
 
+  /** [[formatBare]] with an explicit sign on positives (e.g. "+1,234.56") — for deltas, where direction is the point. */
+  def formatSigned(cents: Long): String = if cents > 0 then s"+${formatBare(cents)}" else formatBare(cents)
+
+  /** The Bootstrap text colour for a signed amount: red when negative, green otherwise. */
+  def amountCls(cents: Long): String = if cents < 0 then "text-danger" else "text-success"
+
   /** Format money as a simple string (e.g., "1,234.56 PLN") */
   def formatSimple(money: Money): String = {
     s"${formatBare(money.amountCents)} ${money.currency.code}"
@@ -42,6 +48,23 @@ object MoneyFormatter {
   /** Format money as a Laminar element with currency conversion if needed. */
   def format(money: Money): HtmlElement = {
     formatWithContext(money, primaryCurrencyVar.now(), exchangeRatesVar.now())
+  }
+
+  /** Format a signed delta as a Laminar element: coloured by sign, and — like [[format]] — with a muted ~equivalent sub-line when the currency isn't
+    * the primary one.
+    */
+  def formatDelta(money: Money): HtmlElement = {
+    val colour  = amountCls(money.amountCents)
+    val primary = primaryCurrencyVar.now()
+    if money.currency == primary then span(cls := colour, formatSigned(money.amountCents))
+    else {
+      val converted = convertToPrimary(money, primary, exchangeRatesVar.now())
+      span(
+        cls := s"money-foreign d-inline-flex flex-column align-items-end $colour",
+        span(cls := "money-amount", formatSigned(money.amountCents)),
+        span(cls := "money-equivalent text-muted small", s"~${formatSigned(converted.amountCents)}"),
+      )
+    }
   }
 
   /** Format cents as a Laminar element with currency conversion if needed. */

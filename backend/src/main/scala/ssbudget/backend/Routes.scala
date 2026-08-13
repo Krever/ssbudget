@@ -69,7 +69,7 @@ object Routes {
       route(Endpoints.periods.startNew)(_ => startNewPeriod(repos)),
       route(Endpoints.periods.summaries)(periodSummaries(repos)),
       // Savings
-      route(Endpoints.savings.periodChange)(_ => savingsPeriodChange(repos)),
+      route(Endpoints.savings.periodBaselines)(_ => savingsPeriodBaselines(repos)),
       // Exchange rates (all rates to primary currency)
       route(Endpoints.exchangeRates.getAll)(_ => getAllExchangeRates(repos)),
       // Currency settings
@@ -297,38 +297,25 @@ object Routes {
     } yield Right(newPeriod)
   }
 
-  /** Net change in savings-account balances over the current period: Σ (current balance − balance as of the period start) across savings accounts,
-    * converted to the primary currency. Positive = net saved, negative = net withdrawn. If an account has no snapshot before the period start its
-    * pre-period balance is unknown, so we count no change for it. Informational only — not part of the free-money calc.
+  /** Balance at the current period's start per savings account (see [[AccountPeriodBaseline]] — the client derives the Δ from its live balances). No
+    * current period, or no recorded history for an account → no entry, and the client shows no Δ. Informational only — not part of the free-money
+    * calc.
     */
-  private def savingsPeriodChange(repos: Repositories): Result[Money] =
+  private def savingsPeriodBaselines(repos: Repositories): Result[List[AccountPeriodBaseline]] =
     for {
-      accounts   <- repos.accounts.findAll
-      savings     = accounts.filter(_.role == AccountRole.Savings)
-      periodOpt  <- repos.periods.findCurrent
-      primaryOpt <- repos.currencySettings.findPrimary
-      enabled    <- repos.currencySettings.findAll
-      primary     = primaryOpt.map(_.code).getOrElse(Currency.PLN)
-      rateList   <- enabled.filterNot(_.code == primary).traverse(s => repos.exchangeRates.findLatest(s.code, primary))
-      changes    <- periodOpt match {
-                      case None    => IO.pure(List.empty[(Long, Currency)])
-                      case Some(p) =>
-                        savings.traverse { acc =>
-                          for {
-                            atStart  <- repos.balanceSnapshots.balanceAsOf(acc.id, p.startDate)
-                            // Baseline = balance at period start, else the earliest recorded balance (first observation ≈ start), else current
-                            // (no history → no change). This makes the change reflect what actually moved even when balances were only recorded
-                            // mid-period (bank balances are snapshotted on sync, not before the period).
-                            baseline <- if atStart.isDefined then IO.pure(atStart) else repos.balanceSnapshots.earliestAmount(acc.id)
-                          } yield (acc.balanceCents - baseline.getOrElse(acc.balanceCents), acc.currency)
-                        }
-                    }
-    } yield {
-      val rateMap                                     = rateList.flatten.map(r => r.fromCurrency -> r).toMap
-      def toPrimary(cents: Long, cur: Currency): Long =
-        if cur == primary then cents else rateMap.get(cur).map(_.convert(Money(cents, cur)).amountCents).getOrElse(cents)
-      Right(Money(changes.map { case (delta, cur) => toPrimary(delta, cur) }.sum, primary))
-    }
+      accounts  <- repos.accounts.findAll
+      periodOpt <- repos.periods.findCurrent
+      baselines <- periodOpt.toList.flatTraverse { p =>
+                     accounts.filter(_.role == AccountRole.Savings).flatTraverse { acc =>
+                       for {
+                         atStart  <- repos.balanceSnapshots.balanceAsOf(acc.id, p.startDate)
+                         // Baseline = balance at period start, else the earliest recorded balance (first observation ≈ start) — bank balances are
+                         // snapshotted on sync, not before the period, so mid-period first observations are common.
+                         baseline <- if atStart.isDefined then IO.pure(atStart) else repos.balanceSnapshots.earliestAmount(acc.id)
+                       } yield baseline.map(b => AccountPeriodBaseline(acc.id, Money(b, acc.currency))).toList
+                     }
+                   }
+    } yield Right(baselines)
 
   /** The primary currency and a converter into it, at the latest rates: `(cents, currency) => cents in primary`. Anything missing a rate is passed
     * through unconverted (rare — the currency isn't enabled), which is the behaviour every caller here already relied on.

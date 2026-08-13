@@ -43,13 +43,15 @@ class DashboardSpec extends E2ESpec {
     waitForPage("Dashboard")
 
     val card         = findCard("Accounts")
-    val initialTotal = card.findElement(By.cssSelector(".card-footer .font-monospace")).getText
+    // The spending group's total: the balance cell (last column) of its closing subtotal row.
+    val totalCell    = By.cssSelector("tr[data-group-total='spending'] td:last-child")
+    val initialTotal = card.findElement(totalCell).getText
 
     click(card, "Edit Balances")
     card.findElement(By.cssSelector("input[type='number']")).sendKeys("999999")
     click(card, "Cancel")
 
-    card.findElement(By.cssSelector(".card-footer .font-monospace")).getText shouldBe initialTotal
+    card.findElement(totalCell).getText shouldBe initialTotal
   }
 
   it should "copy summary to clipboard" in {

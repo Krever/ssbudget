@@ -54,13 +54,14 @@ object TapirSchemas {
   given Schema[BankTransaction]      = Schema.derived[BankTransaction]
 
   // DTO types
-  given Schema[CreateAccount]        = Schema.derived[CreateAccount]
-  given Schema[UpdateAccount]        = Schema.derived[UpdateAccount]
-  given Schema[UpdateAccountBalance] = Schema.derived[UpdateAccountBalance]
-  given Schema[CreateBudgetItem]     = Schema.derived[CreateBudgetItem]
-  given Schema[UpdateBudgetItem]     = Schema.derived[UpdateBudgetItem]
-  given Schema[PayBudgetItem]        = Schema.derived[PayBudgetItem]
-  given Schema[IdResponse]           = Schema.derived[IdResponse]
+  given Schema[CreateAccount]         = Schema.derived[CreateAccount]
+  given Schema[UpdateAccount]         = Schema.derived[UpdateAccount]
+  given Schema[UpdateAccountBalance]  = Schema.derived[UpdateAccountBalance]
+  given Schema[AccountPeriodBaseline] = Schema.derived[AccountPeriodBaseline]
+  given Schema[CreateBudgetItem]      = Schema.derived[CreateBudgetItem]
+  given Schema[UpdateBudgetItem]      = Schema.derived[UpdateBudgetItem]
+  given Schema[PayBudgetItem]         = Schema.derived[PayBudgetItem]
+  given Schema[IdResponse]            = Schema.derived[IdResponse]
 
   // Banking DTOs
   given Schema[Aspsp]                      = Schema.derived[Aspsp]

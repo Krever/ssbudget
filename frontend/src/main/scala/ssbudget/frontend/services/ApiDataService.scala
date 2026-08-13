@@ -20,7 +20,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   private val currencySettingsVar: Var[List[CurrencySetting]]     = Var(List.empty)
   private val availableCurrenciesVar: Var[List[(String, String)]] = Var(List.empty)
   private val categorySummariesVar: Var[List[CategorySummary]]    = Var(List.empty)
-  private val savingsChangeVar: Var[Money]                        = Var(Money.zero(Currency.PLN)) // actual net savings-balance change this period
+  private val savingsBaselinesVar: Var[Map[AccountId, Money]]     = Var(Map.empty) // per savings-account balance at period start, in account currency
 
   // Initialize by fetching all data from individual endpoints
   override def initialize(): Future[Unit] = {
@@ -31,7 +31,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     val exchangeRatesFut    = client.exchangeRates.getAll()
     val currencySettingsFut = client.currencies.getSettings()
     val categorySummsFut    = client.categories.summaries()
-    val savingsChangeFut    = client.savings.periodChange()
+    val baselinesFut        = client.savings.periodBaselines()
 
     for {
       accounts         <- accountsFut
@@ -41,7 +41,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       exchangeRates    <- exchangeRatesFut
       currencySettings <- currencySettingsFut
       categorySumms    <- categorySummsFut
-      savingsChange    <- savingsChangeFut
+      baselines        <- baselinesFut
     } yield {
       accountsVar.set(accounts)
       budgetItemsVar.set(budgetItems)
@@ -51,7 +51,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       currencySettingsVar.set(currencySettings.currencies)
       availableCurrenciesVar.set(currencySettings.availableCurrencies.map(c => (c.code, c.name)))
       categorySummariesVar.set(categorySumms)
-      savingsChangeVar.set(savingsChange)
+      savingsBaselinesVar.set(baselines.map(b => b.accountId -> b.baseline).toMap)
     }
   }
 
@@ -167,7 +167,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       // The category budgets are derived from categorized spend, so the figures on screen are stale until they're re-read.
       .flatMap(_ => client.categories.summaries().map(categorySummariesVar.set))
 
-  override def savingsPeriodChange: Signal[Money] = savingsChangeVar.signal
+  override def savingsBaselines: Signal[Map[AccountId, Money]] = savingsBaselinesVar.signal
 
   // Mutation methods
   private def upsertAccount(account: Account): Unit =
