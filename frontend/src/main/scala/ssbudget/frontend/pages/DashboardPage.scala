@@ -137,18 +137,18 @@ object DashboardPage {
               cls       := "progress",
               styleAttr := "height: 3px",
               div(
-                cls  := "progress-bar bg-secondary",
-                role := "progressbar",
-                styleAttr <-- dataService.daysRemainingInPeriod.map(_ => s"width: ${Formatting.periodProgress(period.startDate)}%"),
+                cls       := "progress-bar bg-secondary",
+                role      := "progressbar",
+                styleAttr := Formatting.progressWidth(DataService.elapsedFraction(period.startDate)),
               ),
             ),
             div(
               cls       := "d-flex justify-content-between small text-muted mt-1",
-              span(s"Period started ${Formatting.formatDate(period.startDate)} · day ${Formatting.daysElapsed(period.startDate) + 1}"),
+              span(s"Period started ${Formatting.formatDate(period.startDate)} · day ${DataService.dayOfPeriod(period.startDate)}"),
               a(
                 cls := "text-muted text-decoration-none",
                 Router.linkTo(Page.Periods),
-                child.text <-- dataService.daysRemainingInPeriod.map(d => s"$d days left · periods →"),
+                s"${DataService.daysRemaining(period.startDate)} days left · periods →",
               ),
             ),
           )
