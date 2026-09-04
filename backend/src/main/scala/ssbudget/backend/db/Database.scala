@@ -1,6 +1,7 @@
 package ssbudget.backend.db
 
 import cats.effect.{IO, Resource}
+import com.zaxxer.hikari.HikariConfig
 import doobie.*
 import doobie.implicits.*
 import doobie.hikari.HikariTransactor
@@ -12,13 +13,7 @@ object Database {
   def migrateAndTransactor(jdbcUrl: String): Resource[IO, HikariTransactor[IO]] = {
     for {
       ce <- ExecutionContexts.fixedThreadPool[IO](32)
-      xa <- HikariTransactor.newHikariTransactor[IO](
-              "org.sqlite.JDBC",
-              jdbcUrl,
-              "", // no username for SQLite
-              "", // no password for SQLite
-              ce,
-            )
+      xa <- HikariTransactor.fromHikariConfigCustomEc[IO](hikariConfig(jdbcUrl), ce)
       // WAL lets a second reader — the bundled Metabase — query the file while the app writes to it,
       // without either blocking the other. The setting lives in the database header, so this is a
       // no-op after the first run.
@@ -27,6 +22,25 @@ object Database {
       // in-memory databases (with shared cache) keep their state
       _  <- Resource.eval(migrateWithDataSource(xa))
     } yield xa
+  }
+
+  /** One connection, on purpose. SQLite allows a single writer at a time, so a pool of several connections buys no write throughput — it only lets
+    * two of our own transactions collide. That is what a bank sync kept hitting: the import fiber writes transactions and job progress while the UI
+    * polls the job, and every authenticated request writes `sessions.last_used_at`. Doobie opens deferred transactions, so a transaction that reads
+    * and then writes has to upgrade its lock, and if another connection committed in between SQLite fails it with `SQLITE_BUSY: database is locked`
+    * *immediately* — the busy handler deliberately doesn't retry that case, which is why waiting longer never helped. A single connection serialises
+    * all of the app's database work instead, and costs nothing here: the transactions are tiny and there is one user.
+    *
+    * `busy_timeout` (3s by default in the driver) only covers plain lock contention with a writer outside this pool, so it is raised as a cushion,
+    * not as the fix.
+    */
+  private def hikariConfig(jdbcUrl: String): HikariConfig = {
+    val config = new HikariConfig()
+    config.setDriverClassName("org.sqlite.JDBC")
+    config.setJdbcUrl(jdbcUrl)
+    config.setMaximumPoolSize(1)
+    config.setConnectionInitSql("PRAGMA busy_timeout = 10000")
+    config
   }
 
   /** Puts the database in WAL mode, which is what lets a bundled Metabase read the file while the app writes to it.
