@@ -2,7 +2,6 @@ package ssbudget.frontend.util
 
 import java.time.{Instant, LocalDate, ZoneId}
 import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 
 object Formatting {
 
@@ -47,17 +46,6 @@ object Formatting {
     dateTimeFormatter.format(instant.atZone(zone))
   }
 
-  def daysRemaining(from: Instant, assumedPeriodDays: Int = 30): Int = {
-    val daysSinceStart = ChronoUnit.DAYS.between(from, Instant.now()).toInt
-    math.max(1, assumedPeriodDays - daysSinceStart)
-  }
-
-  def daysElapsed(from: Instant): Int = {
-    ChronoUnit.DAYS.between(from, Instant.now()).toInt
-  }
-
-  def periodProgress(startDate: Instant, totalDays: Int = 30): Int = {
-    val elapsed = daysElapsed(startDate)
-    math.min(100, (elapsed * 100) / totalDays)
-  }
+  /** CSS width for a progress bar, from a 0..1 fraction. */
+  def progressWidth(fraction: Double): String = s"width: ${(fraction * 100).toInt}%"
 }

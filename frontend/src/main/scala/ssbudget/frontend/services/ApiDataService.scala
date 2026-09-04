@@ -5,8 +5,7 @@ import ssbudget.frontend.services.DataService.sumInPrimary
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 
-import java.time.{Instant, LocalDate, ZoneId}
-import java.time.temporal.ChronoUnit
+import java.time.Instant
 import scala.concurrent.{ExecutionContext, Future}
 
 class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends DataService {
@@ -103,31 +102,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       .map { case (accounts, rates, primary) =>
         sumInPrimary(accounts.map(_.balance), rates, primary)
       }
-
-  override def daysRemainingInPeriod: Signal[Int] =
-    currentPeriod.map {
-      case Some(_) =>
-        val today     = LocalDate.now(ZoneId.of("UTC"))
-        val day25     = today.withDayOfMonth(25)
-        val periodEnd = if today.getDayOfMonth < 25 then day25 else day25.plusMonths(1)
-        val daysLeft  = ChronoUnit.DAYS.between(today, periodEnd).toInt
-        math.max(1, daysLeft)
-      case None    => 0
-    }
-
-  override def periodElapsedFraction: Signal[Double] =
-    currentPeriod.map {
-      case Some(p) =>
-        val zone    = ZoneId.of("UTC")
-        val start   = p.startDate.atZone(zone).toLocalDate
-        val today   = LocalDate.now(zone)
-        val day25   = today.withDayOfMonth(25)
-        val end     = if today.getDayOfMonth < 25 then day25 else day25.plusMonths(1)
-        val total   = ChronoUnit.DAYS.between(start, end).toDouble
-        val elapsed = ChronoUnit.DAYS.between(start, today).toDouble
-        if total <= 0 then 1.0 else math.max(0.0, math.min(1.0, elapsed / total))
-      case None    => 0.0
-    }
 
   /** Budgeted categories only (any budget type set), in display order (by name). */
   override def budgetedCategories: Signal[List[CategorySummary]] =

@@ -6,9 +6,8 @@ import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
 import ssbudget.shared.api.{CategoryFilter, MonthFilter, PeriodCategorySpend, PeriodSummary}
-import ssbudget.shared.model.PeriodId
+import ssbudget.shared.model.{Period, PeriodId}
 
-import java.time.{LocalDate, ZoneId}
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Failure, Success}
@@ -65,9 +64,9 @@ object PeriodsPage {
                 div(
                   cls := "d-flex flex-wrap gap-4",
                   stat("Started", Formatting.formatDate(period.startDate)),
-                  stat("Expected end", expectedEndDate()),
-                  stat("Days left", child.text <-- dataService.daysRemainingInPeriod.map(_.toString)),
-                  stat("Day", child.text <-- dataService.daysRemainingInPeriod.map(_ => (Formatting.daysElapsed(period.startDate) + 1).toString)),
+                  stat("Expected end", Formatting.formatLocalDate(Period.expectedEnd(period.startDate))),
+                  stat("Days left", DataService.daysRemaining(period.startDate).toString),
+                  stat("Day", DataService.dayOfPeriod(period.startDate).toString),
                 ),
                 Loading.actionButton("End Period & Start New", startNew, "btn btn-warning btn-sm"),
               ),
@@ -75,9 +74,9 @@ object PeriodsPage {
                 cls       := "progress",
                 styleAttr := "height: 6px",
                 div(
-                  cls  := "progress-bar",
-                  role := "progressbar",
-                  styleAttr <-- dataService.daysRemainingInPeriod.map(_ => s"width: ${Formatting.periodProgress(period.startDate)}%"),
+                  cls       := "progress-bar",
+                  role      := "progressbar",
+                  styleAttr := Formatting.progressWidth(DataService.elapsedFraction(period.startDate)),
                 ),
               ),
             )
@@ -242,11 +241,4 @@ object PeriodsPage {
   private def signed(cents: Long): String = MoneyFormatter.formatSigned(cents)
 
   private def amountCls(cents: Long): String = MoneyFormatter.amountCls(cents)
-
-  private def expectedEndDate(): String = {
-    val today     = LocalDate.now(ZoneId.of("UTC"))
-    val day25     = today.withDayOfMonth(25)
-    val periodEnd = if today.getDayOfMonth < 25 then day25 else day25.plusMonths(1)
-    Formatting.formatLocalDate(periodEnd)
-  }
 }

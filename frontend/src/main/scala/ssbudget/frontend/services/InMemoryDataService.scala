@@ -5,7 +5,7 @@ import ssbudget.frontend.services.DataService.sumInPrimary
 import ssbudget.shared.api.{CategorySummary, TransactionListResponse}
 import ssbudget.shared.model.*
 
-import java.time.{Instant, LocalDate, ZoneId}
+import java.time.Instant
 import java.time.temporal.ChronoUnit
 import scala.concurrent.Future
 
@@ -132,17 +132,6 @@ object InMemoryDataService extends DataService {
         periodOpt.fold(List.empty[ExpenseRecord])(period => records.filter(_.periodId == period.id))
       }
 
-  override def daysRemainingInPeriod: Signal[Int] =
-    currentPeriod.map {
-      case Some(_) =>
-        val today     = LocalDate.now(ZoneId.of("UTC"))
-        val day25     = today.withDayOfMonth(25)
-        val periodEnd = if today.getDayOfMonth < 25 then day25 else day25.plusMonths(1)
-        val daysLeft  = ChronoUnit.DAYS.between(today, periodEnd).toInt
-        math.max(1, daysLeft)
-      case None    => 0
-    }
-
   // Category budgets are not modelled in the in-memory mock; empty summaries make every derived budget figure zero.
   override def categorySummaries: Signal[List[CategorySummary]]  = Val(List.empty)
   override def budgetedCategories: Signal[List[CategorySummary]] = Val(List.empty)
@@ -160,20 +149,6 @@ object InMemoryDataService extends DataService {
 
   override def setTransactionCategory(txId: BankTransactionId, categoryId: Option[CategoryId]): Future[Unit] =
     Future.unit
-
-  override def periodElapsedFraction: Signal[Double] =
-    currentPeriod.map {
-      case Some(p) =>
-        val zone    = ZoneId.of("UTC")
-        val start   = p.startDate.atZone(zone).toLocalDate
-        val today   = LocalDate.now(zone)
-        val day25   = today.withDayOfMonth(25)
-        val end     = if today.getDayOfMonth < 25 then day25 else day25.plusMonths(1)
-        val total   = ChronoUnit.DAYS.between(start, end).toDouble
-        val elapsed = ChronoUnit.DAYS.between(start, today).toDouble
-        if total <= 0 then 1.0 else math.max(0.0, math.min(1.0, elapsed / total))
-      case None    => 0.0
-    }
 
   private def upsert(account: Account): Unit =
     accountsVar.update(DataService.upsertById(_, account)(_.id))

@@ -5,6 +5,8 @@ import org.scalajs.dom
 import ssbudget.shared.api.{CategorySummary, TransactionListResponse}
 import ssbudget.shared.model.*
 
+import java.time.{Instant, LocalDate, ZoneOffset}
+import java.time.temporal.ChronoUnit
 import scala.concurrent.Future
 
 trait DataService {
@@ -65,7 +67,6 @@ trait DataService {
   // Category budgets (rolling 3-month average per category, computed server-side)
   def categorySummaries: Signal[List[CategorySummary]]
   def budgetedCategories: Signal[List[CategorySummary]] // only categories flagged as monthly budgets
-  def periodElapsedFraction: Signal[Double]             // 0..1 through the current period (for pace markers)
 
   // Manual remaining-amount override for a category budget, current period only (0 = already paid; clearing restores the computed value).
   def setCategoryBudgetOverride(categoryId: CategoryId, remainingCents: Long): Future[Unit]
@@ -90,7 +91,16 @@ trait DataService {
 
   def bankAccountBalance: Signal[Money] // only bank accounts, not savings
   def totalBalance: Signal[Money]       // all accounts including savings (AccountsPage bank-accounts card total)
-  def daysRemainingInPeriod: Signal[Int]
+
+  /** Days until the current period's expected end. 0 on the expected payday itself, negative once the period has overrun without being closed — the
+    * overdue state should be visible, not clamped away.
+    */
+  final def daysRemainingInPeriod: Signal[Int] =
+    currentPeriod.map(_.fold(0)(p => DataService.daysRemaining(p.startDate)))
+
+  /** 0..1 through the current period (for pace markers), against the same expected end as [[daysRemainingInPeriod]]. Pinned to 1 once overrun. */
+  final def periodElapsedFraction: Signal[Double] =
+    currentPeriod.map(_.fold(0.0)(p => DataService.elapsedFraction(p.startDate)))
 
   /** Σ of what's still expected across `items`: per item, its estimate minus what's already been paid this period, zero once settled. Concrete on the
     * trait so the real service and the mock can't disagree about the rule that drives free money.
@@ -200,6 +210,25 @@ object DataService {
   lazy val instance: DataService = {
     if dom.window.location.search.contains("mock=true") then InMemoryDataService
     else apiService
+  }
+
+  // UTC everywhere: ZoneId.systemDefault() fails silently in Scala.js without the tzdb dependency (see Formatting).
+  private val utc = ZoneOffset.UTC
+
+  /** Days from today to [[Period.expectedEnd]] — 0 on the payday itself, negative once the period has overrun. */
+  def daysRemaining(start: Instant): Int =
+    ChronoUnit.DAYS.between(LocalDate.now(utc), Period.expectedEnd(start)).toInt
+
+  /** 1-based day of the period today, for "day N" labels. */
+  def dayOfPeriod(start: Instant): Int =
+    ChronoUnit.DAYS.between(start.atZone(utc).toLocalDate, LocalDate.now(utc)).toInt + 1
+
+  /** 0..1 elapsed between the period's start and [[Period.expectedEnd]]; pinned to 1 once overrun. */
+  def elapsedFraction(start: Instant): Double = {
+    val startDate = start.atZone(utc).toLocalDate
+    val total     = ChronoUnit.DAYS.between(startDate, Period.expectedEnd(start)).toDouble
+    val elapsed   = ChronoUnit.DAYS.between(startDate, LocalDate.now(utc)).toDouble
+    if total <= 0 then 1.0 else math.max(0.0, math.min(1.0, elapsed / total))
   }
 
   /** Replace the element sharing `item`'s key, or append it if none matches. */
