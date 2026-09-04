@@ -5,7 +5,7 @@ import org.scalajs.dom
 import ssbudget.frontend.auth.AuthState
 import ssbudget.frontend.components.{Layout, Loading, LoadingState}
 import ssbudget.frontend.pages.{LoginPage, SetupPage}
-import ssbudget.frontend.services.{ApiClient, DataService}
+import ssbudget.frontend.services.{AnalyticsState, ApiClient, DataService}
 import ssbudget.frontend.util.MoneyFormatter
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -41,6 +41,7 @@ object Main {
     // When logged in, initialize data and show main app
     div(
       onMountCallback { _ =>
+        AnalyticsState.load(apiClient)
         if dataState.now() == LoadingState.Loading then {
           DataService.instance.initialize().onComplete {
             case Success(_)  =>

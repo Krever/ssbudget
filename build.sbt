@@ -65,7 +65,7 @@ lazy val backend = (project in file("backend"))
       "org.http4s"                    %% "http4s-circe"        % http4sVersion,
       "com.softwaremill.sttp.tapir"   %% "tapir-http4s-server" % tapirVersion,
       "com.softwaremill.sttp.tapir"   %% "tapir-json-circe"    % tapirVersion,
-      "com.softwaremill.sttp.client3" %% "cats"                % sttpVersion,
+      "com.softwaremill.sttp.client3" %% "fs2"                 % sttpVersion,
       "io.circe"                      %% "circe-generic"       % circeVersion,
       "ch.qos.logback"                 % "logback-classic"     % "1.5.15",
       // Database

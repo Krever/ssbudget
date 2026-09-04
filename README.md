@@ -69,9 +69,13 @@ Open http://localhost:3000. First visit prompts password setup.
 ### Production Build
 
 ```bash
-./build.sh              # Builds backend + frontend + Docker image
+./build.sh              # Builds backend + frontend + Docker image (Metabase bundled)
 docker run -p 8080:8080 -v ./data:/data ssbudget
 ```
+
+The image includes the Metabase that powers the Analytics page, and the container starts and
+configures it on its own. Use `./build.sh --no-analytics` for an app-only image (~630MB smaller,
+runs in 512MB). See `docs/metabase-analytics.md`.
 
 ### Environment Variables
 
@@ -88,6 +92,7 @@ See `fly.toml` for a fly.io deployment example. Key points:
 
 - Persistent volume for SQLite
 - Secrets for `SSBUDGET_RP_ID` and `SSBUDGET_RP_ORIGINS`
+- `shared-cpu-2x:2048MB`, since the container runs the app and Metabase side by side
 
 ## Project Structure
 

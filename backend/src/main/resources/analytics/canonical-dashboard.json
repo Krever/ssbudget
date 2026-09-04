@@ -1,0 +1,170 @@
+{
+  "_comment": "Layout note: Metabase's dashboard grid is 24 columns wide. Cards must sum to 24 across a row or the dashboard renders with a large empty gutter on the right. Placeholders ({{db}}, {{table:x}}, {{field:x.y}}) are resolved against the live instance at seed time.",
+  "name": "Household Spending",
+  "description": "Shipped with SSBudget as a starting point. Edit it freely — it is created once and never overwritten.",
+
+  "coercions": [
+    { "table": "v_transactions",  "field": "booked_on",          "strategy": "Coercion/ISO8601->Date" },
+    { "table": "v_planned_items", "field": "period_start",       "strategy": "Coercion/ISO8601->Date" },
+    { "table": "v_planned_items", "field": "paid_on",            "strategy": "Coercion/ISO8601->Date" },
+    { "table": "v_accounts",      "field": "balance_updated_at", "strategy": "Coercion/ISO8601->DateTime" }
+  ],
+
+  "filters": [
+    {
+      "name": "Date range",
+      "slug": "date_range",
+      "type": "date/all-options",
+      "sectionId": "date",
+      "default": "past12months",
+      "field": "{{field:v_transactions.booked_on}}"
+    }
+  ],
+
+  "cards": [
+    {
+      "name": "Spent",
+      "display": "scalar",
+      "visualization_settings": { "card.title": "Spent" },
+      "dataset_query": {
+        "database": "{{db}}",
+        "type": "query",
+        "query": {
+          "source-table": "{{table:v_transactions}}",
+          "aggregation": [["sum", ["field", "{{field:v_transactions.outflow}}", null]]],
+          "filter": ["=", ["field", "{{field:v_transactions.internal_transfer}}", null], "no"]
+        }
+      },
+      "layout": { "row": 0, "col": 0, "size_x": 8, "size_y": 3 }
+    },
+    {
+      "name": "Received",
+      "display": "scalar",
+      "visualization_settings": { "card.title": "Received" },
+      "dataset_query": {
+        "database": "{{db}}",
+        "type": "query",
+        "query": {
+          "source-table": "{{table:v_transactions}}",
+          "aggregation": [["sum", ["field", "{{field:v_transactions.inflow}}", null]]],
+          "filter": ["=", ["field", "{{field:v_transactions.internal_transfer}}", null], "no"]
+        }
+      },
+      "layout": { "row": 0, "col": 8, "size_x": 8, "size_y": 3 }
+    },
+    {
+      "name": "Net",
+      "display": "scalar",
+      "visualization_settings": { "card.title": "Net" },
+      "dataset_query": {
+        "database": "{{db}}",
+        "type": "query",
+        "query": {
+          "source-table": "{{table:v_transactions}}",
+          "aggregation": [["sum", ["field", "{{field:v_transactions.amount}}", null]]],
+          "filter": ["=", ["field", "{{field:v_transactions.internal_transfer}}", null], "no"]
+        }
+      },
+      "layout": { "row": 0, "col": 16, "size_x": 8, "size_y": 3 }
+    },
+    {
+      "name": "Spend by category over time",
+      "display": "bar",
+      "visualization_settings": {
+        "stackable.stack_type": "stacked",
+        "graph.dimensions": ["booked_on", "category"],
+        "graph.metrics": ["sum"]
+      },
+      "dataset_query": {
+        "database": "{{db}}",
+        "type": "query",
+        "query": {
+          "source-table": "{{table:v_transactions}}",
+          "aggregation": [["sum", ["field", "{{field:v_transactions.outflow}}", null]]],
+          "breakout": [
+            ["field", "{{field:v_transactions.booked_on}}", { "temporal-unit": "month" }],
+            ["field", "{{field:v_transactions.category}}", null]
+          ],
+          "filter": ["=", ["field", "{{field:v_transactions.internal_transfer}}", null], "no"]
+        }
+      },
+      "layout": { "row": 3, "col": 0, "size_x": 24, "size_y": 8 }
+    },
+    {
+      "name": "Where the money goes",
+      "display": "row",
+      "visualization_settings": {
+        "graph.dimensions": ["category"],
+        "graph.metrics": ["sum"]
+      },
+      "dataset_query": {
+        "database": "{{db}}",
+        "type": "query",
+        "query": {
+          "source-table": "{{table:v_transactions}}",
+          "aggregation": [["sum", ["field", "{{field:v_transactions.outflow}}", null]]],
+          "breakout": [["field", "{{field:v_transactions.category}}", null]],
+          "filter": ["=", ["field", "{{field:v_transactions.internal_transfer}}", null], "no"],
+          "order-by": [["desc", ["aggregation", 0]]]
+        }
+      },
+      "layout": { "row": 11, "col": 0, "size_x": 12, "size_y": 7 }
+    },
+    {
+      "name": "Top counterparties",
+      "display": "row",
+      "visualization_settings": {
+        "graph.dimensions": ["counterparty"],
+        "graph.metrics": ["sum"]
+      },
+      "dataset_query": {
+        "database": "{{db}}",
+        "type": "query",
+        "query": {
+          "source-table": "{{table:v_transactions}}",
+          "aggregation": [["sum", ["field", "{{field:v_transactions.outflow}}", null]]],
+          "breakout": [["field", "{{field:v_transactions.counterparty}}", null]],
+          "filter": ["=", ["field", "{{field:v_transactions.internal_transfer}}", null], "no"],
+          "order-by": [["desc", ["aggregation", 0]]],
+          "limit": 12
+        }
+      },
+      "layout": { "row": 11, "col": 12, "size_x": 12, "size_y": 7 }
+    },
+    {
+      "name": "Largest transactions",
+      "display": "table",
+      "visualization_settings": {
+        "table.columns": [
+          { "name": "booked_on", "enabled": true },
+          { "name": "counterparty", "enabled": true },
+          { "name": "category", "enabled": true },
+          { "name": "outflow", "enabled": true },
+          { "name": "description", "enabled": true }
+        ]
+      },
+      "dataset_query": {
+        "database": "{{db}}",
+        "type": "query",
+        "query": {
+          "source-table": "{{table:v_transactions}}",
+          "fields": [
+            ["field", "{{field:v_transactions.booked_on}}", null],
+            ["field", "{{field:v_transactions.counterparty}}", null],
+            ["field", "{{field:v_transactions.category}}", null],
+            ["field", "{{field:v_transactions.outflow}}", null],
+            ["field", "{{field:v_transactions.description}}", null]
+          ],
+          "filter": [
+            "and",
+            ["=", ["field", "{{field:v_transactions.internal_transfer}}", null], "no"],
+            [">", ["field", "{{field:v_transactions.outflow}}", null], 0]
+          ],
+          "order-by": [["desc", ["field", "{{field:v_transactions.outflow}}", null]]],
+          "limit": 20
+        }
+      },
+      "layout": { "row": 18, "col": 0, "size_x": 24, "size_y": 7 }
+    }
+  ]
+}

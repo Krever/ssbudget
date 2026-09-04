@@ -9,6 +9,7 @@ import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.*
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
+import ssbudget.backend.analytics.AnalyticsService
 import ssbudget.backend.auth.SessionService
 import ssbudget.backend.banking.{BankingService, ImportJobService, RuleEngineService, TransactionImportService}
 import ssbudget.backend.db.Repositories
@@ -38,6 +39,7 @@ object Routes {
       importService: TransactionImportService,
       importJobService: ImportJobService,
       ruleEngine: RuleEngineService,
+      analyticsService: AnalyticsService,
       testMode: Boolean = false,
   ): HttpRoutes[IO] = {
     val interpreter = Http4sServerInterpreter[IO]()
@@ -120,8 +122,8 @@ object Routes {
       route(Endpoints.rules.preview)(previewRule(repos)),
       route(Endpoints.rules.exportRules)(_ => exportRules(repos)),
       route(Endpoints.rules.importRules)(importRules(repos, ruleEngine)),
-      // Analytics
-      route(Endpoints.analytics.overview)(analyticsOverview(repos)),
+      // Analytics (Metabase-backed; reports itself disabled when the deployment ships without it)
+      route(Endpoints.analytics.config)(_ => analyticsService.status.map(Right(_))),
       // Database import/export
       route(Endpoints.database.download)(_ => exportDatabase(dbPath)),
       route(Endpoints.database.`import`)(bytes => importDatabase(xa, dbPath, bytes)),
@@ -675,82 +677,6 @@ object Routes {
         )
       })
     }
-
-  /** Default number of calendar months in the per-category spending breakdown when the client doesn't specify one. */
-  private val analyticsDefaultMonths = 12
-
-  /** How many uncategorized-counterparty rows to surface for rule creation. */
-  private val analyticsUncategorizedCap = 15
-
-  /** Analytics page payload, all converted to the primary currency:
-    *   - a per-month, per-category spending breakdown over the last `months` calendar months (current month included),
-    *   - import/categorization health counts,
-    *   - the top counterparties still lacking a category (actionable for new rules).
-    */
-  private def analyticsOverview(repos: Repositories)(monthsOpt: Option[Int]): Result[AnalyticsResponse] = {
-    val window = monthsOpt.filter(_ > 0).getOrElse(analyticsDefaultMonths).min(60)
-    for {
-      cats         <- repos.categories.findAll
-      primaryOpt   <- repos.currencySettings.findPrimary
-      enabled      <- repos.currencySettings.findAll
-      primary       = primaryOpt.map(_.code).getOrElse(Currency.PLN)
-      rateList     <- enabled.filterNot(_.code == primary).traverse(s => repos.exchangeRates.findLatest(s.code, primary))
-      today         = java.time.LocalDate.now(java.time.ZoneOffset.UTC)
-      firstOfMonth  = today.withDayOfMonth(1)
-      // Oldest → newest, `window` buckets ending with the current month.
-      monthLabels   = (0 until window).reverse.map(i => firstOfMonth.minusMonths(i)).map(d => f"${d.getYear}-${d.getMonthValue}%02d").toList
-      windowStart   = firstOfMonth.minusMonths((window - 1).toLong).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
-      windowEnd     = firstOfMonth.plusMonths(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
-      spendRows    <- repos.bankTransactions.monthlySpendByCategory(windowStart, windowEnd)
-      counts       <- repos.bankTransactions.categorizationCounts()
-      uncatByCur   <- repos.bankTransactions.uncategorizedOutflowByCurrency()
-      topUncatRows <- repos.bankTransactions.topUncategorizedCounterparties(analyticsUncategorizedCap)
-    } yield {
-      val rateMap                                     = rateList.flatten.map(r => r.fromCurrency -> r).toMap
-      def toPrimary(cents: Long, cur: Currency): Long =
-        if cur == primary then cents else rateMap.get(cur).map(_.convert(Money(cents, cur)).amountCents).getOrElse(cents)
-
-      // category id -> (YYYY-MM -> primary-currency spend, summed across currencies)
-      val byCatMonth = spendRows
-        .groupBy(_._1)
-        .view
-        .mapValues(rows => rows.groupBy(_._3).view.mapValues(_.map { case (_, cur, _, cents) => toPrimary(cents, cur) }.sum).toMap)
-        .toMap
-
-      val catById = cats.map(c => c.id -> c).toMap
-      val series  = byCatMonth.toList
-        .flatMap { case (catId, monthMap) =>
-          catById.get(catId).map { cat =>
-            val monthly = monthLabels.map(m => monthMap.getOrElse(m, 0L))
-            CategorySpendSeries(cat, monthly, monthly.sum)
-          }
-        }
-        .filter(_.total > 0)
-        .sortBy(-_.total)
-
-      val monthlyTotals = monthLabels.zipWithIndex.map { case (_, i) => series.map(_.monthly(i)).sum }
-
-      val (total, internal, categorized, uncategorized, manual, rule) = counts
-      val uncatOutflow                                                = uncatByCur.map { case (cur, cents) => toPrimary(cents, cur) }.sum
-      val stats                                                       = CategorizationStats(total, internal, categorized, uncategorized, manual, rule, uncatOutflow)
-
-      // Merge the per-currency counterparty rows into primary-currency totals, then re-rank.
-      val topUncategorized = topUncatRows
-        .groupBy { case (name, _, _, _) => name.getOrElse("(unknown)") }
-        .view
-        .map { case (name, rows) =>
-          UncategorizedCounterparty(
-            name,
-            rows.map { case (_, _, c, _) => c }.sum,
-            rows.map { case (_, cur, _, cents) => toPrimary(cents, cur) }.sum,
-          )
-        }
-        .toList
-        .sortBy(-_.outflowCents)
-
-      Right(AnalyticsResponse(primary, monthLabels, series, monthlyTotals, stats, topUncategorized))
-    }
-  }
 
   private def deleteCategory(repos: Repositories, ruleEngine: RuleEngineService)(id: CategoryId): Result[Unit] =
     // Detach the category from any transactions and drop rules targeting it, delete it, then re-evaluate (rules for it are gone).

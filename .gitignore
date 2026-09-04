@@ -57,3 +57,11 @@ frontend/dist
 *.pem
 frontend/.certs/
 frontend/.vite/
+# Bundled Metabase: the jar and its app database (dashboards you build live here)
+.metabase/
+
+# Metabase unpacks driver plugins into its working directory
+plugins/
+
+
+/.claude/

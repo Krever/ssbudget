@@ -22,6 +22,7 @@ final case class Repositories(
     categoryBudgetOverrides: CategoryBudgetOverrideRepository,
     classificationRules: ClassificationRuleRepository,
     importJobs: ImportJobRepository,
+    analyticsState: AnalyticsStateRepository,
 )
 
 object Repositories {
@@ -44,6 +45,7 @@ object Repositories {
       categoryBudgetOverrides = new CategoryBudgetOverrideRepositoryImpl(xa),
       classificationRules = new ClassificationRuleRepositoryImpl(xa),
       importJobs = new ImportJobRepositoryImpl(xa),
+      analyticsState = new AnalyticsStateRepositoryImpl(xa),
     )
   }
 }

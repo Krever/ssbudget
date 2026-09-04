@@ -354,9 +354,9 @@ class ApiClient(implicit ec: ExecutionContext) {
   }
 
   object analytics {
-    def overview(months: Option[Int]): Future[AnalyticsResponse] = {
-      val request = interpreter.toRequest(Endpoints.client.analytics.overview, Some(baseUri))
-      backend.send(request(months)).map(handleResponse)
+    def config(): Future[AnalyticsConfig] = {
+      val request = interpreter.toRequest(Endpoints.client.analytics.config, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
     }
   }
 

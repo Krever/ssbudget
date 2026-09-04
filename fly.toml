@@ -10,8 +10,14 @@
 #   fly secrets set SSBUDGET_RP_ORIGINS=https://ssbudget.fly.dev
 #
 # Deploy:
-#   ./build.sh                      # Build everything + Docker image
-#   fly deploy --local-only         # Push local image to fly.io (runs Flyway migrations V6-V8 on startup)
+#   ./build.sh                      # Build everything + Docker image (Metabase included)
+#   fly deploy --local-only         # Push local image to fly.io (runs Flyway migrations on startup)
+#
+# If flyctl says "docker is unavailable to build the deployment image": Docker Desktop keeps its
+# socket at ~/.docker/run/docker.sock and only symlinks /var/run/docker.sock when "Allow the default
+# Docker socket to be used" is enabled. The docker CLI follows its context, flyctl does not, so
+# either enable that setting or point flyctl at the socket:
+#   export DOCKER_HOST="unix://$HOME/.docker/run/docker.sock"
 #
 
 app = 'ssbudget'
@@ -27,6 +33,16 @@ primary_region = 'fra'
   # Enable Banking: non-secret config. App id + private key are fly secrets (see header).
   # EB_BASE_URL defaults to https://api.enablebanking.com, so it's omitted.
   EB_REDIRECT_URL = 'https://ssbudget.fly.dev/banking/callback'
+  # --- Analytics (Metabase) --------------------------------------------------------
+  # On by default: the image carries the Metabase jar and the entrypoint starts it, generating the
+  # service-account password and embed key on first boot and keeping them on the data volume. The
+  # only thing worth stating here is the public origin, which Metabase puts in the URLs it prints.
+  # Two JVMs need the 2GB in [[vm]] below; set that in this file, not with `fly scale memory`, which
+  # the next deploy overwrites.
+  #
+  # To run without analytics: ./build.sh --no-analytics (or SSBUDGET_ANALYTICS_ENABLED = 'false'),
+  # and drop [[vm]] back to 512mb.
+  SSBUDGET_PUBLIC_ORIGIN = 'https://ssbudget.fly.dev'
 
 [[mounts]]
   source = 'ssbudget_data'
@@ -45,6 +61,11 @@ primary_region = 'fra'
     soft_limit = 20
 
 [[vm]]
-  memory = '512mb'
-  cpus = 1
-  memory_mb = 512
+  # Two JVMs: the app plus Metabase, which is given -Xmx1g by the entrypoint.
+  #
+  # Two shared cores, not one. On shared-cpu-1x, Metabase's startup exhausts the burst credits and
+  # gets throttled: a boot that takes ~40s on a laptop took ~13 minutes here, with the app's own JVM
+  # competing for the same slice. This is only paid on a real restart — `auto_stop_machines =
+  # 'suspend'` snapshots memory, so ordinary visits resume in about a second.
+  memory = '2048mb'
+  cpus = 2

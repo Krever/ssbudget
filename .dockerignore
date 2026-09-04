@@ -1,6 +1,7 @@
 # Ignore everything
 *
 
-# Except the pre-built artifacts
+# Except the pre-built artifacts and the container entrypoint
 !backend/target/universal/stage/
 !frontend/dist/
+!docker/

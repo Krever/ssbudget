@@ -23,7 +23,9 @@ export default defineConfig(({ mode }) => ({
     port: 3000,
     https,
     proxy: {
-      '/api': 'http://localhost:8080'
+      '/api': 'http://localhost:8080',
+      // Metabase, reached only through the backend's session-gated proxy (see AnalyticsProxyRoutes).
+      '/metabase': 'http://localhost:8080'
     }
   },
   build: {

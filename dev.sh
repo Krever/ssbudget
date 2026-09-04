@@ -19,16 +19,28 @@
 # small app; the alternative (a 2nd sbt just for the backend) hits the boot-socket
 # collision above.
 #
+# Metabase runs too (downloaded on first use into .metabase/, ~630MB), with the backend pointed at it,
+# so the Analytics page works out of the box. Pass --no-analytics to skip it: the app then runs exactly
+# as it did before the integration existed, and the Analytics tab hides itself.
+#
 # Just run ./dev.sh — no env vars to fiddle with. Ctrl-C stops everything.
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(pwd)"
+
+ANALYTICS=1
+case "${1:-}" in
+  --no-analytics) ANALYTICS=0 ;;
+  --analytics | "") ;; # --analytics is now the default; still accepted so old habits keep working
+  *) echo "usage: ./dev.sh [--no-analytics]" >&2; exit 1 ;;
+esac
 
 kill_port() { local p="$1" pids; pids="$(lsof -ti "tcp:$p" 2>/dev/null || true)"; [ -n "$pids" ] && kill $pids 2>/dev/null || true; }
 
 # --- Preflight: clear stragglers from a previous unclean run ---------------------
 kill_port 3000
 kill_port 8080
+kill_port 3001
 pkill -f 'frontend/fastLinkJS' 2>/dev/null || true
 pkill -f 'ssbudget.backend.Main' 2>/dev/null || true  # the reStart/bgRun backend fork
 
@@ -64,16 +76,45 @@ if [[ ! -f "$CERT_DIR/localhost.pem" || ! -f "$CERT_DIR/localhost-key.pem" ]]; t
 fi
 
 # --- Dependencies ----------------------------------------------------------------
-( cd frontend && npm install --silent )
+# `npm install` spends minutes on a registry audit even when nothing changed (~4 min here vs 0.2s
+# with it off), and --silent hid that anything was happening at all. Skip it unless the lockfile
+# actually moved, and say so either way.
+if [[ ! -d frontend/node_modules || frontend/package-lock.json -nt frontend/node_modules ]]; then
+  echo "▶ installing frontend deps (npm install)..."
+  ( cd frontend && npm install --no-audit --no-fund )
+  touch frontend/node_modules
+else
+  echo "▶ frontend deps: up to date"
+fi
 
 # --- Teardown: kill the whole process group so nothing (incl. the bgRun fork) leaks ---
 cleanup() {
   trap - EXIT INT TERM
   echo; echo "▶ stopping..."
   kill_port 8080          # the backend fork may outlive its sbt parent
+  kill_port 3001          # Metabase, unless --no-analytics
   kill 0 2>/dev/null || true
 }
 trap cleanup INT TERM EXIT
+
+# --- 0) Metabase (unless --no-analytics), plus the backend config that points at it ---
+# Dev-only credentials: Metabase is on loopback and reachable only through the app's proxy, so these
+# never leave the machine. Production supplies real secrets via fly secrets.
+if [[ "$ANALYTICS" == "1" ]]; then
+  export SSBUDGET_METABASE_URL="http://127.0.0.1:3001"
+  export SSBUDGET_METABASE_USER="service@ssbudget.local"
+  export SSBUDGET_METABASE_PASSWORD="dev-metabase-password-1"
+  export SSBUDGET_METABASE_EMBED_SECRET="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  export SSBUDGET_METABASE_PATH="/metabase"
+  mkdir -p .metabase
+  echo "▶ starting Metabase (:3001, first run downloads ~630MB and takes a minute)..."
+  MB_EMBEDDING_SECRET_KEY="$SSBUDGET_METABASE_EMBED_SECRET" \
+    MB_SITE_URL="https://localhost:3000${SSBUDGET_METABASE_PATH}" \
+    ./scripts/metabase.sh > .metabase/metabase.log 2>&1 &
+  echo "▶ Metabase log: .metabase/metabase.log"
+else
+  echo "▶ Analytics: disabled (--no-analytics)"
+fi
 
 # --- 1) Vite first: its one-shot plugin `sbt --batch` runs alone (no sbt collision) ---
 echo "▶ starting Vite (https://localhost:3000)..."

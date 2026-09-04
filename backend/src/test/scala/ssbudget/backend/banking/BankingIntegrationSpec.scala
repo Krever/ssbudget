@@ -13,12 +13,13 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 import ssbudget.backend.Routes
+import ssbudget.backend.analytics.AnalyticsService
 import ssbudget.backend.auth.SessionService
 import ssbudget.backend.db.{Database, Repositories}
 import ssbudget.backend.service.CurrencyService
 import ssbudget.shared.api.{BankCallbackRequest, ConnectBankRequest, ImportTransactionsRequest, LinkAccountRequest}
 import ssbudget.shared.model.*
-import sttp.client3.httpclient.cats.HttpClientCatsBackend
+import sttp.client3.httpclient.fs2.HttpClientFs2Backend
 
 import java.nio.file.{Files, Path}
 import java.security.KeyPairGenerator
@@ -92,7 +93,7 @@ class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAft
 
     dbFile = Files.createTempFile("ssbudget-it-", ".db")
     val (xa, relDb)            = Database.migrateAndTransactor(s"jdbc:sqlite:${dbFile.toAbsolutePath}").allocated.unsafeRunSync()
-    val (sttpBackend, relSttp) = HttpClientCatsBackend.resource[IO]().allocated.unsafeRunSync()
+    val (sttpBackend, relSttp) = HttpClientFs2Backend.resource[IO]().allocated.unsafeRunSync()
     releaseDb = relDb
     releaseBackend = relSttp
 
@@ -116,6 +117,7 @@ class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAft
         importService,
         importJobService,
         ruleEngine,
+        new AnalyticsService(None, repos.analyticsState),
         testMode = true,
       )
       .orNotFound

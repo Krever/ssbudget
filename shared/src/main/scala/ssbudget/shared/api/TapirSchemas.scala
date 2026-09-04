@@ -98,10 +98,7 @@ object TapirSchemas {
   given Schema[PeriodSummary]       = Schema.derived[PeriodSummary]
 
   // Analytics DTOs
-  given Schema[CategorySpendSeries]       = Schema.derived[CategorySpendSeries]
-  given Schema[CategorizationStats]       = Schema.derived[CategorizationStats]
-  given Schema[UncategorizedCounterparty] = Schema.derived[UncategorizedCounterparty]
-  given Schema[AnalyticsResponse]         = Schema.derived[AnalyticsResponse]
+  given Schema[AnalyticsConfig] = Schema.derived[AnalyticsConfig]
 
   // Currency settings DTOs
   given Schema[CurrencySetting]           = Schema.derived[CurrencySetting]

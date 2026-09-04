@@ -3,7 +3,7 @@ package ssbudget.frontend.components
 import com.raquo.laminar.api.L.*
 import ssbudget.frontend.{Page, Router}
 import ssbudget.frontend.auth.AuthState
-import ssbudget.frontend.services.ApiClient
+import ssbudget.frontend.services.{AnalyticsState, ApiClient}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -41,7 +41,7 @@ object NavBar {
             navItem(Page.Periods, "Periods", isOpen),
             navItem(Page.Banking, "Banking", isOpen),
             navItem(Page.Transactions(), "Transactions", isOpen),
-            navItem(Page.Analytics, "Analytics", isOpen),
+            child <-- AnalyticsState.enabled.map(if _ then navItem(Page.Analytics, "Analytics", isOpen) else emptyNode),
           ),
           ul(
             cls := "navbar-nav",

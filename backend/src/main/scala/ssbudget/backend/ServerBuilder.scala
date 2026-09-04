@@ -7,9 +7,10 @@ import com.comcast.ip4s.{Host, Port, host}
 import doobie.hikari.HikariTransactor
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.server.Server
-import sttp.client3.httpclient.cats.HttpClientCatsBackend
+import sttp.client3.httpclient.fs2.HttpClientFs2Backend
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 
+import ssbudget.backend.analytics.Analytics
 import ssbudget.backend.auth.{PasswordService, SessionService, WebAuthnService}
 import ssbudget.backend.banking.{
   BankingService,
@@ -26,6 +27,13 @@ import ssbudget.shared.api.HealthEndpoint
 
 /** Reusable server builder for production and testing */
 object ServerBuilder {
+
+  /** sttp decodes `Content-Encoding` itself, and its default handler knows only gzip and deflate — anything else fails the response stream.
+    * `identity` means "not encoded at all" (Metabase labels its static assets with it), so let those bytes through untouched.
+    */
+  private val passThroughIdentity: PartialFunction[(fs2.Stream[IO, Byte], String), fs2.Stream[IO, Byte]] = {
+    case (body, encoding) if encoding.isEmpty || encoding.equalsIgnoreCase("identity") => body
+  }
 
   private val healthRoute = Http4sServerInterpreter[IO]().toRoutes(
     HealthEndpoint.health.serverLogicSuccess(_ => IO.pure("ok")),
@@ -53,7 +61,7 @@ object ServerBuilder {
   ): Resource[IO, Server] = {
     val rpOrigins = webAuthnOrigins.getOrElse(defaultRpOrigins)
     for {
-      sttpBackend     <- HttpClientCatsBackend.resource[IO]()
+      sttpBackend     <- HttpClientFs2Backend.resource[IO](customEncodingHandler = passThroughIdentity)
       webAuthnService <- Resource.eval(WebAuthnService(repos.passkeyCredentials, defaultRpId, defaultRpName, rpOrigins))
       ebConfigOpt     <- Resource.eval(EnableBankingConfig.fromEnv)
       ebClientOpt     <- ebConfigOpt.traverse { cfg =>
@@ -69,11 +77,13 @@ object ServerBuilder {
       _               <- Resource.eval(ruleEngine.applyRules())
       // Background-job runner lives on an app-scoped supervisor so import/sync work outlives the HTTP request.
       supervisor      <- Supervisor[IO]
+      sessionService   = SessionService(repos.sessions)
+      // Analytics is optional: without SSBUDGET_METABASE_URL this bundle is inert and the app is unchanged.
+      analytics       <- Analytics.resource(dbPath, sttpBackend, repos.analyticsState, supervisor, sessionService, testMode)
       // Any job left Running by a previous process was interrupted by the restart — mark it Failed so the UI doesn't show a phantom in-progress run.
       _               <- Resource.eval(IO.realTimeInstant.flatMap(now => repos.importJobs.failRunning(now, "Interrupted by a server restart")))
       server          <- {
         val passwordService  = PasswordService()
-        val sessionService   = SessionService(repos.sessions)
         val currencyService  = new CurrencyService(repos, sttpBackend)
         val bankingService   = new BankingService(repos, ebClientOpt)
         val importService    = new TransactionImportService(repos, ebClientOpt, ruleEngine)
@@ -90,14 +100,26 @@ object ServerBuilder {
 
         // Routes now handle their own auth via Tapir's serverSecurityLogic
         val dataRoutes =
-          Routes.make(repos, xa, dbPath, sessionService, currencyService, bankingService, importService, importJobService, ruleEngine, testMode)
+          Routes.make(
+            repos,
+            xa,
+            dbPath,
+            sessionService,
+            currencyService,
+            bankingService,
+            importService,
+            importJobService,
+            ruleEngine,
+            analytics.service,
+            testMode,
+          )
 
         // Static file routes for production (serves frontend build)
         val staticRoutes = StaticRoutes.make(staticDir)
 
         // Static routes first for non-API paths, then API routes
         // (staticRoutes only handles non-API paths via the make method)
-        val allRoutes = staticRoutes <+> healthRoute <+> authRoutes <+> dataRoutes
+        val allRoutes = analytics.routes <+> staticRoutes <+> healthRoute <+> authRoutes <+> dataRoutes
 
         EmberServerBuilder
           .default[IO]

@@ -119,6 +119,22 @@ PasskeyCredential:
   - credentialId, publicKey, signCount, createdAt
 ```
 
+## Analytics
+
+The Analytics page is served by a **bundled Metabase**, not by in-app charting. It is optional:
+without `SSBUDGET_METABASE_URL` the proxy, provisioning and nav entry all disappear.
+
+- Metabase binds to loopback; the app proxies it under `/metabase` on its own origin, gated by the
+  app session and injecting `X-Metabase-Session` from a service account (`AnalyticsProxyRoutes`).
+- The in-app dashboard is a **static embed** — a short-lived signed JWT, minted per page load.
+- Metabase explores `v_*` SQL views, not raw tables (cents → major units, ISO dates, resolved names).
+- A canonical dashboard is seeded from JSON on first boot and **never reconciled** — the user's edits
+  win. The marker lives in `analytics_state`.
+
+`./dev.sh` runs it locally and `./build.sh` bundles it into the image — both on by default, both
+take `--no-analytics`. The container generates and persists the Metabase credentials itself, so a
+deploy needs no analytics config. See `docs/metabase-analytics.md`.
+
 ## Authentication
 
 **Passkeys (WebAuthn)** - Modern passwordless authentication

@@ -8,7 +8,6 @@ import ssbudget.backend.db.Repositories
 import ssbudget.shared.api.{CurrencySettingsResponse, ExchangeRatesResponse, KnownCurrency}
 import ssbudget.shared.model.{Currency, CurrencySetting, ExchangeRate}
 import sttp.client3.*
-import sttp.client3.httpclient.cats.HttpClientCatsBackend
 
 import java.time.Instant
 

@@ -316,12 +316,11 @@ object Endpoints {
   }
 
   object analytics {
-    // `months` = window size in calendar months for the per-category breakdown (default applied server-side).
-    val overview: Secured[Option[Int], AnalyticsResponse] =
+    // Whether analytics is deployed, plus freshly signed URLs for the embedded dashboard and for Metabase itself.
+    val config: Secured[Unit, AnalyticsConfig] =
       secureEndpoint.get
-        .in("analytics" / "overview")
-        .in(query[Option[Int]]("months"))
-        .out(jsonBody[AnalyticsResponse])
+        .in("analytics" / "config")
+        .out(jsonBody[AnalyticsConfig])
         .errorOut(stringBody)
   }
 
@@ -446,7 +445,7 @@ object Endpoints {
     rules.preview,
     rules.exportRules,
     rules.importRules,
-    analytics.overview,
+    analytics.config,
     test.reset,
   )
 
@@ -701,11 +700,10 @@ object Endpoints {
     }
 
     object analytics {
-      val overview: Client[Option[Int], AnalyticsResponse] =
+      val config: Client[Unit, AnalyticsConfig] =
         baseEndpoint.get
-          .in("analytics" / "overview")
-          .in(query[Option[Int]]("months"))
-          .out(jsonBody[AnalyticsResponse])
+          .in("analytics" / "config")
+          .out(jsonBody[AnalyticsConfig])
           .errorOut(stringBody)
     }
 
