@@ -2,6 +2,7 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
+import ssbudget.frontend.components.InlineEdit
 import ssbudget.frontend.services.ApiClient
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.shared.api.{
@@ -499,7 +500,7 @@ object BankingPage {
 
     def submit(): Unit = {
       val name  = nameVar.now().trim
-      val cents = parseAmountCents(limitVar.now())
+      val cents = InlineEdit.parseCentsOpt(limitVar.now())
       if name.isEmpty then formErrorV.set(Some("Enter a group name."))
       else if cents.isEmpty then formErrorV.set(Some("Enter a valid limit amount, e.g. 10000."))
       else {
@@ -772,9 +773,6 @@ object BankingPage {
       ),
     )
   }
-
-  private def parseAmountCents(s: String): Option[Long] =
-    scala.util.Try((BigDecimal(s.trim.replace(",", ".")) * 100).setScale(0, BigDecimal.RoundingMode.HALF_UP).toLongExact).toOption
 
   private def statusBadge(status: ConnectionStatus): HtmlElement = {
     val (cls0, label) = status match {

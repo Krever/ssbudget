@@ -16,13 +16,13 @@ trait CategoryRepository {
 
 class CategoryRepositoryImpl(xa: Transactor[IO]) extends CategoryRepository {
 
-  private val columns = fr"id, name, color, budget_type"
+  private val columns = fr"id, name, color, budget_type, budget_method, budget_lookback_months, budget_fixed_cents"
 
   override def create(category: Category): IO[Unit] =
-    sql"INSERT INTO categories (id, name, color, budget_type) VALUES (${category.id}, ${category.name}, ${category.color}, ${category.budgetType})".update.run
-      .transact(
-        xa,
-      )
+    sql"""INSERT INTO categories (id, name, color, budget_type, budget_method, budget_lookback_months, budget_fixed_cents)
+          VALUES (${category.id}, ${category.name}, ${category.color}, ${category.budgetType},
+                  ${category.budget.method}, ${category.budget.lookbackMonths}, ${category.budget.fixedCents})""".update.run
+      .transact(xa)
       .void
 
   override def findAll: IO[List[Category]] =
@@ -32,7 +32,11 @@ class CategoryRepositoryImpl(xa: Transactor[IO]) extends CategoryRepository {
     (fr"SELECT" ++ columns ++ fr"FROM categories WHERE id = $id").query[Category].option.transact(xa)
 
   override def update(category: Category): IO[Unit] =
-    sql"UPDATE categories SET name = ${category.name}, color = ${category.color}, budget_type = ${category.budgetType} WHERE id = ${category.id}".update.run
+    sql"""UPDATE categories
+          SET name = ${category.name}, color = ${category.color}, budget_type = ${category.budgetType},
+              budget_method = ${category.budget.method}, budget_lookback_months = ${category.budget.lookbackMonths},
+              budget_fixed_cents = ${category.budget.fixedCents}
+          WHERE id = ${category.id}""".update.run
       .transact(xa)
       .void
 

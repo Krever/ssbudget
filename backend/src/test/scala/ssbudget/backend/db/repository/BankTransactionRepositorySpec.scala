@@ -304,7 +304,7 @@ class BankTransactionRepositorySpec extends RepositorySpec {
     }
   }
 
-  "monthlySpendByCategory breaks spend down per YYYY-MM (powers the per-category monthly average + analytics)" in {
+  "monthlySpendByCategory breaks spend down per YYYY-MM (powers the per-category budget statistic + analytics)" in {
     val repo    = new BankTransactionRepositoryImpl(xa)
     val catRepo = new CategoryRepositoryImpl(xa)
     for {

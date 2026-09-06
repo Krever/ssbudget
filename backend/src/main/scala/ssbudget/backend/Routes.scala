@@ -552,7 +552,7 @@ object Routes {
       existingOpt <- repos.categories.findById(id)
       result      <- existingOpt match {
                        case Some(_) =>
-                         val updated = Category(id, dto.name, dto.color, dto.budgetType)
+                         val updated = dto.toCategory(id)
                          repos.categories.update(updated).as(Right(updated))
                        case None    => IO.pure(Left(s"Category not found: ${id.value}"))
                      }
@@ -580,26 +580,6 @@ object Routes {
                    }
     } yield result
 
-  /** Month index (year*12 + month) for a "YYYY-MM" bucket, so we can count how many calendar months a range spans. */
-  private def monthIndex(ym: String): Int =
-    ym.split("-") match {
-      case Array(y, m) => y.toInt * 12 + m.toInt
-      case _           => 0
-    }
-
-  /** Mean monthly spend over the category's ACTIVE span: total spend divided by the number of calendar months from its first to its last
-    * month-with-spend (inclusive). `monthMap` holds only months that actually had spend (primary-currency cents), so its min/max keys are the active
-    * span — empty months before the first / after the last are NOT counted (a recently-started or long-dormant category isn't diluted by leading or
-    * trailing zeros), while interior gap months are counted as zero (amortised).
-    */
-  private def monthlyMean(monthMap: Map[String, Long]): Long =
-    if monthMap.isEmpty then 0L
-    else {
-      val idxs = monthMap.keys.map(monthIndex)
-      val span = idxs.max - idxs.min + 1
-      if span <= 0 then 0L else monthMap.values.sum / span
-    }
-
   private def startOfDayUtc(i: Instant): Instant =
     java.time.LocalDate.ofInstant(i, java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
 
@@ -617,11 +597,13 @@ object Routes {
 
   /** Per-category spend stats, converted to the primary currency at the latest rates (mixed-currency categories counted in full). Spend is NET
     * (outflows minus inflows) so pure-inflow categories (salary, refunds) aren't reported as 0 and refunds reduce a category's spend:
-    *   - `avgMonthlyCents` = MEAN monthly net spend over the category's active span (see [[monthlyMean]]); current partial month excluded.
+    *   - `expectedMonthlyCents` = the category's monthly figure, derived from its completed-month net spend the way its own budget method says (see
+    *     [[CategoryBudget.expectedMonthly]]); the current partial month is excluded.
     *   - `currentPeriodSpentCents` = net spend since the current period started (from the start of that calendar day).
     *   - `lastPeriodSpentCents` = net spend over the previous (most recent closed) period; 0 if none.
     *   - `currency` = the primary currency.
     *   - `overrideRemainingCents` = the user's manual remaining-amount override for the current period, when set.
+    *   - `monthlyHistory` = the recent completed months behind the figure, for the chart under a category's settings.
     */
 
   private def categorySummaries(repos: Repositories): Result[List[CategorySummary]] =
@@ -650,6 +632,8 @@ object Routes {
       // Manual remaining-amount overrides apply to the current period only.
       overrides   <- currentOpt.traverse(p => repos.categoryBudgetOverrides.findByPeriod(p.id)).map(_.getOrElse(Map.empty))
     } yield {
+      // The month every lookback window ends on: `currentMonth` is the in-progress one, and the history stops just short of it.
+      val lastCompleteMonth                           = CategoryBudget.lastCompleteMonthIndex(now)
       val rateMap                                     = rateList.flatten.map(r => r.fromCurrency -> r).toMap
       // Convert cents in any currency to the primary currency; falls back to 1:1 if a rate is missing (rare — currency not enabled).
       def toPrimary(cents: Long, cur: Currency): Long =
@@ -669,11 +653,13 @@ object Routes {
         val monthMap = byCatMonth.getOrElse(cat.id, Map.empty[String, Long])
         CategorySummary(
           cat,
-          avgMonthlyCents = monthlyMean(monthMap),
+          expectedMonthlyCents = cat.budget.expectedMonthly(monthMap, lastCompleteMonth),
           currentPeriodSpentCents = curByCat.getOrElse(cat.id, 0L),
           lastPeriodSpentCents = prevByCat.getOrElse(cat.id, 0L),
           currency = primary,
           overrideRemainingCents = overrides.get(cat.id),
+          // The same months the statistic ran over, each already flagged with whether its window counted it.
+          monthlyHistory = cat.budget.chartSeries(monthMap, lastCompleteMonth),
         )
       })
     }

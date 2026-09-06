@@ -13,6 +13,7 @@ object CategoryId extends StringId[CategoryId]
 final case class Category(
     id: CategoryId,
     name: String,
-    color: Option[String],                        // optional hex swatch for the UI
-    budgetType: Option[CategoryBudgetType] = None, // None = not a budget; otherwise how its monthly average predicts remaining spend
+    color: Option[String],                         // optional hex swatch for the UI
+    budgetType: Option[CategoryBudgetType] = None, // None = not a budget; otherwise how its monthly figure is drawn down
+    budget: CategoryBudget = CategoryBudget(),     // how that monthly figure is derived
 ) derives Codec.AsObject

@@ -107,6 +107,12 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   protected def txTable: WebElement =
     driver.findElement(By.xpath("//table[.//th[text()='Description']]"))
 
+  /** The Categories card on the Transactions page. One locator with four owners — its header text has already been renamed once, and four private
+    * copies is four edits.
+    */
+  protected def categoriesCard: WebElement =
+    findCard("Categories & monthly budgets")
+
   /** The open rule modal (create or edit). One locator with two owners — the Transactions page and the Dashboard's triage card both open it. */
   protected def ruleModal: WebElement =
     driver.findElement(By.cssSelector(".modal.show, .modal.d-block"))
@@ -173,6 +179,12 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   protected def openDashboard(): Unit = {
     driver.get(baseUrl)
     waitForPage("Dashboard")
+  }
+
+  /** Open the Transactions page — the categories card, the rules card and the transaction table. */
+  protected def openTransactions(): Unit = {
+    driver.get(s"$baseUrl/transactions")
+    waitForPage("Transactions")
   }
 
   /** Ensure there's a current period, starting one if needed */

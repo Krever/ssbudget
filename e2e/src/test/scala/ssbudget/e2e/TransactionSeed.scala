@@ -33,11 +33,14 @@ object TransactionSeed {
 
   def accountUid: String = "e2e-acc-uid"
 
-  /** An instant inside the previous calendar month. A category's budget is the mean over COMPLETED months, so a seed booked today produces no budget
-    * at all — anything testing a budget figure has to book its history here.
+  /** An instant inside the n-th completed calendar month back: `monthsAgo(1)` is the month before this one. A category's budget is a statistic over
+    * COMPLETED months, so a seed booked today produces no budget at all — anything testing a budget figure has to book its history here.
     */
-  def lastMonth: Instant =
-    java.time.LocalDate.now(java.time.ZoneOffset.UTC).withDayOfMonth(1).minusDays(5).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
+  def monthsAgo(n: Int): Instant =
+    java.time.LocalDate.now(java.time.ZoneOffset.UTC).minusMonths(n.toLong).withDayOfMonth(15).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
+
+  /** An instant inside the previous calendar month. */
+  def lastMonth: Instant = monthsAgo(1)
 
   /** Insert one booked outflow. `bookedAt` defaults to now, which puts it in the current period. */
   def addTransaction(

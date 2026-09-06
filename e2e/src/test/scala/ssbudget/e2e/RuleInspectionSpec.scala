@@ -22,8 +22,7 @@ class RuleInspectionSpec extends E2ESpec {
     TransactionSeed.addTransaction(counterparty, -4200)
 
     // Let the engine assign the category, exactly as it does after a real import.
-    driver.get(s"$baseUrl/transactions")
-    waitForPage("Transactions")
+    openTransactions()
     click(findCard("Categorization rules"), "Re-apply")
 
     driver.get(s"$baseUrl/transactions?category=all")

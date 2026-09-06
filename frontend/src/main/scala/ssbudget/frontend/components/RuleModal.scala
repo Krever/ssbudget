@@ -229,7 +229,8 @@ object RuleModal {
       staticField("Account", uid.take(12) + "…")
     case RuleCriterion.Direction(outflow)        =>
       val dir = Var(outflow)
-      labeled("Direction")(
+      InlineEdit.labelled(
+        "Direction",
         select(
           cls := "form-select form-select-sm w-auto",
           value <-- dir.signal.map(o => if o then "outflow" else "inflow"),
@@ -242,7 +243,8 @@ object RuleModal {
       val opVar        = Var(op0)
       val amt          = Var(centsToStr(a))
       def sync(): Unit = cr.set(RuleCriterion.AmountCompare(opVar.now(), strToCents(amt.now())))
-      labeled("Amount")(
+      InlineEdit.labelled(
+        "Amount",
         select(
           cls := "form-select form-select-sm w-auto",
           value <-- opVar.signal.map(AmountMatchOp.asString),
@@ -260,7 +262,8 @@ object RuleModal {
     case RuleCriterion.AmountBetween(lo, hi)     =>
       val loV          = Var(centsToStr(lo)); val hiV = Var(centsToStr(hi))
       def sync(): Unit = cr.set(RuleCriterion.AmountBetween(strToCents(loV.now()), strToCents(hiV.now())))
-      labeled("Amount between")(
+      InlineEdit.labelled(
+        "Amount between",
         input(
           cls    := "form-control form-control-sm w-auto",
           tpe    := "number",
@@ -275,7 +278,8 @@ object RuleModal {
       )
     case RuleCriterion.CurrencyIs(cur)           =>
       val curVar = Var(cur.code)
-      labeled("Currency")(
+      InlineEdit.labelled(
+        "Currency",
         select(
           cls := "form-select form-select-sm w-auto",
           value <-- curVar.signal,
@@ -287,15 +291,13 @@ object RuleModal {
       )
   }
 
-  private def labeled(labelText: String)(controls: HtmlElement*): HtmlElement =
-    div(cls := "d-flex align-items-center gap-2", span(cls := "small text-muted", labelText), controls)
-
   private def staticField(labelText: String, value: String): HtmlElement =
-    div(cls := "d-flex align-items-center gap-2", span(cls := "small text-muted", labelText), span(cls := "badge text-bg-light", value))
+    InlineEdit.labelled(labelText, span(cls := "badge text-bg-light", value))
 
   private def singleTextEditor(labelText: String, initial: String, set: String => Unit): HtmlElement = {
     val v = Var(initial)
-    labeled(labelText)(
+    InlineEdit.labelled(
+      labelText,
       input(cls := "form-control form-control-sm", controlled(value <-- v.signal, onInput.mapToValue --> { s => v.set(s); set(s) })),
     )
   }

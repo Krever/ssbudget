@@ -64,7 +64,7 @@ trait DataService {
   def plannedIncomes: Signal[List[BudgetItemDefinition]]
   def currentPeriodRecords: Signal[List[ExpenseRecord]]
 
-  // Category budgets (rolling 3-month average per category, computed server-side)
+  // Category budgets (each category's monthly figure and period spend, computed server-side — see CategoryBudgetMethod)
   def categorySummaries: Signal[List[CategorySummary]]
   def budgetedCategories: Signal[List[CategorySummary]] // only categories flagged as monthly budgets
 

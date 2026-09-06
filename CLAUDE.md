@@ -32,7 +32,16 @@ Think "Google Sheets for personal budget" not "enterprise dashboard with cards e
 - There is deliberately no automatic scaling: an item is either expected in full, part-paid, or settled
 
 Variable spend (groceries, fuel) is **not** modelled here — it comes from **Category Budgets**, which derive expected spend from
-real bank transactions (Steady / Bill / Subscription, with a per-period manual override).
+real bank transactions. Two independent settings per category:
+- **Budget** (`CategoryBudget`) picks the monthly figure: `Average` / `Median` over the last N completed months (blank = all
+  history), or `Fixed` — a typed amount, history ignored. Leading/trailing empty months are never counted, so a short history isn't
+  diluted by a long window; interior gap months count as zero.
+- **Type** (`CategoryBudgetType`) spreads that figure over the period: Steady / Bill / Subscription, with a per-period manual
+  override of what's remaining.
+
+Both are edited in a settings strip that opens under the category's row on the Transactions page; the table itself stays
+read-only so the figures scan like a spreadsheet. The strip charts `CategorySummary.monthlyHistory` — the same series the
+statistic ran over — with the lookback window shaded, so the window can be picked by eye rather than guessed.
 
 ### Savings
 
@@ -109,7 +118,12 @@ Account (spending accounts and savings buckets, unified):
   - balanceCents, balanceSource (manual|bank|card_group), balanceUpdatedAt
 
 Category / CategoryBudgetOverride:
-  - category: id, name, color, budgetType (steady|bill|subscription)
+  - category: id, name, color
+      budgetType (steady|bill|subscription)  -- how the monthly figure is drawn down over a period; NULL = not a budget
+      budget: CategoryBudget                 -- how that figure is DERIVED; one value, flattened to three columns
+        method (average|median|fixed)
+        lookbackMonths                       -- completed months the average/median sees; NULL = all history
+        fixedCents                           -- signed; the figure itself when method = fixed
   - override: (periodId, categoryId) -> remainingCents   -- per-period manual remaining
 
 ExchangeRate:

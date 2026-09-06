@@ -25,7 +25,7 @@ object InlineEdit {
   /** Amount input in major units, right-aligned. Read it back with [[parseCents]]. */
   def moneyInput(
       defaultCents: Option[Long],
-      refCallback: org.scalajs.dom.html.Input => Unit,
+      refCallback: org.scalajs.dom.html.Input => Unit = _ => (),
       placeholderText: String = "Amount",
       autoFocus: Boolean = false,
   ): HtmlElement =
@@ -39,7 +39,19 @@ object InlineEdit {
       Option.when(autoFocus)(onMountFocus),
     )
 
-  /** Cents from a [[moneyInput]] — 0 for anything unparseable (including a not-yet-mounted, and therefore null, ref). */
+  /** Cents from a [[moneyInput]] — 0 for anything unparseable, including a not-yet-mounted (and therefore null) ref. */
   def parseCents(input: org.scalajs.dom.html.Input): Long =
-    Option(input).flatMap(_.value.toDoubleOption).map(d => (d * 100).toLong).getOrElse(0L)
+    Option(input).flatMap(i => parseCentsOpt(i.value)).getOrElse(0L)
+
+  /** Cents from an amount typed in major units, comma or dot. The one parsing rule; [[parseCents]] is this plus a default. It differs only in
+    * answering a different question — `None` keeps "nothing was typed" distinct from zero, which is what an optional amount (a card limit, a fixed
+    * budget figure) needs.
+    */
+  def parseCentsOpt(text: String): Option[Long] =
+    scala.util.Try((BigDecimal(text.trim.replace(",", ".")) * 100).setScale(0, BigDecimal.RoundingMode.HALF_UP).toLongExact).toOption
+
+  /** A control with its name in front of it. One owner: the settings strip and the rule modal draw the same shape, and an e2e locator depends on it.
+    */
+  def labelled(name: String, controls: Modifier[HtmlElement]*): HtmlElement =
+    div(cls := "d-flex align-items-center gap-2", span(cls := "small text-muted", name), controls)
 }

@@ -74,10 +74,9 @@ class CategoryDrillDownSpec extends E2ESpec {
     val categoryId = TransactionSeed.addCategory("Drilldown Fuel")
     TransactionSeed.addTransaction("Orlen Drill E2E", -25000, categoryId = Some(categoryId))
 
-    driver.get(s"$baseUrl/transactions")
-    waitForPage("Transactions")
+    openTransactions()
 
-    val card = findCard("Categories & monthly averages")
+    val card = categoriesCard
     val row  = card.findElement(By.xpath(".//tr[.//span[text()='Drilldown Fuel']]"))
     row.findElement(By.xpath(".//a[contains(text(),'250')]")).click()
 
@@ -92,11 +91,10 @@ class CategoryDrillDownSpec extends E2ESpec {
     ensurePeriodExists()
     TransactionSeed.addCategory("Drilldown Unspent")
 
-    driver.get(s"$baseUrl/transactions")
-    waitForPage("Transactions")
+    openTransactions()
 
     // Nothing to drill into, so the figures are deliberately not links.
-    val card = findCard("Categories & monthly averages")
+    val card = categoriesCard
     val row  = card.findElement(By.xpath(".//tr[.//span[text()='Drilldown Unspent']]"))
     assertAbsent(row, By.cssSelector("a"))
   }

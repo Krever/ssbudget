@@ -72,41 +72,60 @@ final case class SetNoteRequest(note: Option[String]) derives Codec.AsObject
 
 final case class CreateCategory(name: String, color: Option[String], budgetType: Option[CategoryBudgetType] = None) derives Codec.AsObject
 
-final case class UpdateCategory(name: String, color: Option[String], budgetType: Option[CategoryBudgetType] = None) derives Codec.AsObject
+/** Full replacement of a category's editable state. Its budget travels as one value, the way [[ssbudget.shared.model.CategoryBudget]] holds it. */
+final case class UpdateCategory(
+    name: String,
+    color: Option[String],
+    budgetType: Option[CategoryBudgetType] = None,
+    budget: CategoryBudget = CategoryBudget(),
+) derives Codec.AsObject {
+
+  /** The category this request describes, under the id the URL names, with its window clamped to what may actually be stored. Paired with
+    * [[UpdateCategory.of]] so the field list is written once at each end rather than unpacked and repacked by hand.
+    */
+  def toCategory(id: CategoryId): Category = Category(id, name, color, budgetType, budget.normalized)
+}
+
+object UpdateCategory {
+  def of(c: Category): UpdateCategory = UpdateCategory(c.name, c.color, c.budgetType, c.budget)
+}
 
 /** Spending stats for a category, computed server-side from bank transactions (the browser no longer holds them). All amounts are converted to the
   * primary currency at the latest rates, so a category with mixed-currency transactions is counted in full.
   *
-  *   - `avgMonthlyCents`: MEAN monthly NET spend over the category's active span — total completed-month spend divided by the number of months from
-  *     its first to its last month-with-spend (the budget when `category.budgetType` is set). The in-progress current month is excluded and empty
-  *     leading/trailing months don't count, so a recently-started or dormant category isn't diluted by zeros.
+  *   - `expectedMonthlyCents`: the category's monthly figure (its budget when `category.budgetType` is set), derived from completed-month NET spend
+  *     the way `category.budget` says — see [[ssbudget.shared.model.CategoryBudget.expectedMonthly]].
   *   - `currentPeriodSpentCents`: net spend since the current budget period started.
   *   - `lastPeriodSpentCents`: net spend over the previous (most recent closed) period; 0 if there is none.
   *   - `currency`: the primary currency (all category spend is converted to it).
   *   - `overrideRemainingCents`: manual remaining-amount override for the CURRENT period, when the user set one (see [[remainingCents]]).
+  *   - `monthlyHistory`: the completed months behind `expectedMonthlyCents`, oldest first and gap months filled in as zero — the series the statistic
+  *     actually saw, so the UI can draw the shape behind the number. Capped to the most recent
+  *     [[ssbudget.shared.model.CategoryBudget.maxLookbackMonths]].
   *
   * Spend is NET (outflows minus inflows), so pure-inflow categories (salary, refunds) show a negative figure instead of 0, and refunds reduce a
   * category's spend.
   */
 final case class CategorySummary(
     category: Category,
-    avgMonthlyCents: Long,
+    expectedMonthlyCents: Long,
     currentPeriodSpentCents: Long,
     lastPeriodSpentCents: Long,
     currency: Currency,
     overrideRemainingCents: Option[Long] = None,
+    monthlyHistory: List[MonthlySpend] = Nil,
 ) derives Codec.AsObject {
 
   /** Which way this category's money flows: `1` when it is spent, `-1` when it arrives (its net spend, and so its budget, is negative). This is the
     * ONE rule for direction in the app — everything else multiplies by it rather than re-deriving it from a sign somewhere.
     */
-  def direction: Long = if avgMonthlyCents < 0 || (avgMonthlyCents == 0 && currentPeriodSpentCents < 0) then -1L else 1L
+  def direction: Long = if expectedMonthlyCents < 0 || (expectedMonthlyCents == 0 && currentPeriodSpentCents < 0) then -1L else 1L
 
   /** Whether this category's money flows IN. Drives wording and colour. */
   def isIncome: Boolean = direction < 0
 
   /** The budget, as a magnitude in the category's own direction: what is expected to be spent, or to arrive. */
-  def expectedMagnitude: Long = math.abs(avgMonthlyCents)
+  def expectedMagnitude: Long = math.abs(expectedMonthlyCents)
 
   /** What has already moved this period in the category's own direction — spent for an expense, received for an income. Negative if it moved the
     * other way (a refund on an expense category, say), which the budget formulas treat as no progress rather than as progress backwards.

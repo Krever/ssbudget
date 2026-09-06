@@ -20,24 +20,25 @@ object TapirSchemas {
   given Schema[ImportJobId]          = Schema.string.map[ImportJobId]((s: String) => Some(ImportJobId(s)))(_.value)
 
   // Enums and value types
-  given Schema[Currency]           = Schema.string.map[Currency]((s: String) => Some(Currency(s)))(_.code)
-  given Schema[BudgetItemType]     = Schema.derivedEnumeration[BudgetItemType].defaultStringBased
-  given Schema[ConnectionStatus]   = Schema.derivedEnumeration[ConnectionStatus].defaultStringBased
-  given Schema[AccountRole]        = Schema.derivedEnumeration[AccountRole].defaultStringBased
-  given Schema[BalanceSource]      = Schema.derivedEnumeration[BalanceSource].defaultStringBased
-  given Schema[BankLinkTarget]     = Schema.derived[BankLinkTarget]
-  given Schema[TransactionStatus]  = Schema.derivedEnumeration[TransactionStatus].defaultStringBased
-  given Schema[CategorySource]     = Schema.derivedEnumeration[CategorySource].defaultStringBased
-  given Schema[CategoryBudgetType] = Schema.derivedEnumeration[CategoryBudgetType].defaultStringBased
-  given Schema[ImportJobStatus]    = Schema.derivedEnumeration[ImportJobStatus].defaultStringBased
-  given Schema[ImportJobKind]      = Schema.derivedEnumeration[ImportJobKind].defaultStringBased
-  given Schema[ImportItemStatus]   = Schema.derivedEnumeration[ImportItemStatus].defaultStringBased
-  given Schema[ImportJobItem]      = Schema.derived[ImportJobItem]
-  given Schema[ImportJob]          = Schema.derived[ImportJob]
-  given Schema[TextMatchOp]        = Schema.derivedEnumeration[TextMatchOp].defaultStringBased
-  given Schema[AmountMatchOp]      = Schema.derivedEnumeration[AmountMatchOp].defaultStringBased
-  given Schema[RuleCriterion]      = Schema.derived[RuleCriterion]
-  given Schema[ClassificationRule] = Schema.derived[ClassificationRule]
+  given Schema[Currency]             = Schema.string.map[Currency]((s: String) => Some(Currency(s)))(_.code)
+  given Schema[BudgetItemType]       = Schema.derivedEnumeration[BudgetItemType].defaultStringBased
+  given Schema[ConnectionStatus]     = Schema.derivedEnumeration[ConnectionStatus].defaultStringBased
+  given Schema[AccountRole]          = Schema.derivedEnumeration[AccountRole].defaultStringBased
+  given Schema[BalanceSource]        = Schema.derivedEnumeration[BalanceSource].defaultStringBased
+  given Schema[BankLinkTarget]       = Schema.derived[BankLinkTarget]
+  given Schema[TransactionStatus]    = Schema.derivedEnumeration[TransactionStatus].defaultStringBased
+  given Schema[CategorySource]       = Schema.derivedEnumeration[CategorySource].defaultStringBased
+  given Schema[CategoryBudgetType]   = Schema.derivedEnumeration[CategoryBudgetType].defaultStringBased
+  given Schema[CategoryBudgetMethod] = Schema.derivedEnumeration[CategoryBudgetMethod].defaultStringBased
+  given Schema[ImportJobStatus]      = Schema.derivedEnumeration[ImportJobStatus].defaultStringBased
+  given Schema[ImportJobKind]        = Schema.derivedEnumeration[ImportJobKind].defaultStringBased
+  given Schema[ImportItemStatus]     = Schema.derivedEnumeration[ImportItemStatus].defaultStringBased
+  given Schema[ImportJobItem]        = Schema.derived[ImportJobItem]
+  given Schema[ImportJob]            = Schema.derived[ImportJob]
+  given Schema[TextMatchOp]          = Schema.derivedEnumeration[TextMatchOp].defaultStringBased
+  given Schema[AmountMatchOp]        = Schema.derivedEnumeration[AmountMatchOp].defaultStringBased
+  given Schema[RuleCriterion]        = Schema.derived[RuleCriterion]
+  given Schema[ClassificationRule]   = Schema.derived[ClassificationRule]
 
   // Model types
   given Schema[Account]              = Schema.derived[Account]
@@ -79,6 +80,8 @@ object TapirSchemas {
   given Schema[SetNoteRequest]             = Schema.derived[SetNoteRequest]
   given Schema[CreateCategory]             = Schema.derived[CreateCategory]
   given Schema[UpdateCategory]             = Schema.derived[UpdateCategory]
+  given Schema[MonthlySpend]               = Schema.derived[MonthlySpend]
+  given Schema[CategoryBudget]             = Schema.derived[CategoryBudget]
   given Schema[CategorySummary]            = Schema.derived[CategorySummary]
   given Schema[SetCategoryOverrideRequest] = Schema.derived[SetCategoryOverrideRequest]
   given Schema[CreateRuleRequest]          = Schema.derived[CreateRuleRequest]

@@ -3,7 +3,7 @@ package ssbudget.frontend.pages
 import com.raquo.laminar.api.L.*
 import io.circe.syntax.*
 import org.scalajs.dom
-import ssbudget.frontend.components.{CategoryCombobox, RuleModal}
+import ssbudget.frontend.components.{CategoryCombobox, InlineEdit, RuleModal, Sparkline}
 import ssbudget.frontend.services.ApiClient
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -22,6 +22,8 @@ import ssbudget.shared.api.{
 import ssbudget.shared.model.{
   BankTransaction,
   Category,
+  CategoryBudget,
+  CategoryBudgetMethod,
   CategoryBudgetType,
   CategoryId,
   ClassificationRule,
@@ -83,7 +85,7 @@ object TransactionsPage {
     def loadSummaries(): Unit =
       apiClient.categories.summaries().onComplete {
         case Success(s) => summariesVar.set(s)
-        case Failure(_) => () // averages are informational; ignore failures
+        case Failure(_) => () // the derived figures are informational; ignore failures
       }
 
     def loadRules(): Unit =
@@ -538,6 +540,17 @@ object TransactionsPage {
     )
   }
 
+  /** Columns in the categories table; the settings strip spans all of them. */
+  private val columnCount = 6
+
+  /** The `<option>` value standing for "not a budget" — [[CategoryBudgetType]] has no case for it, since it is the absence of one. */
+  private val offBudgetType = "off"
+
+  /** A category's budget settings as one scannable line: how it's drawn down, then how its figure is derived and over how long — "Steady · median 6".
+    * A category that isn't a budget reads as "—"; its figure is still computed and shown, but nothing consumes it.
+    */
+  private def budgetSummary(c: Category): String = c.budgetType.fold("—")(t => s"${t.toString} · ${c.budget.summary}")
+
   /** Inline explanation of the budget types (shown in the categories card on demand). Each type predicts the money still needed before the next
     * paycheck differently — see also `CategoryBudgetType.remaining`.
     */
@@ -549,7 +562,7 @@ object TransactionsPage {
         cls   := "mb-0 ps-3",
         li(
           span(cls := "fw-semibold", "Steady"),
-          " — time-based (groceries, eating out): reserves the remaining-time share of the monthly average; overspending never zeroes it.",
+          " — time-based (groceries, eating out): reserves the remaining-time share of the monthly figure; overspending never zeroes it.",
         ),
         li(
           span(cls := "fw-semibold", "Bill"),
@@ -557,9 +570,21 @@ object TransactionsPage {
         ),
         li(
           span(cls := "fw-semibold", "Subscription"),
-          " — fixed pool (subscriptions): reserves average − spent; pay them all early and nothing more is reserved.",
+          " — fixed pool (subscriptions): reserves the monthly figure − spent; pay them all early and nothing more is reserved.",
         ),
         li(span(cls := "fw-semibold", "Off"), " — not tracked as a budget."),
+      ),
+      div(cls := "mt-2 mb-1", "Method = where that monthly figure comes from:"),
+      ul(
+        cls   := "mb-0 ps-3",
+        li(span(cls := "fw-semibold", "Average"), " — the mean of the months on record."),
+        li(span(cls := "fw-semibold", "Median"), " — the middle month, so one holiday month doesn't inflate the figure."),
+        li(span(cls := "fw-semibold", "Fixed"), " — the amount you type; history is ignored."),
+        li(
+          span(cls := "fw-semibold", "Months"),
+          " — how far back the average/median looks (blank = all history). Months before the category's first transaction never count, so a short " +
+            "history isn't diluted by a long window.",
+        ),
       ),
     )
 
@@ -576,6 +601,7 @@ object TransactionsPage {
     val editingId = Var(Option.empty[CategoryId]) // category whose name is being edited inline
     val editName  = Var("")
     val showHelp  = Var(false)                    // toggles the budget-type explanation
+    val expanded  = Var(Set.empty[CategoryId])    // categories whose settings strip is open
     val collapsed = Var(loadFlag(categoriesFoldKey))
 
     def addCategory(): Unit = {
@@ -586,13 +612,23 @@ object TransactionsPage {
       }
     }
 
+    // Every category edit goes out as the whole category — the budget settings only mean anything together, which is why they travel as one value.
+    def saveCategory(c: Category): Unit =
+      apiClient.categories
+        .update(c.id, UpdateCategory.of(c))
+        .onComplete {
+          // The response IS the updated category, so patch the list instead of re-fetching it (kept in the server's name order). Only the derived
+          // figures still need a round-trip — they are recomputed from transactions, not echoed back.
+          case Success(updated) =>
+            catsVar.update(_.map(c0 => if c0.id == updated.id then updated else c0).sortBy(_.name)); reloadSummaries()
+          case Failure(_)       => ()
+        }
+
     def renameCategory(c: Category): Unit = {
       val name = editName.now().trim
       editingId.set(None)
-      if name.nonEmpty && name != c.name then apiClient.categories.update(c.id, UpdateCategory(name, c.color, c.budgetType)).onComplete {
-        case Success(_) => reloadCategories(); reloadSummaries() // name shows on the tx category dropdown + rules card via cats
-        case Failure(_) => ()
-      }
+      // The name shows on the tx category dropdown + rules card too, both of which read `catsVar` that `saveCategory` patches.
+      if name.nonEmpty && name != c.name then saveCategory(c.copy(name = name))
     }
 
     def deleteCategory(id: CategoryId): Unit =
@@ -601,10 +637,13 @@ object TransactionsPage {
         case Failure(_) => ()
       }
 
-    def setBudgetType(c: Category, budgetType: Option[CategoryBudgetType]): Unit =
-      apiClient.categories.update(c.id, UpdateCategory(c.name, c.color, budgetType)).onComplete {
-        case Success(_) => reloadCategories(); reloadSummaries()
-        case Failure(_) => ()
+    def saveBudget(c: Category)(f: CategoryBudget => CategoryBudget): Unit = saveCategory(c.copy(budget = f(c.budget)))
+
+    /** Switching to Fixed seeds the amount with whatever the statistic was showing, so the cell starts where the eye left it instead of at zero. */
+    def setBudgetMethod(c: Category, summary: Option[CategorySummary], method: CategoryBudgetMethod): Unit =
+      saveBudget(c) { b =>
+        val seeded = if method == CategoryBudgetMethod.Fixed && b.fixedCents.isEmpty then summary.map(_.expectedMonthlyCents) else b.fixedCents
+        b.copy(method = method, fixedCents = seeded)
       }
 
     // Drill-through cell: the period spend figures are links into the transaction table below, filtered to that category + window — like clicking a
@@ -618,7 +657,7 @@ object TransactionsPage {
               cls   := "text-body",
               href  := "#",
               title := "Show these transactions",
-              onClick.preventDefault --> { _ => onDrillDown(c.id, month) },
+              onClick.preventDefault.stopPropagation --> { _ => onDrillDown(c.id, month) },
               money(v),
             )
           case Some(v)           => span(money(v))
@@ -626,47 +665,141 @@ object TransactionsPage {
         },
       )
 
-    // Row per category: average monthly spend + this-period spend + the budget-type selector that surfaces it on the budget page.
-    def categoryRow(c: Category, summary: Option[CategorySummary]): HtmlElement = {
-      val currency                   = summary.map(_.currency)
-      def money(cents: Long): String =
-        currency.map(cur => MoneyFormatter.formatSimple(cents, cur)).getOrElse("—")
-      tr(
-        td(
-          child <-- editingId.signal.map { editing =>
-            if editing.contains(c.id) then input(
-              cls         := "form-control form-control-sm",
-              controlled(value <-- editName.signal, onInput.mapToValue --> editName.writer),
-              onBlur --> { _ => renameCategory(c) },
-              onKeyDown.filter(_.key == "Enter") --> { _ => renameCategory(c) },
-              onKeyDown.filter(_.key == "Escape") --> { _ => editingId.set(None) },
-              onMountCallback(ctx => ctx.thisNode.ref.focus()),
-            )
-            else
-              span(
-                styleAttr := "cursor: pointer",
-                title     := "Click to rename",
-                onClick --> { _ => editName.set(c.name); editingId.set(Some(c.id)) },
-                c.name,
-              )
+    // Blurring is what commits an inline cell, so Enter just leaves the field rather than duplicating the save.
+    val commitOnEnter = onKeyDown.filter(_.key == "Enter") --> { ev => ev.target.asInstanceOf[dom.html.Input].blur() }
+
+    /** The one enum dropdown. Options carry their wire value and their label; the current one is marked with `selected :=` rather than `value :=` on
+      * the select, which would be applied before the options mount and fall back to the first one.
+      */
+    def enumSelect(options: List[(String, String)], current: String, onPick: String => Unit): HtmlElement =
+      select(
+        cls := "form-select form-select-sm w-auto",
+        onChange.mapToValue --> { v => onPick(v) },
+        options.map { case (v, text) => option(value := v, selected := v == current, text) },
+      )
+
+    /** How the category's monthly figure is derived. */
+    def methodSelect(c: Category, summary: Option[CategorySummary]): HtmlElement =
+      enumSelect(
+        CategoryBudgetMethod.values.toList.map(m => CategoryBudgetMethod.asString(m) -> CategoryBudgetMethod.label(m)),
+        CategoryBudgetMethod.asString(c.budget.method),
+        v => CategoryBudgetMethod.fromString(v).foreach(setBudgetMethod(c, summary, _)),
+      )
+
+    /** How that figure is drawn down over the period — or Off, for a category that isn't a budget at all. */
+    def typeSelect(c: Category): HtmlElement =
+      enumSelect(
+        (offBudgetType -> "Off") :: CategoryBudgetType.values.toList.map(t => CategoryBudgetType.asString(t) -> t.toString),
+        c.budgetType.fold(offBudgetType)(CategoryBudgetType.asString),
+        v => saveCategory(c.copy(budgetType = if v == offBudgetType then None else CategoryBudgetType.fromString(v).toOption)),
+      )
+
+    /** How far back the average/median looks. Meaningless for a figure that never reads history, hence disabled there. */
+    def monthsInput(c: Category): HtmlElement =
+      input(
+        cls          := "form-control form-control-sm text-center",
+        tpe          := "number",
+        minAttr      := "1",
+        maxAttr      := CategoryBudget.maxLookbackMonths.toString,
+        stepAttr     := "1",
+        styleAttr    := "width: 5rem",
+        placeholder  := "all",
+        title        := s"Completed months the average/median looks back over; blank = all history (at most ${CategoryBudget.maxLookbackMonths})",
+        disabled     := !c.budget.derivesFromHistory,
+        defaultValue := c.budget.lookbackMonths.map(_.toString).getOrElse(""),
+        onBlur.mapToValue --> { v =>
+          val months = v.trim.toIntOption.filter(_ > 0)
+          if months != c.budget.lookbackMonths then saveBudget(c)(_.copy(lookbackMonths = months))
+        },
+        commitOnEnter,
+      )
+
+    /** The typed-in figure. The mirror of [[monthsInput]]: it only applies to a method that does NOT read history, so it's disabled for the others
+      * rather than hidden — the strip keeps its shape whichever method is selected.
+      */
+    def fixedInput(c: Category): HtmlElement =
+      InlineEdit
+        // No placeholder: the strip already labels this field, and "Amount" inside an "Amount" box just says it twice.
+        .moneyInput(c.budget.fixedCents, placeholderText = "")
+        .amend(
+          cls       := "font-monospace",
+          styleAttr := "width: 8rem",
+          title     := "Monthly figure for this category (negative if the money comes in)",
+          disabled  := c.budget.derivesFromHistory,
+          onBlur.mapToValue --> { v =>
+            val cents = InlineEdit.parseCentsOpt(v)
+            if cents != c.budget.fixedCents then saveBudget(c)(_.copy(fixedCents = cents))
           },
-        ),
-        // Avg/mo isn't drillable: it spans many months, so there's no single window to filter to.
-        td(cls := "text-end font-monospace small", summary.map(s => money(s.avgMonthlyCents)).getOrElse("—")),
-        spendCell(c, summary.map(_.lastPeriodSpentCents), money, MonthFilter.PreviousPeriod, "text-muted"),
-        spendCell(c, summary.map(_.currentPeriodSpentCents), money, MonthFilter.CurrentPeriod, ""),
+          commitOnEnter,
+        )
+
+    /** The settings strip: every control that writes to a category, plus the history the derived ones read. The table itself stays read-only so the
+      * figures in it can be scanned like a spreadsheet, and this opens on demand rather than putting four controls on every row.
+      */
+    def settingsRow(c: Category, summary: Option[CategorySummary]): HtmlElement =
+      tr(
+        cls := "budget-settings table-light",
         td(
-          cls  := "text-center",
-          select(
-            cls := "form-select form-select-sm",
-            onChange.mapToValue --> { v => setBudgetType(c, if v == "off" then None else CategoryBudgetType.fromString(v).toOption) },
-            // Mark the current option with `selected` (not `value :=` on the select — that's applied before the options mount and falls back to "Off").
-            option(value := "off", selected          := c.budgetType.isEmpty, "Off"),
-            option(value := "steady", selected       := c.budgetType.contains(CategoryBudgetType.Steady), "Steady"),
-            option(value := "bill", selected         := c.budgetType.contains(CategoryBudgetType.Bill), "Bill"),
-            option(value := "subscription", selected := c.budgetType.contains(CategoryBudgetType.Subscription), "Subscription"),
+          colSpan := columnCount,
+          div(
+            cls := "d-flex flex-wrap align-items-center gap-3 px-2 pt-2",
+            InlineEdit.labelled("Type", typeSelect(c)),
+            InlineEdit.labelled("Method", methodSelect(c, summary)),
+            InlineEdit.labelled("Months", monthsInput(c)),
+            InlineEdit.labelled("Amount", fixedInput(c)),
+          ),
+          div(
+            cls := "px-2 pb-2",
+            summary.map(s0 => Sparkline.monthly(s0.monthlyHistory, s0.direction, s0.expectedMagnitude, s0.currency, c.name)),
           ),
         ),
+      )
+
+    /** Row per category: a read-only line of figures whose WHOLE width opens the settings strip. The few things on it that do something else of their
+      * own — renaming, the drill-through figures, delete — stop the click travelling up to here, so the row is one big target without swallowing
+      * them.
+      */
+    def categoryRow(c: Category, summary: Option[CategorySummary], isOpen: Boolean): HtmlElement = {
+      val currency                         = summary.map(_.currency)
+      def money(cents: Long): String       =
+        currency.map(cur => MoneyFormatter.formatSimple(cents, cur)).getOrElse("—")
+      tr(
+        cls       := "budget-toggle",
+        styleAttr := "cursor: pointer",
+        onClick --> { _ => expanded.update(ids => if ids(c.id) then ids - c.id else ids + c.id) },
+        td(
+          div(
+            cls := "d-flex align-items-center gap-1",
+            span(cls := "text-muted user-select-none", if isOpen then "▾" else "▸"),
+            // Renaming owns its clicks: without this the row would fold shut under the cursor as you go to edit the name.
+            div(
+              onClick.stopPropagation --> { _ => () },
+              child <-- editingId.signal.map { editing =>
+                if editing.contains(c.id) then input(
+                  cls         := "form-control form-control-sm",
+                  controlled(value <-- editName.signal, onInput.mapToValue --> editName.writer),
+                  onBlur --> { _ => renameCategory(c) },
+                  onKeyDown.filter(_.key == "Enter") --> { _ => renameCategory(c) },
+                  onKeyDown.filter(_.key == "Escape") --> { _ => editingId.set(None) },
+                  onMountCallback(ctx => ctx.thisNode.ref.focus()),
+                )
+                else
+                  span(
+                    styleAttr := "cursor: pointer",
+                    title     := "Click to rename",
+                    onClick --> { _ => editName.set(c.name); editingId.set(Some(c.id)) },
+                    c.name,
+                  )
+              },
+            ),
+          ),
+        ),
+        // The settings as one scannable line; the row around it is what opens them.
+        td(cls := "small text-muted", title := "Click the row for budget settings", budgetSummary(c)),
+        // Not drillable: the figure spans many months, so there's no single window to filter to.
+        td(cls := "text-end font-monospace small", summary.map(s => money(s.expectedMonthlyCents)).getOrElse("—")),
+        spendCell(c, summary.map(_.lastPeriodSpentCents), money, MonthFilter.PreviousPeriod, "text-muted"),
+        spendCell(c, summary.map(_.currentPeriodSpentCents), money, MonthFilter.CurrentPeriod, ""),
         td(
           cls  := "text-end",
           button(
@@ -674,7 +807,7 @@ object TransactionsPage {
             cls       := "btn-close",
             styleAttr := "font-size: 0.6rem",
             title     := "Delete category",
-            onClick --> { _ => deleteCategory(c.id) },
+            onClick.stopPropagation --> { _ => deleteCategory(c.id) },
           ),
         ),
       )
@@ -688,31 +821,30 @@ object TransactionsPage {
           thead(
             tr(
               th("Category"),
+              th("Budget", title := "How the monthly figure is derived and drawn down — click a row to change it"),
               th(
-                cls   := "text-end",
-                "Avg / mo",
-                title := "Mean monthly net spend over the category's active span (first to last month with spend)",
+                cls              := "text-end",
+                "Expected / mo",
+                title            := "The category's monthly figure — its budget when a budget type is set",
               ),
               th(
-                cls   := "text-end",
+                cls              := "text-end",
                 "Last period",
-                title := "Net spend over the previous (most recent closed) period — click a figure to list its transactions",
+                title            := "Net spend over the previous (most recent closed) period — click a figure to list its transactions",
               ),
-              th(cls  := "text-end", "This period", title := "Net spend since this period started — click a figure to list its transactions"),
-              th(
-                cls   := "text-center",
-                "Budget",
-                title := "Budget type on the Dashboard — Steady (time-based), Bill (one-off), or Subscription (fixed pool)",
-              ),
+              th(cls             := "text-end", "This period", title := "Net spend since this period started — click a figure to list its transactions"),
               th(),
             ),
           ),
           tbody(
-            children <-- catsVar.signal.combineWith(summaries).map { case (cats, summs) =>
-              if cats.isEmpty then List(tr(td(colSpan := 6, cls := "text-muted small text-center py-2", "No categories yet.")))
+            children <-- catsVar.signal.combineWith(summaries).combineWith(expanded.signal).map { case (cats, summs, open) =>
+              if cats.isEmpty then List(tr(td(colSpan := columnCount, cls := "text-muted small text-center py-2", "No categories yet.")))
               else {
                 val byId = summs.map(s => s.category.id -> s).toMap
-                cats.map(c => categoryRow(c, byId.get(c.id)))
+                cats.flatMap { c =>
+                  val summary = byId.get(c.id)
+                  categoryRow(c, summary, open(c.id)) :: Option.when(open(c.id))(settingsRow(c, summary)).toList
+                }
               }
             },
           ),
@@ -745,7 +877,7 @@ object TransactionsPage {
           styleAttr := "cursor: pointer; flex-grow: 1",
           onClick --> { _ => collapsed.update(!_) },
           child.text <-- collapsed.signal.map(c => if c then "▸ " else "▾ "),
-          "Categories & monthly averages",
+          "Categories & monthly budgets",
           // Keep a count on the header so the folded card still says something.
           child.text <-- catsVar.signal.map(cs => if cs.isEmpty then "" else s" (${cs.size})"),
         ),

@@ -59,7 +59,7 @@ trait BankTransactionRepository {
   def flowsBetween(from: Instant, to: Option[Instant]): IO[List[(Currency, Long, Long)]]
 
   /** Spend per (category, currency, YYYY-MM) over `[from, to)`, categorized + non-internal — a per-month breakdown. `includeInflows` as in
-    * [[spendByCategoryBetween]] (false = gross outflow, e.g. for the analytics chart; true = net, for the budget average).
+    * [[spendByCategoryBetween]] (false = gross outflow, e.g. for the analytics chart; true = net, for the budget statistic).
     */
   def monthlySpendByCategory(from: Instant, to: Instant, includeInflows: Boolean = false): IO[List[(CategoryId, Currency, String, Long)]]
 

@@ -42,7 +42,7 @@ class CategoryBudgetTypeSpec extends AnyFreeSpec with Matchers {
     def summary(budget: Long, spent: Long, override_ : Option[Long] = None): CategorySummary =
       CategorySummary(
         Category(CategoryId("c"), "Tenant rent", None, Some(CategoryBudgetType.Bill)),
-        avgMonthlyCents = budget,
+        expectedMonthlyCents = budget,
         currentPeriodSpentCents = spent,
         lastPeriodSpentCents = 0L,
         currency = Currency.PLN,
