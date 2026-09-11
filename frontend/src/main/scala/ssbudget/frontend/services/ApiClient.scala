@@ -248,9 +248,10 @@ class ApiClient(implicit ec: ExecutionContext) {
         sort: String,
         asc: Boolean,
         limit: Option[Int],
+        q: Option[String],
     ): Future[TransactionListResponse] = {
       val request = interpreter.toRequest(Endpoints.client.transactions.list, Some(baseUri))
-      backend.send(request((accountUid, month, category, Some(hideInternal), Some(sort), Some(asc), limit))).map(handleResponse)
+      backend.send(request((accountUid, month, category, Some(hideInternal), Some(sort), Some(asc), limit, q))).map(handleResponse)
     }
 
     def months(): Future[List[String]] = {

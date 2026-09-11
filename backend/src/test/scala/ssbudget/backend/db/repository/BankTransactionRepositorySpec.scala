@@ -240,9 +240,9 @@ class BankTransactionRepositorySpec extends RepositorySpec {
       _                      <- repo.insertNew(tx("t-cat", "uid-1", "r2", categoryId = Some(CategoryId("cat-1"))))
       _                      <- repo.insertNew(tx("t-int", "uid-1", "r3", counterpartyAccount = Some("PL99")))
       _                      <- repo.markInternalTransfers()
-      (uncat, uncatTotal, _) <- repo.query(None, None, None, None, Some("uncategorized"), hideInternal = false, "date", asc = false, None)
-      (cat, _, _)            <- repo.query(None, None, None, None, Some("cat-1"), hideInternal = false, "date", asc = false, None)
-      (visible, _, _)        <- repo.query(None, None, None, None, Some("all"), hideInternal = true, "date", asc = false, None)
+      (uncat, uncatTotal, _) <- repo.query(TransactionFilter(category = Some("uncategorized")), "date", asc = false, None)
+      (cat, _, _)            <- repo.query(TransactionFilter(category = Some("cat-1")), "date", asc = false, None)
+      (visible, _, _)        <- repo.query(TransactionFilter(category = Some("all"), hideInternal = true), "date", asc = false, None)
     } yield {
       uncat.map(_.id.value) shouldBe List("t-uncat")                 // categorized + internal both excluded from the triage view
       uncatTotal shouldBe 1
@@ -260,9 +260,9 @@ class BankTransactionRepositorySpec extends RepositorySpec {
       _                      <- repo.insertNew(tx("t-a", "uid-1", "ra", amountCents = -500, bookedAt = jan1))
       _                      <- repo.insertNew(tx("t-b", "uid-1", "rb", amountCents = -9000, bookedAt = jan2))
       _                      <- repo.insertNew(tx("t-c", "uid-1", "rc", amountCents = -1000, bookedAt = feb))
-      (janRows, janTotal, _) <- repo.query(None, Some("2026-01"), None, None, Some("all"), hideInternal = false, "date", asc = false, None)
-      (capped, total, sums)  <- repo.query(None, None, None, None, Some("all"), hideInternal = false, "amount", asc = true, Some(2))
-      (windowRows, _, _)     <- repo.query(None, None, Some(jan2), Some(feb), Some("all"), hideInternal = false, "date", asc = false, None)
+      (janRows, janTotal, _) <- repo.query(TransactionFilter(month = Some("2026-01"), category = Some("all")), "date", asc = false, None)
+      (capped, total, sums)  <- repo.query(TransactionFilter(category = Some("all")), "amount", asc = true, Some(2))
+      (windowRows, _, _)     <- repo.query(TransactionFilter(from = Some(jan2), to = Some(feb), category = Some("all")), "date", asc = false, None)
     } yield {
       janRows.map(_.id.value) shouldBe List("t-b", "t-a") // date desc within January
       janTotal shouldBe 2

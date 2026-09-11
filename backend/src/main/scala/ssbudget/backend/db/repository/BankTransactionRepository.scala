@@ -10,6 +10,29 @@ import ssbudget.shared.model.*
 
 import java.time.Instant
 
+/** The non-text filters every transaction listing shares. A case class rather than six positional parameters: three consecutive `Option[String]` and
+  * two `Option[Instant]` are an arg-swap that compiles cleanly and returns the wrong rows on one code path only.
+  */
+final case class TransactionFilter(
+    accountUid: Option[String] = None,
+    month: Option[String] = None,
+    from: Option[Instant] = None,
+    to: Option[Instant] = None,
+    category: Option[String] = None,
+    hideInternal: Boolean = false,
+)
+
+/** One candidate row for the search scan: [[text]] is every searchable field concatenated, still unfolded (the matcher folds it), and the rest is
+  * what ranking and the totals row need without paying to deserialise the full transaction — `raw_json` alone averages 860 bytes a row.
+  */
+final case class TransactionSearchRow(
+    id: BankTransactionId,
+    text: String,
+    amountCents: Long,
+    currency: Currency,
+    bookedAt: Instant,
+)
+
 trait BankTransactionRepository {
 
   /** Insert a transaction, or if one with the same (ebAccountUid, dedupKey) already exists, refresh its bank-derived fields from the latest parse (so
@@ -32,16 +55,21 @@ trait BankTransactionRepository {
     * show a reliable total even when rows are truncated.
     */
   def query(
-      accountUid: Option[String],
-      month: Option[String],
-      from: Option[Instant],
-      to: Option[Instant],
-      category: Option[String],
-      hideInternal: Boolean,
+      filter: TransactionFilter,
       sort: String,
       asc: Boolean,
       limit: Option[Int],
   ): IO[(List[BankTransaction], Int, List[(Currency, Long)])]
+
+  /** Every row matching the non-text filters (same interpretation as [[query]]), projected down to what the search scan needs: the concatenated raw
+    * text, and the fields it sorts and totals by. The free-text match itself runs in the JVM rather than in SQL — it is diacritic-folded and typo
+    * tolerant, neither of which SQLite's `LIKE` can express — so this hands the matcher its candidate set.
+    */
+  def searchCandidates(filter: TransactionFilter): IO[List[TransactionSearchRow]]
+
+  /** Full rows for an explicit id set, for the page the search scan settled on. Order is unspecified — the caller already knows the order it wants.
+    */
+  def findByIds(ids: List[BankTransactionId]): IO[List[BankTransaction]]
 
   /** Distinct YYYY-MM buckets present in the data, newest first — for the month filter dropdown. */
   def distinctMonths(): IO[List[String]]
@@ -133,28 +161,12 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
   }
 
   override def query(
-      accountUid: Option[String],
-      month: Option[String],
-      from: Option[Instant],
-      to: Option[Instant],
-      category: Option[String],
-      hideInternal: Boolean,
+      filter: TransactionFilter,
       sort: String,
       asc: Boolean,
       limit: Option[Int],
   ): IO[(List[BankTransaction], Int, List[(Currency, Long)])] = {
-    val conds    = List(
-      accountUid.map(u => fr"eb_account_uid = $u"),
-      month.map(m => fr"substr(booked_at, 1, 7) = $m"),
-      from.map(f => fr"booked_at >= $f"),
-      to.map(t => fr"booked_at < $t"),
-      category.filterNot(_ == CategoryFilter.All).map {
-        case CategoryFilter.Uncategorized => fr"category_id IS NULL AND is_internal = 0"
-        case cid                          => fr"category_id = ${CategoryId(cid)}"
-      },
-      Option.when(hideInternal)(fr"is_internal = 0"),
-    ).flatten
-    val where    = if conds.isEmpty then Fragment.empty else fr"WHERE" ++ conds.reduce(_ ++ fr"AND" ++ _)
+    val where    = filterClause(filter)
     val orderCol = if sort == "amount" then fr"ORDER BY amount_cents" else fr"ORDER BY booked_at"
     val orderDir = if asc then fr"ASC" else fr"DESC"
     val limitFr  = limit.fold(Fragment.empty)(n => fr"LIMIT $n")
@@ -164,6 +176,40 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
     val sumsQ    = (fr"SELECT currency, SUM(amount_cents) FROM bank_transactions" ++ where ++ fr"GROUP BY currency").query[(Currency, Long)].to[List]
     (itemsQ, countQ, sumsQ).tupled.transact(xa)
   }
+
+  /** The non-text filters, shared by [[query]] and [[searchCandidates]] so the search scan and the plain list can never drift on what "uncategorized"
+    * or "hide internal" mean.
+    */
+  private def filterClause(filter: TransactionFilter): Fragment = {
+    val conds = List(
+      filter.accountUid.map(u => fr"eb_account_uid = $u"),
+      filter.month.map(m => fr"substr(booked_at, 1, 7) = $m"),
+      filter.from.map(f => fr"booked_at >= $f"),
+      filter.to.map(t => fr"booked_at < $t"),
+      filter.category.filterNot(_ == CategoryFilter.All).map {
+        case CategoryFilter.Uncategorized => fr"category_id IS NULL AND is_internal = 0"
+        case cid                          => fr"category_id = ${CategoryId(cid)}"
+      },
+      Option.when(filter.hideInternal)(fr"is_internal = 0"),
+    ).flatten
+    if conds.isEmpty then Fragment.empty else fr"WHERE" ++ conds.reduce(_ ++ fr"AND" ++ _)
+  }
+
+  override def searchCandidates(filter: TransactionFilter): IO[List[TransactionSearchRow]] = {
+    // Everything a user might recognise a transaction by. `raw_json` is deliberately left out: at 860 bytes a row it is mostly structure, and it
+    // would make every query match every row.
+    val text = fr"""coalesce(counterparty_name, '') || ' ' || coalesce(remittance, '') || ' ' ||
+                    coalesce(bank_transaction_code, '') || ' ' || coalesce(counterparty_account, '') || ' ' || coalesce(note, '')"""
+    (fr"SELECT id," ++ text ++ fr""", amount_cents, currency, booked_at FROM bank_transactions""" ++
+      filterClause(filter)).query[TransactionSearchRow].to[List].transact(xa)
+  }
+
+  override def findByIds(ids: List[BankTransactionId]): IO[List[BankTransaction]] =
+    ids.toNel match {
+      case None           => IO.pure(Nil)
+      case Some(nonEmpty) =>
+        (fr"SELECT" ++ columns ++ fr"FROM bank_transactions WHERE" ++ Fragments.in(fr"id", nonEmpty)).query[BankTransaction].to[List].transact(xa)
+    }
 
   override def distinctMonths(): IO[List[String]] =
     sql"SELECT DISTINCT substr(booked_at, 1, 7) AS m FROM bank_transactions ORDER BY m DESC".query[String].to[List].transact(xa)

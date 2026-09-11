@@ -23,6 +23,7 @@ object Page {
       month: Option[String] = None,    // "all" | "current-period" | "previous-period" | "YYYY-MM"
       account: Option[String] = None,  // ebAccountUid
       hideInternal: Option[Boolean] = None,
+      q: Option[String] = None,        // free-text search; matched against counterparty, remittance, bank code, IBAN and note
   ) extends Page
 
   /** Page identity ignoring arguments — a canonical instance of the same page. Used for nav highlighting and to keep one page instance mounted while

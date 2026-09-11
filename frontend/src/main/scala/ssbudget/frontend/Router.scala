@@ -14,13 +14,14 @@ object Router
         Route.static(Page.Banking, root / "banking" / endOfSegments),
         Route.static(Page.BankingCallback, root / "banking" / "callback" / endOfSegments),
         // Filters live in the query string, so a filtered list is linkable (category drill-down) and survives a reload.
-        Route.onlyQuery[Page.Transactions, (Option[String], Option[String], Option[String], Option[Boolean])](
-          encode = p => (p.category, p.month, p.account, p.hideInternal),
-          decode = { case (category, month, account, hideInternal) => Page.Transactions(category, month, account, hideInternal) },
+        Route.onlyQuery[Page.Transactions, (Option[String], Option[String], Option[String], Option[Boolean], Option[String])](
+          encode = p => (p.category, p.month, p.account, p.hideInternal, p.q),
+          decode = { case (category, month, account, hideInternal, q) => Page.Transactions(category, month, account, hideInternal, q) },
           pattern = (root / "transactions" / endOfSegments) ? (param[String]("category").?
             & param[String]("month").?
             & param[String]("account").?
-            & param[Boolean]("hideInternal").?),
+            & param[Boolean]("hideInternal").?
+            & param[String]("q").?),
         ),
         Route.static(Page.Analytics, root / "analytics" / endOfSegments),
         Route.static(Page.Settings, root / "settings" / endOfSegments),

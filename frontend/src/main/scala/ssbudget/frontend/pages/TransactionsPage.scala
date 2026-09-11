@@ -40,10 +40,17 @@ import scala.util.{Failure, Success}
 
 object TransactionsPage {
 
-  /** Filter defaults, used when the URL leaves a filter out. Triage-first: show what still needs a category. */
-  private val defaultCategory     = CategoryFilter.Uncategorized
-  private val defaultMonth        = MonthFilter.All
-  private val defaultHideInternal = true
+  /** Filter defaults, used when the URL leaves a filter out. Triage-first: show what still needs a category — except while searching.
+    *
+    * A search is a hunt across everything, so it defaults to all categories: typing "spotify" into the triage slice would otherwise return nothing,
+    * since Spotify is both categorized and months old. Expressing that as a default rather than as remembered state is what makes it survive a reload
+    * and the Back button — the URL carries the search term, and the default follows from it. A category the user picked deliberately is non-default,
+    * so it stays put through a search instead of being silently swapped out.
+    */
+  private def defaultCategory(searching: Boolean): String =
+    if searching then CategoryFilter.All else CategoryFilter.Uncategorized
+  private val defaultMonth                                = MonthFilter.All
+  private val defaultHideInternal                         = true
 
   /** Anchor for the drill-down scroll: the filter row, so both the filters that were just applied and the table land in view. */
   private val filtersAnchorId = "tx-filters"
@@ -70,11 +77,18 @@ object TransactionsPage {
     val errorVar       = Var(Option.empty[String])
     val monthFilter    = Var(initialPage.month.getOrElse(defaultMonth))
     val accountFilter  = Var(initialPage.account.getOrElse(""))
-    val categoryFilter = Var(initialPage.category.getOrElse(defaultCategory))
+    val categoryFilter = Var(initialPage.category.getOrElse(defaultCategory(initialPage.q.exists(_.trim.nonEmpty))))
     val hideInternal   = Var(initialPage.hideInternal.getOrElse(defaultHideInternal))
+    // `searchVar` is what's typed; `activeSearch` is what's been committed after a pause. Everything downstream — the fetch, the URL, the category
+    // default — reads the committed one, so a keystroke can't send a request on its own.
+    val searchVar      = Var(initialPage.q.getOrElse(""))
+    val activeSearch   = Var(initialPage.q.getOrElse(""))
+    val nearVar        = Var(List.empty[BankTransaction]) // rows that only matched after a typo allowance
     val sortBy         = Var("date")                      // "date" | "amount"
     val sortAsc        = Var(false)                       // default: date descending (newest first)
     val ruleModalState = Var(Option.empty[RuleModal.Seed])
+
+    def searchTerm: Option[String] = Some(activeSearch.now().trim).filter(_.nonEmpty)
 
     def loadCategories(): Unit =
       apiClient.categories.list().onComplete {
@@ -118,9 +132,13 @@ object TransactionsPage {
           sort = sortBy.now(),
           asc = sortAsc.now(),
           limit = None,                          // server applies its display cap
+          q = searchTerm,
         )
         .onComplete {
-          case Success(r)  => txVar.set(r.items); totalVar.set(r.total); sumsVar.set(r.sums); loadingVar.set(false)
+          // One batched set: written one at a time, the table would render a frame pairing the new rows with the previous response's near list.
+          case Success(r)  =>
+            Var.set(txVar -> r.items, nearVar -> r.near, totalVar -> r.total, sumsVar -> r.sums)
+            loadingVar.set(false)
           case Failure(ex) => errorVar.set(Some(s"Failed to load transactions: ${ex.getMessage}")); loadingVar.set(false)
         }
     }
@@ -133,31 +151,36 @@ object TransactionsPage {
         .combineWith(hideInternal.signal)
         .combineWith(sortBy.signal)
         .combineWith(sortAsc.signal)
+        .combineWith(activeSearch.signal)
 
     // The URL carries the shareable copy of the filter state; the Vars stay the working state the controls bind to. Both directions compare before
     // writing, so a change settles after one hop instead of ping-ponging. Sort stays local — it's a view preference, not a filter.
     // Filters left at their default are omitted, so the default view stays a bare `/transactions` and a drill-down URL carries only what it changed.
     def filtersAsPage(): Page.Transactions =
       Page.Transactions(
-        category = Some(categoryFilter.now()).filter(_ != defaultCategory),
+        category = Some(categoryFilter.now()).filter(_ != defaultCategory(searchTerm.isDefined)),
         month = Some(monthFilter.now()).filter(_ != defaultMonth),
         account = Some(accountFilter.now()).filter(_.nonEmpty),
         hideInternal = Some(hideInternal.now()).filter(_ != defaultHideInternal),
+        q = searchTerm,
       )
 
     // One batched `Var.set` per direction: setting the Vars one at a time would fire `filtersTrigger` (and a fetch) once per filter, and the responses
     // could then land out of order and leave the table showing a half-applied filter.
     def applyPageToFilters(p: Page.Transactions): Unit = {
-      val category = p.category.getOrElse(defaultCategory)
+      val search   = p.q.getOrElse("")
+      val category = p.category.getOrElse(defaultCategory(search.trim.nonEmpty))
       val month    = p.month.getOrElse(defaultMonth)
       val account  = p.account.getOrElse("")
       val internal = p.hideInternal.getOrElse(defaultHideInternal)
-      val current  = (categoryFilter.now(), monthFilter.now(), accountFilter.now(), hideInternal.now())
-      if current != (category, month, account, internal) then Var.set(
+      val current  = (categoryFilter.now(), monthFilter.now(), accountFilter.now(), hideInternal.now(), activeSearch.now())
+      if current != (category, month, account, internal, search) then Var.set(
         categoryFilter -> category,
         monthFilter    -> month,
         accountFilter  -> account,
         hideInternal   -> internal,
+        searchVar      -> search,
+        activeSearch   -> search,
       )
     }
 
@@ -165,6 +188,19 @@ object TransactionsPage {
     def drillDown(categoryId: CategoryId, month: String): Unit = {
       Var.set(categoryFilter -> categoryId.value, monthFilter -> month)
       Option(dom.document.getElementById(filtersAnchorId)).foreach(_.scrollIntoView(true))
+    }
+
+    // Committing a search (or clearing one) flips which category default applies. Re-resolve the filter here rather than remembering the old value:
+    // a category sitting at the outgoing default follows the incoming one, and anything the user chose explicitly is left alone. Batched with the
+    // term itself so the widening and the query it was meant for go out as a single fetch.
+    def commitSearch(value: String): Unit = {
+      val wasSearching = activeSearch.now().trim.nonEmpty
+      val isSearching  = value.trim.nonEmpty
+      if wasSearching != isSearching && categoryFilter.now() == defaultCategory(wasSearching) then Var.set(
+        activeSearch   -> value,
+        categoryFilter -> defaultCategory(isSearching),
+      )
+      else activeSearch.set(value)
     }
 
     def setCategory(txId: ssbudget.shared.model.BankTransactionId, categoryId: Option[CategoryId]): Unit =
@@ -188,6 +224,8 @@ object TransactionsPage {
         loadConnections()
         loadMonths()
       },
+      // A fetch goes out per pause in typing, not per keystroke; the dropdowns are discrete choices and need no such treatment.
+      searchVar.signal.changes.debounce(250) --> Observer(commitSearch),
       filtersTrigger --> Observer(_ => loadTransactions()),
       // Filter edits use replaceState, not pushState: tweaking a filter shouldn't fill the history, so Back still returns to wherever you drilled down
       // from. A drill-down link or Back/forward arrives on currentPageSignal and is read back into the Vars.
@@ -214,11 +252,21 @@ object TransactionsPage {
         () => { loadRules(); loadCategories(); loadSummaries(); loadTransactions() },
         seed => ruleModalState.set(Some(seed)),
       ),
-      filtersRow(monthsVar.signal, connsVar.signal, catsVar.signal, monthFilter, accountFilter, categoryFilter, hideInternal),
+      filtersRow(
+        monthsVar.signal,
+        connsVar.signal,
+        catsVar.signal,
+        monthFilter,
+        accountFilter,
+        categoryFilter,
+        hideInternal,
+        searchVar,
+      ),
       transactionsTable(
         txVar.signal,
         totalVar.signal,
         sumsVar.signal,
+        nearVar.signal,
         catsVar.signal,
         connsVar.signal,
         sortBy,
@@ -266,10 +314,39 @@ object TransactionsPage {
       accountFilter: Var[String],
       categoryFilter: Var[String],
       hideInternal: Var[Boolean],
+      search: Var[String],
   ): HtmlElement =
     div(
       cls    := "row g-2 align-items-end mb-2",
       idAttr := filtersAnchorId,
+      div(
+        cls := "col-12 col-md-4",
+        label(cls := "form-label small mb-1", forId := "tx-search", "Search"),
+        div(
+          cls     := "position-relative",
+          input(
+            cls         := "form-select form-select-sm", // form-select, not form-control: matches the height of the dropdowns beside it
+            idAttr      := "tx-search",
+            tpe         := "search",
+            placeholder := "counterparty, description, note, amount…",
+            styleAttr   := "background-image: none",     // form-select paints a dropdown caret we don't want on a text box
+            value <-- search.signal,
+            onInput.mapToValue --> search.writer,
+            // Escape clears the box, which also restores the category filter the search widened.
+            onKeyDown.filter(_.key == "Escape") --> { _ => search.set("") },
+          ),
+          child.maybe <-- search.signal.map(v =>
+            Option.when(v.nonEmpty)(
+              button(
+                tpe       := "button",
+                cls       := "btn-close position-absolute top-50 translate-middle-y",
+                styleAttr := "right: 0.5rem; font-size: 0.6rem",
+                onClick --> { _ => search.set("") },
+              ),
+            ),
+          ),
+        ),
+      ),
       div(
         cls := "col-auto",
         label(cls := "form-label small mb-1", "Category"),
@@ -331,6 +408,7 @@ object TransactionsPage {
       txs: Signal[List[BankTransaction]],
       total: Signal[Int],
       sums: Signal[List[Money]],
+      near: Signal[List[BankTransaction]],
       cats: Signal[List[Category]],
       conns: Signal[List[BankConnectionView]],
       sortBy: Var[String],
@@ -380,10 +458,31 @@ object TransactionsPage {
             child <-- loading.map(l => if l then tr(td(colSpan := 6, cls := "text-center py-3", "Loading…")) else emptyNode),
             // Rows depend only on txs + conns; the per-row category combobox and rule badge subscribe to `cats`/`rules` themselves, so creating a
             // category or editing a rule doesn't rebuild every row.
+            //
+            // A search splits the body in two: the literal matches, then a divider, then the rows that only matched after a typo allowance. Keeping
+            // the approximate ones visible but fenced off means a misspelling still finds the transaction without quietly passing guesses off as
+            // hits — and the sum in the footer covers the exact tier only.
             children <-- txs
               .combineWith(conns)
-              .map { case (ts, cs) =>
-                ts.map(t => transactionRow(t, cats, cs, setCategory, setNote, onCreateRule, rules, onInspectRule, apiClient, onCategoryCreated))
+              .combineWith(near)
+              .map { case (ts, cs, approximate) =>
+                def row(t: BankTransaction) =
+                  transactionRow(t, cats, cs, setCategory, setNote, onCreateRule, rules, onInspectRule, apiClient, onCategoryCreated)
+                val divider                 =
+                  if approximate.isEmpty then Nil
+                  else
+                    List(
+                      tr(
+                        cls := "table-light",
+                        td(
+                          colSpan   := 6,
+                          cls       := "text-muted small py-1",
+                          styleAttr := "letter-spacing: 0.03em",
+                          s"${approximate.size} similar ${if approximate.size == 1 then "match" else "matches"} — not counted in the sum",
+                        ),
+                      ),
+                    )
+                ts.map(row) ++ divider ++ approximate.map(row)
               },
           ),
         ),

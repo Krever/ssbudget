@@ -217,8 +217,9 @@ object Endpoints {
 
   object transactions {
     // Filtering/sorting/capping happen server-side: the browser can't hold thousands of rows. `category` = "all" | "uncategorized" | a categoryId.
+    // `q` is the free-text box: diacritic-insensitive, typo-tolerant, ANDed across whitespace-separated terms, and ANDed with the other filters.
     val list: Secured[
-      (Option[String], Option[String], Option[String], Option[Boolean], Option[String], Option[Boolean], Option[Int]),
+      (Option[String], Option[String], Option[String], Option[Boolean], Option[String], Option[Boolean], Option[Int], Option[String]),
       TransactionListResponse,
     ] =
       secureEndpoint.get
@@ -230,6 +231,7 @@ object Endpoints {
         .in(query[Option[String]]("sort"))
         .in(query[Option[Boolean]]("asc"))
         .in(query[Option[Int]]("limit"))
+        .in(query[Option[String]]("q"))
         .out(jsonBody[TransactionListResponse])
         .errorOut(stringBody)
 
@@ -606,7 +608,7 @@ object Endpoints {
 
     object transactions {
       val list: Client[
-        (Option[String], Option[String], Option[String], Option[Boolean], Option[String], Option[Boolean], Option[Int]),
+        (Option[String], Option[String], Option[String], Option[Boolean], Option[String], Option[Boolean], Option[Int], Option[String]),
         TransactionListResponse,
       ] =
         baseEndpoint.get
@@ -618,6 +620,7 @@ object Endpoints {
           .in(query[Option[String]]("sort"))
           .in(query[Option[Boolean]]("asc"))
           .in(query[Option[Int]]("limit"))
+          .in(query[Option[String]]("q"))
           .out(jsonBody[TransactionListResponse])
           .errorOut(stringBody)
 

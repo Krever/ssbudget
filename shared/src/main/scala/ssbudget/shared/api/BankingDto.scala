@@ -41,8 +41,17 @@ final case class ImportResult(accounts: List[AccountImportResult]) derives Codec
 
 /** A page of transactions matching the server-side filters, plus the total number that match (before the display cap) and the net signed sum per
   * currency over the FULL match (`sums`) so the UI can show a reliable total even when `items` is capped.
+  *
+  * With a search term active, [[near]] carries the rows that only matched after a typo allowance, kept as their own list rather than appended to
+  * [[items]] behind an index into it. [[total]] and [[sums]] cover [[items]] alone — a near match is a guess, and letting guesses into the total
+  * would quietly corrupt the "search a merchant, read its net spend" use that makes the search box worth having.
   */
-final case class TransactionListResponse(items: List[BankTransaction], total: Int, sums: List[Money]) derives Codec.AsObject
+final case class TransactionListResponse(
+    items: List[BankTransaction],
+    total: Int,
+    sums: List[Money],
+    near: List[BankTransaction] = Nil,
+) derives Codec.AsObject
 
 /** Values the transaction-list `month` filter accepts beyond a `YYYY-MM` bucket. These two are resolved server-side to the same date windows that
   * back `CategorySummary.currentPeriodSpentCents` / `lastPeriodSpentCents`, so drilling into a category budget lists exactly the transactions its

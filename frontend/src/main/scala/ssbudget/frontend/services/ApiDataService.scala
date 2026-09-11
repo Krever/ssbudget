@@ -122,6 +122,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       sort = "date",
       asc = false,
       limit = Some(limit),
+      q = None,
     )
 
   override def uncategorizedTransactions(limit: Int): Future[TransactionListResponse] =
@@ -133,6 +134,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       sort = "date",
       asc = false,
       limit = Some(limit),
+      q = None,
     )
 
   override def setTransactionCategory(txId: BankTransactionId, categoryId: Option[CategoryId]): Future[Unit] =
