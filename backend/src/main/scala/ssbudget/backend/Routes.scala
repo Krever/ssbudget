@@ -127,7 +127,7 @@ object Routes {
       // Analytics (Metabase-backed; reports itself disabled when the deployment ships without it)
       route(Endpoints.analytics.config)(_ => analyticsService.status.map(Right(_))),
       // Database import/export
-      route(Endpoints.database.download)(_ => exportDatabase(dbPath)),
+      route(Endpoints.database.download)(_ => exportDatabase(xa, dbPath)),
       route(Endpoints.database.`import`)(bytes => importDatabase(xa, dbPath, bytes)),
     ) ++ (if testMode then List(route(Endpoints.test.reset)(_ => resetDatabase(repos))) else Nil)
 
@@ -817,20 +817,34 @@ object Routes {
       _                             <- ruleEngine.applyRules()
     } yield Right(ImportRulesResult(toCreate.size, categoriesCreated))
 
-  private def exportDatabase(dbPath: String): Result[(String, Array[Byte])] = {
-    val path      = Paths.get(dbPath)
+  /** A consistent copy of the whole database, via SQLite's own backup API.
+    *
+    * NOT a raw read of the database file: this database runs in WAL mode, where committed data lives in the `-wal` sidecar until a checkpoint.
+    * Copying the main file alone therefore produced a backup that was stale, or — on a freshly checkpointed file — empty, while still carrying a
+    * valid SQLite header, so nothing looked wrong until a restore came up missing its tables.
+    */
+  private def exportDatabase(xa: HikariTransactor[IO], dbPath: String): Result[(String, Array[Byte])] = {
     val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmmss"))
     val filename  = s"ssbudget_backup_$timestamp.db"
+    val tempPath  = Paths.get(dbPath + ".export.tmp")
 
-    IO.blocking {
-      if JFiles.exists(path) then {
-        val bytes              = JFiles.readAllBytes(path)
-        val contentDisposition = s"""attachment; filename="$filename""""
-        Right((contentDisposition, bytes))
-      } else {
-        Left("Database file not found")
+    val snapshot = IO.blocking {
+      // Close the POOLED connection, not the unwrapped delegate — see importDatabase.
+      val pooled = xa.kernel.getConnection
+      try {
+        pooled.unwrap(classOf[SQLiteConnection]).getDatabase.backup("main", tempPath.toAbsolutePath.toString, null)
+      } finally {
+        pooled.close()
       }
+      JFiles.readAllBytes(tempPath)
     }
+
+    val cleanup = IO.blocking(if JFiles.exists(tempPath) then JFiles.delete(tempPath))
+
+    snapshot
+      .guarantee(cleanup)
+      .map(bytes => Right((s"""attachment; filename="$filename"""", bytes)))
+      .handleError(e => Left(s"Export failed: ${e.getMessage}"))
   }
 
   private def importDatabase(xa: HikariTransactor[IO], dbPath: String, bytes: Array[Byte]): Result[String] = {
@@ -859,12 +873,14 @@ object Routes {
       }
 
       val restoreDb = IO.blocking {
-        val hikariDs = xa.kernel
-        val destConn = hikariDs.getConnection.unwrap(classOf[SQLiteConnection])
+        // Close the POOLED connection, not the unwrapped SQLite one. `unwrap` hands back the underlying delegate; closing that shuts the physical
+        // connection without ever returning the pool's entry, so every import leaked the pool's only connection and left the app hanging on the next
+        // query until it was restarted.
+        val pooled = xa.kernel.getConnection
         try {
-          destConn.getDatabase.restore("main", tempPath.toAbsolutePath.toString, null)
+          pooled.unwrap(classOf[SQLiteConnection]).getDatabase.restore("main", tempPath.toAbsolutePath.toString, null)
         } finally {
-          destConn.close()
+          pooled.close()
         }
       }
 
