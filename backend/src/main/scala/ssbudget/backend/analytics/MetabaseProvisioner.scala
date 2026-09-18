@@ -256,24 +256,137 @@ class MetabaseProvisioner(config: MetabaseConfig, client: MetabaseClient, state:
       IO.println(s"Metabase: hid ${raw.size} raw tables, leaving the $ReportingViewPrefix* views")
   }
 
-  /** Creates the dashboard that ships with the app — exactly once, ever.
+  /** Creates the dashboard that ships with the app, and thereafter brings it up to whatever version the app now ships.
     *
-    * The guard lives in our own database rather than in Metabase's state, and that is the point: the dashboard is the user's to rename, rearrange or
-    * delete, and re-applying our JSON on a later boot would silently destroy that work. If they delete it, it stays deleted.
+    * The original rule — seed once, never overwrite — protected something real: the dashboard is the user's to rename, rearrange or delete, and
+    * re-applying our JSON on every boot would silently destroy that work. What it also prevented was ever DELIVERING a new card. So the rule is now
+    * narrower: nothing happens unless the shipped spec's version is newer than the one last applied, and even then the user's edits win.
+    *
+    * On a version bump:
+    *   - the dashboard is copied first, always, so whatever it looked like a moment ago is still openable;
+    *   - if Metabase's revision log says nobody has touched it since we wrote it, the new spec is applied whole, layout included;
+    *   - otherwise only the cards it is missing are appended, below everything already there. Nothing existing is moved, retyped or removed.
+    *
+    * A dashboard the user deleted stays deleted: the version is recorded so the attempt is not repeated.
     */
-  private def seedCanonicalDashboard(meta: DbMetadata): EitherT[IO, String, Unit] =
-    EitherT.liftF(state.canonicalDashboardId).flatMap {
-      case Some(id) => EitherT.liftF(IO.println(s"Metabase: canonical dashboard already seeded (id $id)"))
-      case None     =>
-        for {
-          loaded  <- EitherT.fromEither[IO](spec)
-          ids      = meta.placeholders
-          cardIds <- loaded.cards.traverse(c => EitherT(createCard(c, ids)))
-          dashId  <- createDashboard(loaded, loaded.cards.zip(cardIds), ids)
-          _       <- EitherT.liftF(state.setCanonicalDashboardId(dashId))
-          _       <- EitherT.liftF(IO.println(s"Metabase: seeded canonical dashboard (id $dashId)"))
-        } yield ()
+  private[analytics] def seedCanonicalDashboard(meta: DbMetadata): EitherT[IO, String, Unit] =
+    for {
+      loaded <- EitherT.fromEither[IO](spec)
+      id     <- EitherT.liftF(state.canonicalDashboardId)
+      _      <- id.fold(seedDashboard(loaded, meta))(reconcileDashboard(_, loaded, meta))
+    } yield ()
+
+  private def seedDashboard(loaded: DashboardSpec, meta: DbMetadata): EitherT[IO, String, Unit] = {
+    val ids = meta.placeholders
+    for {
+      cardIds <- loaded.cards.traverse(c => EitherT(createCard(c, ids)))
+      dashId  <- createDashboard(loaded, loaded.cards.zip(cardIds), ids)
+      _       <- EitherT.liftF(state.setCanonicalDashboardId(dashId))
+      _       <- EitherT.liftF(state.setCanonicalDashboardCards(loaded.cards.map(_.key).toSet))
+      _       <- recordApplied(dashId, loaded.version)
+      _       <- EitherT.liftF(IO.println(s"Metabase: seeded canonical dashboard v${loaded.version} (id $dashId)"))
+    } yield ()
+  }
+
+  private def reconcileDashboard(dashId: Int, loaded: DashboardSpec, meta: DbMetadata): EitherT[IO, String, Unit] =
+    EitherT.liftF(state.canonicalDashboardVersion.map(_.getOrElse(1))).flatMap { applied =>
+      if loaded.version <= applied then EitherT.liftF(IO.println(s"Metabase: canonical dashboard is at v$applied (id $dashId)"))
+      else
+        EitherT.liftF(client.get(Seq("api", "dashboard", dashId.toString))).flatMap {
+          // Gone, or archived by the user. Record the version so this isn't retried on every boot.
+          case Left(_)                                                                      =>
+            leaveAlone(dashId, loaded.version, "is gone")
+          case Right(live) if live.hcursor.get[Boolean]("archived").toOption.contains(true) =>
+            leaveAlone(dashId, loaded.version, "is archived")
+          case Right(live)                                                                  =>
+            for {
+              _        <- EitherT.liftF(backupDashboard(dashId, loaded))
+              stamped  <- EitherT.liftF(state.canonicalDashboardRevision)
+              current  <- EitherT.liftF(latestRevision(dashId))
+              untouched = stamped.isDefined && stamped == current
+              _        <- if untouched then applyWholeSpec(dashId, loaded, meta) else appendMissingCards(dashId, live, loaded, meta)
+              _        <- recordApplied(dashId, loaded.version)
+            } yield ()
+        }
     }
+
+  /** A copy of the dashboard as it stands, before anything is written to it. One per version bump, named so it is obvious what it is. */
+  private def backupDashboard(dashId: Int, loaded: DashboardSpec): IO[Unit] = {
+    val name = s"${loaded.name} — before v${loaded.version} (${java.time.LocalDate.now()})"
+    client
+      .post(
+        Seq("api", "dashboard", dashId.toString, "copy"),
+        // Shallow: the copy points at the same saved questions, which is what makes it a cheap snapshot of the LAYOUT.
+        Json.obj("name" -> name.asJson, "is_shallow_copy" -> true.asJson),
+      )
+      .flatMap {
+        case Right(_) => IO.println(s"Metabase: backed up the dashboard as '$name'")
+        // Worth saying out loud, but not worth abandoning an additive update over.
+        case Left(e)  => IO.println(s"Metabase: could not back up the dashboard before updating it: $e")
+      }
+  }
+
+  /** The id of the dashboard's most recent revision — Metabase's own answer to "has this changed since?". */
+  private def latestRevision(dashId: Int): IO[Option[Int]] =
+    client.get(Seq("api", "revision"), Map("entity" -> "dashboard", "id" -> dashId.toString)).map {
+      case Right(json) => json.hcursor.values.getOrElse(Nil).headOption.flatMap(_.hcursor.get[Int]("id").toOption)
+      case Left(_)     => None
+    }
+
+  private def recordApplied(dashId: Int, version: Int): EitherT[IO, String, Unit] =
+    EitherT.liftF(
+      state.setCanonicalDashboardVersion(version) *>
+        latestRevision(dashId).flatMap(_.traverse_(state.setCanonicalDashboardRevision)),
+    )
+
+  /** Record the version without touching Metabase, so a dashboard the user removed is not chased on every boot. */
+  private def leaveAlone(dashId: Int, version: Int, why: String): EitherT[IO, String, Unit] =
+    EitherT.liftF(
+      state.setCanonicalDashboardVersion(version) *> IO.println(s"Metabase: canonical dashboard $dashId $why; leaving it that way"),
+    )
+
+  /** Nobody has edited it, so it can simply become the dashboard the app now ships — cards, filters and layout alike. */
+  private def applyWholeSpec(dashId: Int, loaded: DashboardSpec, meta: DbMetadata): EitherT[IO, String, Unit] = {
+    val ids = meta.placeholders
+    for {
+      cardIds <- loaded.cards.traverse(c => EitherT(createCard(c, ids)))
+      _       <- writeDashcards(dashId, loaded, loaded.cards.zip(cardIds), ids, Nil)
+      _       <- EitherT.liftF(state.setCanonicalDashboardCards(loaded.cards.map(_.key).toSet))
+      _       <- EitherT.liftF(IO.println(s"Metabase: updated the untouched canonical dashboard to v${loaded.version}"))
+    } yield ()
+  }
+
+  /** The user has made it theirs, so only add what is missing, underneath what they built.
+    *
+    * Which cards are missing is answered by the stored key -> card id map. A dashboard seeded before keys existed has no map, so it is bootstrapped
+    * by matching card NAMES once; anything that doesn't match counts as missing and gets added.
+    */
+  private def appendMissingCards(dashId: Int, live: Json, loaded: DashboardSpec, meta: DbMetadata): EitherT[IO, String, Unit] = {
+    val ids       = meta.placeholders
+    val existing  = live.hcursor.downField("dashcards").values.getOrElse(Nil).toList
+    val liveNames = existing.flatMap(dc => dc.hcursor.downField("card").get[String]("name").toOption).toSet
+    val nextRow   = existing.map(dc => dc.hcursor.get[Int]("row").getOrElse(0) + dc.hcursor.get[Int]("size_y").getOrElse(0)).maxOption.getOrElse(0)
+
+    EitherT.liftF(state.canonicalDashboardCards).flatMap { stored =>
+      // A dashboard seeded before keys existed has nothing stored, so its keys are recovered once by matching card names. The result is saved like any
+      // other, which is what stops the next version bump from having to guess again.
+      val known   = if stored.nonEmpty then stored else loaded.cards.filter(c => liveNames.contains(c.name)).map(_.key).toSet
+      val missing = loaded.cards.filterNot(c => known.contains(c.key))
+      // Laid out as shipped, but shifted below everything the user already has.
+      val placed  = missing.map(c => c.copy(layout = c.layout.copy(row = c.layout.row + nextRow)))
+      for {
+        cardIds <- placed.traverse(c => EitherT(createCard(c, ids)))
+        _       <- if placed.isEmpty then EitherT.pure[IO, String](()) else writeDashcards(dashId, loaded, placed.zip(cardIds), ids, existing)
+        _       <- EitherT.liftF(state.setCanonicalDashboardCards(known ++ placed.map(_.key)))
+        _       <- EitherT.liftF(
+                     IO.println(
+                       if placed.isEmpty then s"Metabase: canonical dashboard v${loaded.version} adds no cards this dashboard is missing"
+                       else s"Metabase: appended ${placed.size} card(s) to the edited canonical dashboard (v${loaded.version})",
+                     ),
+                   )
+      } yield ()
+    }
+  }
 
   private def createCard(card: CardSpec, ids: Map[String, Json]): IO[Either[String, Int]] = {
     val body = Json.obj(
@@ -289,9 +402,21 @@ class MetabaseProvisioner(config: MetabaseConfig, client: MetabaseClient, state:
       })
   }
 
-  private def createDashboard(spec: DashboardSpec, cards: List[(CardSpec, Int)], ids: Map[String, Json]): EitherT[IO, String, Int] = {
-    // Dashboard-level filter widgets. Each needs a stable id that the per-card mappings refer to.
-    val parameters = spec.filters.map { f =>
+  private def createDashboard(spec: DashboardSpec, cards: List[(CardSpec, Int)], ids: Map[String, Json]): EitherT[IO, String, Int] =
+    for {
+      created <- EitherT(
+                   client.post(
+                     Seq("api", "dashboard"),
+                     Json.obj("name" -> spec.name.asJson, "description" -> spec.description.asJson, "parameters" -> parameters(spec).asJson),
+                   ),
+                 )
+      dashId  <- EitherT.fromOption[IO](created.hcursor.get[Int]("id").toOption, "Metabase did not return a dashboard id")
+      _       <- writeDashcards(dashId, spec, cards, ids, Nil)
+    } yield dashId
+
+  /** Dashboard-level filter widgets. Each needs a stable id that the per-card mappings refer to. */
+  private def parameters(spec: DashboardSpec): List[Json] =
+    spec.filters.map { f =>
       Json
         .obj(
           "id"        -> parameterId(f.slug).asJson,
@@ -303,10 +428,22 @@ class MetabaseProvisioner(config: MetabaseConfig, client: MetabaseClient, state:
         .deepMerge(f.default.fold(Json.obj())(d => Json.obj("default" -> d.asJson)))
     }
 
-    // Every card here reads from the same table, so each filter maps onto every card by the field it names.
-    def mappingsFor(cardId: Int): List[Json] =
+  /** Places `cards` on the dashboard, keeping `keep` exactly as it is.
+    *
+    * `PUT /api/dashboard/:id` replaces the WHOLE dashcard set, so sending the existing entries back verbatim is what preserves a layout the user
+    * arranged — and passing `Nil` for them is what makes the shipped layout authoritative instead.
+    */
+  private def writeDashcards(
+      dashId: Int,
+      spec: DashboardSpec,
+      cards: List[(CardSpec, Int)],
+      ids: Map[String, Json],
+      keep: List[Json],
+  ): EitherT[IO, String, Unit] = {
+    // A filter maps onto each card by the field that card reads: the filter's own field by default, or the card's override where it names one.
+    def mappingsFor(card: CardSpec, cardId: Int): List[Json] =
       spec.filters.flatMap { f =>
-        ids.get(f.field).flatMap(_.asNumber).map { fieldId =>
+        ids.get(card.filterFields.getOrElse(f.slug, f.field)).flatMap(_.asNumber).map { fieldId =>
           Json.obj(
             "parameter_id" -> parameterId(f.slug).asJson,
             "card_id"      -> cardId.asJson,
@@ -319,36 +456,30 @@ class MetabaseProvisioner(config: MetabaseConfig, client: MetabaseClient, state:
     // makes the widget usable inside the iframe rather than merely present.
     val embeddingParams = Json.fromFields(spec.filters.map(f => f.slug -> "enabled".asJson))
 
+    // New dashcards are identified by negative placeholder ids; existing ones keep the ids they already have.
+    val added = cards.zipWithIndex.map { case ((card, cardId), i) =>
+      Json.obj(
+        "id"                     -> (-(i + 1)).asJson,
+        "card_id"                -> cardId.asJson,
+        "row"                    -> card.layout.row.asJson,
+        "col"                    -> card.layout.col.asJson,
+        "size_x"                 -> card.layout.sizeX.asJson,
+        "size_y"                 -> card.layout.sizeY.asJson,
+        "parameter_mappings"     -> mappingsFor(card, cardId).asJson,
+        "visualization_settings" -> Json.obj(),
+      )
+    }
+
     for {
-      created  <- EitherT(
-                    client.post(
-                      Seq("api", "dashboard"),
-                      Json.obj("name" -> spec.name.asJson, "description" -> spec.description.asJson, "parameters" -> parameters.asJson),
-                    ),
-                  )
-      dashId   <- EitherT.fromOption[IO](created.hcursor.get[Int]("id").toOption, "Metabase did not return a dashboard id")
-      // Dashcards are placed in a follow-up PUT; new ones are identified by negative placeholder ids.
-      dashcards = cards.zipWithIndex.map { case ((card, cardId), i) =>
-                    Json.obj(
-                      "id"                     -> (-(i + 1)).asJson,
-                      "card_id"                -> cardId.asJson,
-                      "row"                    -> card.layout.row.asJson,
-                      "col"                    -> card.layout.col.asJson,
-                      "size_x"                 -> card.layout.sizeX.asJson,
-                      "size_y"                 -> card.layout.sizeY.asJson,
-                      "parameter_mappings"     -> mappingsFor(cardId).asJson,
-                      "visualization_settings" -> Json.obj(),
-                    )
-                  }
-      _        <- EitherT(client.put(Seq("api", "dashboard", dashId.toString), Json.obj("dashcards" -> dashcards.asJson)))
+      _ <- EitherT(client.put(Seq("api", "dashboard", dashId.toString), Json.obj("dashcards" -> (keep ++ added).asJson)))
       // Static embedding is per-resource: without this the signed JWT is rejected.
-      _        <- EitherT(
-                    client.put(
-                      Seq("api", "dashboard", dashId.toString),
-                      Json.obj("enable_embedding" -> true.asJson, "embedding_params" -> embeddingParams),
-                    ),
-                  )
-    } yield dashId
+      _ <- EitherT(
+             client.put(
+               Seq("api", "dashboard", dashId.toString),
+               Json.obj("enable_embedding" -> true.asJson, "embedding_params" -> embeddingParams),
+             ),
+           )
+    } yield ()
   }
 
   /** Walks a JSON tree replacing placeholder strings with the ids they name. */
@@ -413,13 +544,29 @@ object MetabaseProvisioner {
   // --- the shipped dashboard spec ---------------------------------------------------------------
 
   final case class Layout(row: Int, col: Int, sizeX: Int, sizeY: Int)
-  final case class CardSpec(name: String, display: String, visualizationSettings: Json, datasetQuery: Json, layout: Layout)
+
+  /** One card. `key` is its identity across versions — stable where the name is the user's to change — and `filterFields` overrides, per filter slug,
+    * the column a dashboard filter maps onto for this card (cards reading a different table than the filter's default field need it).
+    */
+  final case class CardSpec(
+      key: String,
+      name: String,
+      display: String,
+      visualizationSettings: Json,
+      datasetQuery: Json,
+      layout: Layout,
+      filterFields: Map[String, String] = Map.empty,
+  )
   final case class Coercion(table: String, field: String, strategy: String)
 
   /** A dashboard-level filter widget. `field` is a `{{field:table.column}}` placeholder naming the column every card is filtered on. */
   final case class FilterSpec(name: String, slug: String, `type`: String, sectionId: String, default: Option[String], field: String)
 
+  /** `version` is what makes a shipped change reach a dashboard that already exists: bump it and the next boot reconciles (see
+    * [[MetabaseProvisioner.reconcileDashboard]]). Leave it alone and nothing is touched.
+    */
   final case class DashboardSpec(
+      version: Int,
       name: String,
       description: String,
       coercions: List[Coercion],
@@ -450,21 +597,24 @@ object MetabaseProvisioner {
     }
     private given Decoder[CardSpec]      = Decoder.instance { c =>
       for {
+        key     <- c.get[String]("key")
         name    <- c.get[String]("name")
         display <- c.get[String]("display")
         viz     <- c.getOrElse[Json]("visualization_settings")(Json.obj())
         query   <- c.get[Json]("dataset_query")
         layout  <- c.get[Layout]("layout")
-      } yield CardSpec(name, display, viz, query, layout)
+        fields  <- c.getOrElse[Map[String, String]]("filter_fields")(Map.empty)
+      } yield CardSpec(key, name, display, viz, query, layout, fields)
     }
     private given Decoder[DashboardSpec] = Decoder.instance { c =>
       for {
+        version     <- c.getOrElse[Int]("version")(1)
         name        <- c.get[String]("name")
         description <- c.get[String]("description")
         coercions   <- c.getOrElse[List[Coercion]]("coercions")(Nil)
         filters     <- c.getOrElse[List[FilterSpec]]("filters")(Nil)
         cards       <- c.get[List[CardSpec]]("cards")
-      } yield DashboardSpec(name, description, coercions, filters, cards)
+      } yield DashboardSpec(version, name, description, coercions, filters, cards)
     }
 
     /** Reads the shipped dashboard spec from the jar. A malformed spec is reported, not silently trimmed. */

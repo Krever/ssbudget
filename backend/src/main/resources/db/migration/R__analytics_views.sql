@@ -59,6 +59,38 @@ SELECT
   a.balance_updated_at      AS balance_updated_at
 FROM accounts a;
 
+DROP VIEW IF EXISTS v_daily_budget;
+CREATE VIEW v_daily_budget AS
+-- Free money is computed ONCE, in the inner select, and everything derived from it reads the alias — SQLite can't
+-- reference an output alias in the same SELECT, which is the only reason for the nesting. It is deliberately not a
+-- stored column: the terms are the record, so a dip can always be traced to the term that caused it.
+-- BudgetSnapshotServiceSpec holds this expression to the Scala one in DailyBudgetSnapshot, so the two cannot drift.
+SELECT
+  b.*,
+  CASE WHEN b.days_remaining > 0 THEN b.free_money / b.days_remaining END AS daily_budget
+FROM (
+  SELECT
+    s.on_date                                    AS on_date,
+    strftime('%Y-%m', s.on_date)                 AS month,
+    s.currency                                   AS currency,
+    s.spendable_cents          * 1.0 / 100       AS spendable,
+    s.planned_to_pay_cents     * 1.0 / 100       AS planned_to_pay,
+    s.planned_to_receive_cents * 1.0 / 100       AS planned_to_receive,
+    s.budgets_to_spend_cents   * 1.0 / 100       AS budgets_to_spend,
+    s.budgets_to_receive_cents * 1.0 / 100       AS budgets_to_receive,
+    (s.planned_to_pay_cents     + s.budgets_to_spend_cents)   * 1.0 / 100 AS still_to_pay,
+    (s.planned_to_receive_cents + s.budgets_to_receive_cents) * 1.0 / 100 AS still_to_receive,
+    (s.spendable_cents
+       + s.planned_to_receive_cents + s.budgets_to_receive_cents
+       - s.planned_to_pay_cents     - s.budgets_to_spend_cents) * 1.0 / 100 AS free_money,
+    s.savings_cents * 1.0 / 100                  AS savings,
+    s.days_remaining                             AS days_remaining,
+    s.source                                     AS source,
+    date(p.started_at)                           AS period_start
+  FROM daily_budget_snapshots s
+  LEFT JOIN periods p ON p.id = s.period_id
+) b;
+
 DROP VIEW IF EXISTS v_planned_items;
 CREATE VIEW v_planned_items AS
 SELECT

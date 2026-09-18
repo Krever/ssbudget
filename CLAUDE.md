@@ -112,6 +112,12 @@ ExpenseRecord (one per planned item per period):
 BalanceSnapshot:
   - accountId, amount, currency, timestamp   -- append-only history
 
+DailyBudgetSnapshot (table: daily_budget_snapshots):
+  - one row per day: the TERMS of the free-money calculation, never the answer
+  - spendable / plannedToPay / plannedToReceive / budgetsToSpend / budgetsToReceive / savings, daysRemaining
+  - source (live|reconstructed)              -- measured that day, or rebuilt from the record later
+  - free money is derived in `v_daily_budget`, so a dip can always be traced to the term that caused it
+
 Account (spending accounts and savings buckets, unified):
   - id, name, currency
   - role (spending|savings)
@@ -142,8 +148,11 @@ without `SSBUDGET_METABASE_URL` the proxy, provisioning and nav entry all disapp
   app session and injecting `X-Metabase-Session` from a service account (`AnalyticsProxyRoutes`).
 - The in-app dashboard is a **static embed** — a short-lived signed JWT, minted per page load.
 - Metabase explores `v_*` SQL views, not raw tables (cents → major units, ISO dates, resolved names).
-- A canonical dashboard is seeded from JSON on first boot and **never reconciled** — the user's edits
-  win. The marker lives in `analytics_state`.
+- A canonical dashboard is seeded from JSON on first boot. It is only ever touched again when the
+  spec's `version` is bumped, and even then **the user's edits win**: the dashboard is copied first,
+  then replaced whole only if Metabase's revision log says nobody has edited it — otherwise it just
+  gains the cards it is missing, appended below everything already there. Deleted stays deleted.
+  Version, revision and the card-key map live in `analytics_state`.
 
 `./dev.sh` runs it locally and `./build.sh` bundles it into the image — both on by default, both
 take `--no-analytics`. The container generates and persists the Metabase credentials itself, so a

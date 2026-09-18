@@ -22,7 +22,7 @@ import ssbudget.backend.banking.{
   TransactionImportService,
 }
 import ssbudget.backend.db.Repositories
-import ssbudget.backend.service.CurrencyService
+import ssbudget.backend.service.{BudgetSnapshotService, BudgetSnapshotTrigger, CurrencyService}
 import ssbudget.shared.api.HealthEndpoint
 
 /** Reusable server builder for production and testing */
@@ -82,6 +82,8 @@ object ServerBuilder {
       analytics       <- Analytics.resource(dbPath, sttpBackend, repos.analyticsState, supervisor, sessionService, testMode)
       // Any job left Running by a previous process was interrupted by the restart — mark it Failed so the UI doesn't show a phantom in-progress run.
       _               <- Resource.eval(IO.realTimeInstant.flatMap(now => repos.importJobs.failRunning(now, "Interrupted by a server restart")))
+      // Records the day's free-money components off ordinary traffic, and fills in whatever the suspended days missed.
+      snapshotting    <- Resource.eval(BudgetSnapshotTrigger.wrap(new BudgetSnapshotService(repos), supervisor))
       server          <- {
         val passwordService  = PasswordService()
         val currencyService  = new CurrencyService(repos, sttpBackend)
@@ -119,7 +121,7 @@ object ServerBuilder {
 
         // Static routes first for non-API paths, then API routes
         // (staticRoutes only handles non-API paths via the make method)
-        val allRoutes = analytics.routes <+> staticRoutes <+> healthRoute <+> authRoutes <+> dataRoutes
+        val allRoutes = analytics.routes <+> staticRoutes <+> healthRoute <+> authRoutes <+> snapshotting(dataRoutes)
 
         EmberServerBuilder
           .default[IO]

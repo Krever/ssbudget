@@ -1,5 +1,6 @@
 {
-  "_comment": "Layout note: Metabase's dashboard grid is 24 columns wide. Cards must sum to 24 across a row or the dashboard renders with a large empty gutter on the right. Placeholders ({{db}}, {{table:x}}, {{field:x.y}}) are resolved against the live instance at seed time.",
+  "_comment": "Layout note: Metabase's dashboard grid is 24 columns wide. Cards must sum to 24 across a row or the dashboard renders with a large empty gutter on the right. Placeholders ({{db}}, {{table:x}}, {{field:x.y}}) are resolved against the live instance at seed time. Each card carries a stable `key`, so a later `version` can tell which cards a dashboard already has; bumping `version` is what delivers new ones (see MetabaseProvisioner.seedCanonicalDashboard). `filter_fields` re-points a dashboard filter at another column for cards that read a different table.",
+  "version": 2,
   "name": "Household Spending",
   "description": "Shipped with SSBudget as a starting point. Edit it freely — it is created once and never overwritten.",
 
@@ -7,7 +8,8 @@
     { "table": "v_transactions",  "field": "booked_on",          "strategy": "Coercion/ISO8601->Date" },
     { "table": "v_planned_items", "field": "period_start",       "strategy": "Coercion/ISO8601->Date" },
     { "table": "v_planned_items", "field": "paid_on",            "strategy": "Coercion/ISO8601->Date" },
-    { "table": "v_accounts",      "field": "balance_updated_at", "strategy": "Coercion/ISO8601->DateTime" }
+    { "table": "v_accounts",      "field": "balance_updated_at", "strategy": "Coercion/ISO8601->DateTime" },
+    { "table": "v_daily_budget",  "field": "on_date",            "strategy": "Coercion/ISO8601->Date" }
   ],
 
   "filters": [
@@ -23,6 +25,7 @@
 
   "cards": [
     {
+      "key": "spent",
       "name": "Spent",
       "display": "scalar",
       "visualization_settings": { "card.title": "Spent" },
@@ -38,6 +41,7 @@
       "layout": { "row": 0, "col": 0, "size_x": 8, "size_y": 3 }
     },
     {
+      "key": "received",
       "name": "Received",
       "display": "scalar",
       "visualization_settings": { "card.title": "Received" },
@@ -53,6 +57,7 @@
       "layout": { "row": 0, "col": 8, "size_x": 8, "size_y": 3 }
     },
     {
+      "key": "net",
       "name": "Net",
       "display": "scalar",
       "visualization_settings": { "card.title": "Net" },
@@ -68,6 +73,7 @@
       "layout": { "row": 0, "col": 16, "size_x": 8, "size_y": 3 }
     },
     {
+      "key": "spend-by-category",
       "name": "Spend by category over time",
       "display": "bar",
       "visualization_settings": {
@@ -91,6 +97,7 @@
       "layout": { "row": 3, "col": 0, "size_x": 24, "size_y": 8 }
     },
     {
+      "key": "where-money-goes",
       "name": "Where the money goes",
       "display": "row",
       "visualization_settings": {
@@ -111,6 +118,7 @@
       "layout": { "row": 11, "col": 0, "size_x": 12, "size_y": 7 }
     },
     {
+      "key": "top-counterparties",
       "name": "Top counterparties",
       "display": "row",
       "visualization_settings": {
@@ -132,6 +140,7 @@
       "layout": { "row": 11, "col": 12, "size_x": 12, "size_y": 7 }
     },
     {
+      "key": "largest-transactions",
       "name": "Largest transactions",
       "display": "table",
       "visualization_settings": {
@@ -165,6 +174,65 @@
         }
       },
       "layout": { "row": 18, "col": 0, "size_x": 24, "size_y": 7 }
+    },
+    {
+      "key": "free-money-trend",
+      "name": "Free money over time",
+      "display": "line",
+      "visualization_settings": {
+        "card.title": "Free money over time",
+        "card.description": "What was actually free to spend that day: the spendable balance, plus what was still expected in, less what was still expected out.",
+        "graph.dimensions": ["on_date"],
+        "graph.metrics": ["sum"],
+        "graph.x_axis.title_text": "Day",
+        "graph.y_axis.title_text": "Free money",
+        "graph.show_goal": true,
+        "graph.goal_value": 0,
+        "graph.goal_label": "Nothing left"
+      },
+      "filter_fields": { "date_range": "{{field:v_daily_budget.on_date}}" },
+      "dataset_query": {
+        "database": "{{db}}",
+        "type": "query",
+        "query": {
+          "source-table": "{{table:v_daily_budget}}",
+          "aggregation": [["sum", ["field", "{{field:v_daily_budget.free_money}}", null]]],
+          "breakout": [["field", "{{field:v_daily_budget.on_date}}", { "temporal-unit": "day" }]]
+        }
+      },
+      "layout": { "row": 25, "col": 0, "size_x": 24, "size_y": 7 }
+    },
+    {
+      "key": "free-money-commitments",
+      "name": "What's committed",
+      "display": "area",
+      "visualization_settings": {
+        "card.title": "What's committed",
+        "card.description": "What the plan still expected to leave the balance \u2014 hand-declared items and category budgets. The steps down in free money are these being paid off.",
+        "graph.dimensions": ["on_date"],
+        "graph.metrics": ["sum", "sum_2"],
+        "graph.x_axis.title_text": "Day",
+        "graph.y_axis.title_text": "Still to pay",
+        "stackable.stack_type": "stacked",
+        "series_settings": {
+          "sum": { "title": "Planned items" },
+          "sum_2": { "title": "Category budgets" }
+        }
+      },
+      "filter_fields": { "date_range": "{{field:v_daily_budget.on_date}}" },
+      "dataset_query": {
+        "database": "{{db}}",
+        "type": "query",
+        "query": {
+          "source-table": "{{table:v_daily_budget}}",
+          "aggregation": [
+            ["sum", ["field", "{{field:v_daily_budget.planned_to_pay}}", null]],
+            ["sum", ["field", "{{field:v_daily_budget.budgets_to_spend}}", null]]
+          ],
+          "breakout": [["field", "{{field:v_daily_budget.on_date}}", { "temporal-unit": "day" }]]
+        }
+      },
+      "layout": { "row": 32, "col": 0, "size_x": 24, "size_y": 7 }
     }
   ]
 }

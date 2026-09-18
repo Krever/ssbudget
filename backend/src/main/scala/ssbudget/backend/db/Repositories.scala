@@ -23,6 +23,7 @@ final case class Repositories(
     classificationRules: ClassificationRuleRepository,
     importJobs: ImportJobRepository,
     analyticsState: AnalyticsStateRepository,
+    dailyBudgetSnapshots: DailyBudgetSnapshotRepository,
 )
 
 object Repositories {
@@ -46,6 +47,7 @@ object Repositories {
       classificationRules = new ClassificationRuleRepositoryImpl(xa),
       importJobs = new ImportJobRepositoryImpl(xa),
       analyticsState = new AnalyticsStateRepositoryImpl(xa),
+      dailyBudgetSnapshots = new DailyBudgetSnapshotRepositoryImpl(xa),
     )
   }
 }

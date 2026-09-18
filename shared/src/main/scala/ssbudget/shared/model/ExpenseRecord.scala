@@ -3,7 +3,7 @@ package ssbudget.shared.model
 import io.circe.Codec
 import ssbudget.shared.json.StringId
 
-import java.time.Instant
+import java.time.{Instant, LocalDate, ZoneOffset}
 
 final case class ExpenseRecordId(value: String) extends AnyVal
 object ExpenseRecordId                          extends StringId[ExpenseRecordId]
@@ -28,6 +28,18 @@ final case class ExpenseRecord(
   def remaining(estimateCents: Long): Long =
     if settled then 0L else math.max(0L, estimateCents - paidCents)
 
+  /** What was still expected against `estimateCents` as of the END of `asOf`, reconstructed from what the record now holds.
+    *
+    * The record keeps only its end state — an accumulated `paidAmount`, the instant of the LAST payment, and a `settled` flag with no timestamp at
+    * all — so the one date available is `paidAt`. Before it, the item reads as untouched; from it on, as it stands today. An item paid in instalments
+    * therefore steps down once, at the final payment, rather than in stages: the intermediate amounts were never recorded. Accurate for anything paid
+    * in one go, which in practice is nearly everything.
+    */
+  def remainingAsOf(estimateCents: Long, asOf: LocalDate): Long =
+    // Before the payment, the item reads as untouched. A settled record with no payment at all has no date to place it, so it counts as closed
+    // throughout — there is nothing else it could mean.
+    if paidAt.exists(_.atZone(ZoneOffset.UTC).toLocalDate.isAfter(asOf)) then estimateCents else remaining(estimateCents)
+
   /** Paid something, but not closed yet. */
   def isPartiallyPaid: Boolean = !settled && paidCents > 0
 
@@ -46,4 +58,8 @@ object ExpenseRecord {
   /** Remaining for an item whose record may not exist yet (no record = nothing paid, nothing settled). */
   def remainingFor(record: Option[ExpenseRecord], estimateCents: Long): Long =
     record.fold(estimateCents)(_.remaining(estimateCents))
+
+  /** [[remainingFor]] as of a past day — see [[ExpenseRecord.remainingAsOf]]. */
+  def remainingForAsOf(record: Option[ExpenseRecord], estimateCents: Long, asOf: LocalDate): Long =
+    record.fold(estimateCents)(_.remainingAsOf(estimateCents, asOf))
 }

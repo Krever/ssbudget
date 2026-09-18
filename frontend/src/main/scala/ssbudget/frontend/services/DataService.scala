@@ -6,7 +6,6 @@ import ssbudget.shared.api.{CategorySummary, TransactionListResponse}
 import ssbudget.shared.model.*
 
 import java.time.{Instant, LocalDate, ZoneOffset}
-import java.time.temporal.ChronoUnit
 import scala.concurrent.Future
 
 trait DataService {
@@ -215,21 +214,17 @@ object DataService {
   // UTC everywhere: ZoneId.systemDefault() fails silently in Scala.js without the tzdb dependency (see Formatting).
   private val utc = ZoneOffset.UTC
 
+  // The rules themselves live on Period, in shared, so the browser and the server's daily snapshot read a period the same way. Here they are simply
+  // fixed to today.
+
   /** Days from today to [[Period.expectedEnd]] — 0 on the payday itself, negative once the period has overrun. */
-  def daysRemaining(start: Instant): Int =
-    ChronoUnit.DAYS.between(LocalDate.now(utc), Period.expectedEnd(start)).toInt
+  def daysRemaining(start: Instant): Int = Period.daysRemaining(start, LocalDate.now(utc))
 
   /** 1-based day of the period today, for "day N" labels. */
-  def dayOfPeriod(start: Instant): Int =
-    ChronoUnit.DAYS.between(start.atZone(utc).toLocalDate, LocalDate.now(utc)).toInt + 1
+  def dayOfPeriod(start: Instant): Int = Period.dayOfPeriod(start, LocalDate.now(utc))
 
   /** 0..1 elapsed between the period's start and [[Period.expectedEnd]]; pinned to 1 once overrun. */
-  def elapsedFraction(start: Instant): Double = {
-    val startDate = start.atZone(utc).toLocalDate
-    val total     = ChronoUnit.DAYS.between(startDate, Period.expectedEnd(start)).toDouble
-    val elapsed   = ChronoUnit.DAYS.between(startDate, LocalDate.now(utc)).toDouble
-    if total <= 0 then 1.0 else math.max(0.0, math.min(1.0, elapsed / total))
-  }
+  def elapsedFraction(start: Instant): Double = Period.elapsedFraction(start, LocalDate.now(utc))
 
   /** Replace the element sharing `item`'s key, or append it if none matches. */
   def upsertById[A, K](xs: List[A], item: A)(key: A => K): List[A] =

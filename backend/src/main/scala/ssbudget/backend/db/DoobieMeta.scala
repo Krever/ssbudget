@@ -7,7 +7,7 @@ import io.circe.parser.decode
 import io.circe.syntax.*
 import ssbudget.shared.model.*
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 
 object DoobieMeta {
 
@@ -59,6 +59,10 @@ object DoobieMeta {
     case BudgetItemType.PlannedIncome  => "planned_income"
   }
 
+  given Meta[SnapshotSource] = Meta[String].tiemap(SnapshotSource.fromString)(SnapshotSource.asString)
+
   // Date/Time types (stored as TEXT in SQLite)
-  given Meta[Instant] = Meta[String].timap(Instant.parse)(_.toString)
+  given Meta[Instant]   = Meta[String].timap(Instant.parse)(_.toString)
+  // Bare calendar days, 'YYYY-MM-DD' — SQLite's date() and strftime() read them directly.
+  given Meta[LocalDate] = Meta[String].timap(LocalDate.parse)(_.toString)
 }

@@ -49,7 +49,8 @@ class MetabaseClient(config: MetabaseConfig, backend: SttpBackend[IO, Any], toke
       }
   }
 
-  def get(segments: Seq[String]): IO[Either[String, Json]] = call("GET", segments, None)
+  /** `params` becomes the query string — `/api/revision?entity=dashboard&id=7` and friends. */
+  def get(segments: Seq[String], params: Map[String, String] = Map.empty): IO[Either[String, Json]] = call("GET", segments, None, params)
 
   def post(segments: Seq[String], body: Json): IO[Either[String, Json]] = call("POST", segments, Some(body))
 
@@ -64,9 +65,15 @@ class MetabaseClient(config: MetabaseConfig, backend: SttpBackend[IO, Any], toke
   def postPublic(segments: Seq[String], body: Json): IO[Either[String, Json]] = send("POST", segments, Some(body), None).map(_._2)
 
   /** One request, with the session header attached when there is one. */
-  private def send(method: String, segments: Seq[String], body: Option[Json], token: Option[String]): IO[(StatusCode, Either[String, Json])] = {
+  private def send(
+      method: String,
+      segments: Seq[String],
+      body: Option[Json],
+      token: Option[String],
+      params: Map[String, String] = Map.empty,
+  ): IO[(StatusCode, Either[String, Json])] = {
     val request  = basicRequest
-      .method(Method(method), base.addPath(segments))
+      .method(Method(method), base.addPath(segments).addParams(params))
       .contentType("application/json")
     val withAuth = token.fold(request)(t => request.header("X-Metabase-Session", t))
     body.fold(withAuth)(b => withAuth.body(b.noSpaces)).send(backend).attempt.map {
@@ -84,16 +91,21 @@ class MetabaseClient(config: MetabaseConfig, backend: SttpBackend[IO, Any], toke
   }
 
   /** Authenticated call, retrying once with a fresh token if Metabase says the session is gone. */
-  private def call(method: String, segments: Seq[String], body: Option[Json]): IO[Either[String, Json]] =
+  private def call(
+      method: String,
+      segments: Seq[String],
+      body: Option[Json],
+      params: Map[String, String] = Map.empty,
+  ): IO[Either[String, Json]] =
     sessionToken.flatMap {
       case Left(e)  => IO.pure(Left(e))
       case Right(t) =>
-        send(method, segments, body, Some(t)).flatMap {
+        send(method, segments, body, Some(t), params).flatMap {
           // Session expired or Metabase was reset — drop the cached token and try once more.
           case (StatusCode.Unauthorized, _) =>
             tokenRef.set(None) *> sessionToken.flatMap {
               case Left(e)   => IO.pure(Left(e))
-              case Right(t2) => send(method, segments, body, Some(t2)).map(_._2)
+              case Right(t2) => send(method, segments, body, Some(t2), params).map(_._2)
             }
           case (_, result)                  => IO.pure(result)
         }

@@ -91,6 +91,22 @@ trait BankTransactionRepository {
     */
   def monthlySpendByCategory(from: Instant, to: Instant, includeInflows: Boolean = false): IO[List[(CategoryId, Currency, String, Long)]]
 
+  /** Net spend per (category, currency, day) over `[from, to]` INCLUSIVE, categorized + non-internal, inflows subtracting — the daily grain of
+    * [[spendByCategoryBetween]] with `includeInflows = true`.
+    *
+    * One query instead of one per day: rebuilding a category's period-to-date spend for every day of a backfill otherwise costs hundreds of round
+    * trips.
+    */
+  def dailyNetSpendByCategory(from: Instant, to: Instant): IO[List[(CategoryId, Currency, String, Long)]]
+
+  /** Signed net movement per (bank account uid, currency, day) over `[from, to]` INCLUSIVE of both days — credits positive, debits negative, internal
+    * transfers included (a transfer really does move one account's balance).
+    *
+    * This is what carries a balance forward between snapshots: the app only records balances when it syncs, but the ledger is continuous, so a day
+    * with no snapshot still has a knowable balance. Days are `YYYY-MM-DD` keys, since `booked_at` is date-granular anyway.
+    */
+  def dailyNetByAccount(from: Instant, to: Instant): IO[List[(String, Currency, String, Long)]]
+
   /** Most recent booked_at for an account, for incremental imports (None when the account has no transactions yet). */
   def latestBookedAt(ebAccountUid: String): IO[Option[Instant]]
 
@@ -240,6 +256,25 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
           WHERE category_id IS NOT NULL AND is_internal = 0""" ++ debit ++ fr"AND booked_at >= $from AND booked_at < $to" ++
       fr"GROUP BY category_id, currency, ym").query[(CategoryId, Currency, String, Long)].to[List].transact(xa)
   }
+
+  override def dailyNetSpendByCategory(from: Instant, to: Instant): IO[List[(CategoryId, Currency, String, Long)]] =
+    sql"""SELECT category_id, currency, substr(booked_at, 1, 10) AS d, SUM(-amount_cents)
+          FROM bank_transactions
+          WHERE category_id IS NOT NULL AND is_internal = 0 AND booked_at >= $from AND booked_at <= $to
+          GROUP BY category_id, currency, d"""
+      .query[(CategoryId, Currency, String, Long)]
+      .to[List]
+      .transact(xa)
+
+  override def dailyNetByAccount(from: Instant, to: Instant): IO[List[(String, Currency, String, Long)]] =
+    // `<= to` rather than `< to`: the caller names the last day it wants, and booked_at is midnight of that day.
+    sql"""SELECT eb_account_uid, currency, substr(booked_at, 1, 10) AS d, SUM(amount_cents)
+          FROM bank_transactions
+          WHERE booked_at >= $from AND booked_at <= $to
+          GROUP BY eb_account_uid, currency, d"""
+      .query[(String, Currency, String, Long)]
+      .to[List]
+      .transact(xa)
 
   override def latestBookedAt(ebAccountUid: String): IO[Option[Instant]] =
     sql"SELECT MAX(booked_at) FROM bank_transactions WHERE eb_account_uid = $ebAccountUid".query[Option[Instant]].unique.transact(xa)
