@@ -1,6 +1,6 @@
 package ssbudget.frontend.util
 
-import java.time.{Instant, LocalDate, ZoneId}
+import java.time.{Instant, ZoneId}
 import java.time.format.DateTimeFormatter
 
 object Formatting {
@@ -19,10 +19,6 @@ object Formatting {
     isoDateFormatter.format(localDate)
   }
 
-  def formatIsoToday: String = {
-    isoDateFormatter.format(LocalDate.now(zone))
-  }
-
   def formatMoneyShort(cents: Long): String = {
     val amount = cents / 100.0
     f"$amount%,.0f"
@@ -31,10 +27,6 @@ object Formatting {
   def formatDate(instant: Instant): String = {
     val localDate = instant.atZone(zone).toLocalDate
     dateFormatter.format(localDate)
-  }
-
-  def formatLocalDate(date: LocalDate): String = {
-    dateFormatter.format(date)
   }
 
   def formatDateShort(instant: Instant): String = {

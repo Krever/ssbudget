@@ -139,16 +139,16 @@ object DashboardPage {
               div(
                 cls       := "progress-bar bg-secondary",
                 role      := "progressbar",
-                styleAttr := Formatting.progressWidth(DataService.elapsedFraction(period.startDate)),
+                styleAttr := Formatting.progressWidth(period.elapsedFraction(DataService.today)),
               ),
             ),
             div(
               cls       := "d-flex justify-content-between small text-muted mt-1",
-              span(s"Period started ${Formatting.formatDate(period.startDate)} · day ${DataService.dayOfPeriod(period.startDate)}"),
+              span(s"Period started ${Formatting.formatDate(period.startDate)} · day ${period.dayOfPeriod(DataService.today)}"),
               a(
                 cls := "text-muted text-decoration-none",
                 Router.linkTo(Page.Periods),
-                s"${DataService.daysRemaining(period.startDate)} days left · periods →",
+                s"${period.daysRemaining(DataService.today)} days left · periods →",
               ),
             ),
           )

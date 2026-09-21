@@ -8,9 +8,10 @@ import ssbudget.frontend.{Page, Router}
 import ssbudget.shared.api.{CategoryFilter, MonthFilter, PeriodCategorySpend, PeriodSummary}
 import ssbudget.shared.model.{Period, PeriodId}
 
+import java.time.LocalDate
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 /** Period bookkeeping and the retrospective that goes with it: the running period on top (start, progress, and the one button that closes it), then
   * every past period as a row of what actually happened — money in and out per the bank, how the plan was executed, what savings did, and the balance
@@ -64,9 +65,9 @@ object PeriodsPage {
                 div(
                   cls := "d-flex flex-wrap gap-4",
                   stat("Started", Formatting.formatDate(period.startDate)),
-                  stat("Expected end", Formatting.formatLocalDate(Period.expectedEnd(period.startDate))),
-                  stat("Days left", DataService.daysRemaining(period.startDate).toString),
-                  stat("Day", DataService.dayOfPeriod(period.startDate).toString),
+                  stat("Expected end", expectedEndInput(period)),
+                  stat("Days left", period.daysRemaining(DataService.today).toString),
+                  stat("Day", period.dayOfPeriod(DataService.today).toString),
                 ),
                 Loading.actionButton("End Period & Start New", startNew, "btn btn-warning btn-sm"),
               ),
@@ -76,7 +77,7 @@ object PeriodsPage {
                 div(
                   cls       := "progress-bar",
                   role      := "progressbar",
-                  styleAttr := Formatting.progressWidth(DataService.elapsedFraction(period.startDate)),
+                  styleAttr := Formatting.progressWidth(period.elapsedFraction(DataService.today)),
                 ),
               ),
             )
@@ -88,6 +89,24 @@ object PeriodsPage {
             )
         },
       ),
+    )
+
+  /** The period's expected end, typed directly into the row.
+    *
+    * It is the only thing that decides the period's length — days left, day N and the progress bar all read it — so it is edited in place rather than
+    * behind a dialog: a paycheck landing early is a two-second correction, not a workflow.
+    */
+  private def expectedEndInput(period: Period): HtmlElement =
+    input(
+      tpe          := "date",
+      cls          := "form-control form-control-sm py-0 fw-semibold",
+      styleAttr    := "width: 9.5rem",
+      defaultValue := period.expectedEnd.toString,
+      // `change` rather than `input`: a date picker emits a half-typed year as you go, and each one would be a request. A cleared or half-typed
+      // field parses to nothing and is simply ignored, leaving the period on the date it already had.
+      onChange.mapToValue --> { value =>
+        Try(LocalDate.parse(value)).foreach(date => dataService.setPeriodExpectedEnd(period.id, date))
+      },
     )
 
   private def stat(label: String, value: Modifier[HtmlElement]): HtmlElement =

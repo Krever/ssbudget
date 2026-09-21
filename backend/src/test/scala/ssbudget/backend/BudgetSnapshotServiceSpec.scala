@@ -23,6 +23,8 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
 
   private val today       = LocalDate.now(ZoneOffset.UTC)
   private val periodStart = today.minusDays(10)
+  // The period states its own expected end; nothing derives one from a payday.
+  private val periodEnd   = periodStart.plusDays(30)
 
   private def at(day: LocalDate, hour: Int = 12): Instant = day.atStartOfDay(ZoneOffset.UTC).plusHours(hour).toInstant
 
@@ -43,7 +45,7 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
     val insert = for {
       _ <- sql"""INSERT INTO accounts (id, name, currency, role, balance_cents, balance_source, balance_updated_at)
                  VALUES ('acc1', 'Main', 'PLN', 'spending', 85000, 'bank', ${at(today)})""".update.run
-      _ <- sql"""INSERT INTO periods (id, started_at, ended_at) VALUES ('per1', ${at(periodStart, 9)}, NULL)""".update.run
+      _ <- sql"""INSERT INTO periods (id, started_at, expected_end, ended_at) VALUES ('per1', ${at(periodStart, 9)}, $periodEnd, NULL)""".update.run
       _ <- sql"""INSERT INTO expense_definitions (id, name, item_type, estimate_cents, currency)
                  VALUES ('def1', 'Rent', 'planned_expense', 30000, 'PLN')""".update.run
       _ <- sql"""INSERT INTO expense_records (id, period_id, expense_def_id, paid_amount, paid_at, settled)
@@ -162,7 +164,7 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
         freeOn(service, today).asserting { s =>
           s.spendableCents shouldBe 85000L
           s.source shouldBe SnapshotSource.Live
-          s.daysRemaining shouldBe Some(Period.daysRemaining(at(periodStart, 9), today))
+          s.daysRemaining shouldBe Some(20) // the period opened 10 days ago and runs 30 days
         }
       }
     }

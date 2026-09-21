@@ -3,6 +3,8 @@ package ssbudget.shared.api
 import io.circe.Codec
 import ssbudget.shared.model.*
 
+import java.time.LocalDate
+
 /** One period's retrospective: what actually moved between the paycheck that opened it and the one that closed it. Everything monetary is in
   * [[currency]] (the primary currency), converted at the latest rates.
   *
@@ -43,3 +45,8 @@ final case class PeriodCategorySpend(
     category: Category,
     spentCents: Long,
 ) derives Codec.AsObject
+
+/** Correct when a period is expected to end — the paycheck came early, came late, or the pay cycle changed shape. The date is stored on the period,
+  * so this is the only thing that decides its length; nothing re-derives it from a payday.
+  */
+final case class SetPeriodExpectedEndRequest(expectedEnd: LocalDate) derives Codec.AsObject

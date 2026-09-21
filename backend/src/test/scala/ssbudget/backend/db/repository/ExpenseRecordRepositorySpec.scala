@@ -3,7 +3,7 @@ package ssbudget.backend.db.repository
 import cats.effect.IO
 import ssbudget.shared.model.*
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 
 class ExpenseRecordRepositorySpec extends RepositorySpec {
 
@@ -11,7 +11,7 @@ class ExpenseRecordRepositorySpec extends RepositorySpec {
       periodRepo: PeriodRepository,
       expenseRepo: ExpenseDefinitionRepository,
   ): IO[Unit] = {
-    val period  = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), None)
+    val period  = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), LocalDate.parse("2024-02-25"), None)
     val expense = BudgetItemDefinition(ExpenseDefId("exp-1"), "Rent", BudgetItemType.PlannedExpense, 200000L, Currency.PLN)
     periodRepo.create(period) *> expenseRepo.create(expense)
   }
@@ -42,8 +42,8 @@ class ExpenseRecordRepositorySpec extends RepositorySpec {
     val expenseRepo = new ExpenseDefinitionRepositoryImpl(xa)
     val recordRepo  = new ExpenseRecordRepositoryImpl(xa)
 
-    val period1 = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), None)
-    val period2 = Period(PeriodId("per-2"), Instant.parse("2024-02-25T00:00:00Z"), None)
+    val period1 = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), LocalDate.parse("2024-02-25"), None)
+    val period2 = Period(PeriodId("per-2"), Instant.parse("2024-02-25T00:00:00Z"), LocalDate.parse("2024-03-25"), None)
     val expense = BudgetItemDefinition(ExpenseDefId("exp-1"), "Rent", BudgetItemType.PlannedExpense, 100L, Currency.PLN)
     val record1 = ExpenseRecord(ExpenseRecordId("rec-1"), PeriodId("per-1"), ExpenseDefId("exp-1"), None, None, settled = false)
     val record2 = ExpenseRecord(ExpenseRecordId("rec-2"), PeriodId("per-2"), ExpenseDefId("exp-1"), None, None, settled = false)

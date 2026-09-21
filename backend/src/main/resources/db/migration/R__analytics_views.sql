@@ -84,9 +84,12 @@ FROM (
        + s.planned_to_receive_cents + s.budgets_to_receive_cents
        - s.planned_to_pay_cents     - s.budgets_to_spend_cents) * 1.0 / 100 AS free_money,
     s.savings_cents * 1.0 / 100                  AS savings,
-    s.days_remaining                             AS days_remaining,
+    -- Derived, not read from the stored `days_remaining` column: a period's expected end is editable, and a chart that kept the figure captured on
+    -- the day would disagree with the Dashboard the moment a date was corrected. NULL with no period, exactly as the stored column was.
+    CAST(julianday(p.expected_end) - julianday(s.on_date) AS INTEGER) AS days_remaining,
     s.source                                     AS source,
-    date(p.started_at)                           AS period_start
+    date(p.started_at)                           AS period_start,
+    p.expected_end                               AS period_expected_end
   FROM daily_budget_snapshots s
   LEFT JOIN periods p ON p.id = s.period_id
 ) b;
@@ -101,6 +104,7 @@ SELECT
   COALESCE(r.paid_amount, 0) * 1.0 / 100 AS paid,
   CASE WHEN r.settled = 1 THEN 'yes' ELSE 'no' END AS settled,
   date(p.started_at)              AS period_start,
+  p.expected_end                  AS period_expected_end,
   date(r.paid_at)                 AS paid_on
 FROM expense_definitions d
 LEFT JOIN expense_records r ON r.expense_def_id = d.id

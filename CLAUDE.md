@@ -17,9 +17,17 @@ Think "Google Sheets for personal budget" not "enterprise dashboard with cards e
 ## Core Concepts
 
 ### Period
-- Starts when paycheck arrives (~25th of month, flexible)
-- Ends when next paycheck arrives
-- All calculations are relative to current period
+- Starts when a paycheck arrives; closed by hand when the next one does
+- Carries its own `expectedEnd` date. Nothing infers it from a payday — the app's only opinion is the date it PROPOSES when a
+  period opens (`Period.defaultExpectedEnd`: the same day of the following month), and that is editable in place on the Periods
+  page. Days left, day N and the progress bar all read that one date, so a paycheck landing early or late is a one-field fix
+  rather than a rule change
+- An open period past its `expectedEnd` overruns (days remaining go negative) instead of rolling forward, so being late to close
+  it stays visible
+- A second paycheck inside a period is not a period boundary: it is a **planned income**, and so reaches free money through
+  `Pending Income`. Timing is deliberately not modelled — the app takes an approximate, eventually-consistent view of when money
+  lands, because dating every expense would cost more effort than the precision is worth
+- All calculations are relative to the current period
 
 ### Budget Items
 
@@ -102,7 +110,7 @@ BudgetItemDefinition (table: expense_definitions):
   - fixedEstimate (optional), currency
 
 Period:
-  - id, startDate, endDate (nullable until closed)
+  - id, startDate, expectedEnd (stored, editable), endDate (nullable until closed)
 
 ExpenseRecord (one per planned item per period):
   - periodId, expenseDefId

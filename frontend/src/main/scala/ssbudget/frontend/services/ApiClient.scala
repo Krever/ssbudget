@@ -7,6 +7,7 @@ import sttp.tapir.client.sttp.SttpClientInterpreter
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 
+import java.time.LocalDate
 import scala.concurrent.{ExecutionContext, Future}
 
 class ApiClient(implicit ec: ExecutionContext) {
@@ -152,6 +153,11 @@ class ApiClient(implicit ec: ExecutionContext) {
     def startNew(): Future[Period] = {
       val request = interpreter.toRequest(Endpoints.client.periods.startNew, Some(baseUri))
       backend.send(request(())).map(handleResponse)
+    }
+
+    def setExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Period] = {
+      val request = interpreter.toRequest(Endpoints.client.periods.setExpectedEnd, Some(baseUri))
+      backend.send(request((id, SetPeriodExpectedEndRequest(expectedEnd)))).map(handleResponse)
     }
 
     def summaries(limit: Option[Int] = None): Future[List[PeriodSummary]] = {

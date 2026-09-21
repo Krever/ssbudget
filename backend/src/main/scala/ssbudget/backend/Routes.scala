@@ -73,6 +73,7 @@ object Routes {
       // Periods
       route(Endpoints.periods.list)(_ => repos.periods.findAll.map(Right(_))),
       route(Endpoints.periods.startNew)(_ => startNewPeriod(repos)),
+      route(Endpoints.periods.setExpectedEnd)((id, req) => setPeriodExpectedEnd(repos, id, req)),
       route(Endpoints.periods.summaries)(periodSummaries(repos)),
       // Savings
       route(Endpoints.savings.periodBaselines)(_ => savingsPeriodBaselines(repos)),
@@ -282,10 +283,23 @@ object Routes {
     } yield result
   }
 
+  /** Correct when a period is expected to end. The date is the period's own — nothing re-derives it — so this is the whole of "the paycheck came a
+    * few days early", "it came late", or "the pay cycle changed shape".
+    */
+  private def setPeriodExpectedEnd(repos: Repositories, id: PeriodId, req: SetPeriodExpectedEndRequest): Result[Period] =
+    for {
+      existingOpt <- repos.periods.findById(id)
+      result      <- existingOpt match {
+                       case None           => IO.pure(Left(s"Period not found: ${id.value}"))
+                       case Some(existing) =>
+                         repos.periods.updateExpectedEnd(id, req.expectedEnd).as(Right(existing.copy(expectedEnd = req.expectedEnd)))
+                     }
+    } yield result
+
   private def startNewPeriod(repos: Repositories): Result[Period] = {
     val now         = Instant.now()
     val newPeriodId = PeriodId(UUID.randomUUID().toString)
-    val newPeriod   = Period(newPeriodId, now, None)
+    val newPeriod   = Period(newPeriodId, now, Period.defaultExpectedEnd(now), None)
 
     for {
       // Close current period

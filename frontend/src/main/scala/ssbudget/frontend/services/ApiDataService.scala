@@ -5,7 +5,7 @@ import ssbudget.frontend.services.DataService.sumInPrimary
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 import scala.concurrent.{ExecutionContext, Future}
 
 class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends DataService {
@@ -209,6 +209,11 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       }
     }
   }
+
+  override def setPeriodExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Unit] =
+    client.periods.setExpectedEnd(id, expectedEnd).map { updated =>
+      periodsVar.update(DataService.upsertById(_, updated)(_.id))
+    }
 
   override def startNewPeriod(): Future[Unit] = {
     client.periods.startNew().map { newPeriod =>

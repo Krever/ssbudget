@@ -2,7 +2,7 @@ package ssbudget.backend.db.repository
 
 import ssbudget.shared.model.*
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 
 class CategoryBudgetOverrideRepositorySpec extends RepositorySpec {
 
@@ -16,8 +16,8 @@ class CategoryBudgetOverrideRepositorySpec extends RepositorySpec {
     val periods = new PeriodRepositoryImpl(xa)
     val cats    = new CategoryRepositoryImpl(xa)
     for {
-      _ <- periods.create(Period(period1, at, None))
-      _ <- periods.create(Period(period2, at, None))
+      _ <- periods.create(Period(period1, at, LocalDate.parse("2024-02-25"), None))
+      _ <- periods.create(Period(period2, at, LocalDate.parse("2024-02-25"), None))
       _ <- cats.create(Category(catA, "Groceries", None))
       _ <- cats.create(Category(catB, "Rent", None))
     } yield ()

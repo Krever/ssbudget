@@ -5,7 +5,7 @@ import ssbudget.frontend.services.DataService.sumInPrimary
 import ssbudget.shared.api.{CategorySummary, TransactionListResponse}
 import ssbudget.shared.model.*
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 import java.time.temporal.ChronoUnit
 import scala.concurrent.Future
 
@@ -49,8 +49,8 @@ object InMemoryDataService extends DataService {
 
   private val periodsVar: Var[List[Period]] = Var(
     List(
-      Period(PeriodId("period-1"), tenDaysAgo, None),
-      Period(PeriodId("period-0"), sixtyDaysAgo, Some(thirtyDaysAgo)),
+      Period(PeriodId("period-1"), tenDaysAgo, Period.defaultExpectedEnd(tenDaysAgo), None),
+      Period(PeriodId("period-0"), sixtyDaysAgo, Period.defaultExpectedEnd(sixtyDaysAgo), Some(thirtyDaysAgo)),
     ),
   )
 
@@ -217,6 +217,11 @@ object InMemoryDataService extends DataService {
     Future.successful(())
   }
 
+  override def setPeriodExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Unit] = {
+    periodsVar.update(_.map(p => if p.id == id then p.copy(expectedEnd = expectedEnd) else p))
+    Future.successful(())
+  }
+
   override def startNewPeriod(): Future[Unit] = {
     val now = Instant.now()
 
@@ -228,7 +233,7 @@ object InMemoryDataService extends DataService {
     }
 
     val newPeriodId = PeriodId(s"period-${System.currentTimeMillis()}")
-    periodsVar.update(_ :+ Period(newPeriodId, now, None))
+    periodsVar.update(_ :+ Period(newPeriodId, now, Period.defaultExpectedEnd(now), None))
 
     budgetRecordsVar.update { records =>
       records ++ budgetItemsVar.now().map { item =>

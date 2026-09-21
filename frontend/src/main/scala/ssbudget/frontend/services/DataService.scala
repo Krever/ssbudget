@@ -5,7 +5,7 @@ import org.scalajs.dom
 import ssbudget.shared.api.{CategorySummary, TransactionListResponse}
 import ssbudget.shared.model.*
 
-import java.time.{Instant, LocalDate, ZoneOffset}
+import java.time.{LocalDate, ZoneOffset}
 import scala.concurrent.Future
 
 trait DataService {
@@ -35,6 +35,11 @@ trait DataService {
   // Periods
   def periods: Signal[List[Period]]
   def startNewPeriod(): Future[Unit]
+
+  /** Correct when the current period is expected to end. Everything the page shows about a period's length — days left, day N, the progress bar —
+    * reads that one date, so this is the only control over any of them.
+    */
+  def setPeriodExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Unit]
 
   // Exchange rates (currency code -> rate to primary currency)
   def exchangeRates: Signal[Map[Currency, Double]]
@@ -95,11 +100,11 @@ trait DataService {
     * overdue state should be visible, not clamped away.
     */
   final def daysRemainingInPeriod: Signal[Int] =
-    currentPeriod.map(_.fold(0)(p => DataService.daysRemaining(p.startDate)))
+    currentPeriod.map(_.fold(0)(_.daysRemaining(DataService.today)))
 
   /** 0..1 through the current period (for pace markers), against the same expected end as [[daysRemainingInPeriod]]. Pinned to 1 once overrun. */
   final def periodElapsedFraction: Signal[Double] =
-    currentPeriod.map(_.fold(0.0)(p => DataService.elapsedFraction(p.startDate)))
+    currentPeriod.map(_.fold(0.0)(_.elapsedFraction(DataService.today)))
 
   /** Σ of what's still expected across `items`: per item, its estimate minus what's already been paid this period, zero once settled. Concrete on the
     * trait so the real service and the mock can't disagree about the rule that drives free money.
@@ -214,17 +219,10 @@ object DataService {
   // UTC everywhere: ZoneId.systemDefault() fails silently in Scala.js without the tzdb dependency (see Formatting).
   private val utc = ZoneOffset.UTC
 
-  // The rules themselves live on Period, in shared, so the browser and the server's daily snapshot read a period the same way. Here they are simply
-  // fixed to today.
-
-  /** Days from today to [[Period.expectedEnd]] — 0 on the payday itself, negative once the period has overrun. */
-  def daysRemaining(start: Instant): Int = Period.daysRemaining(start, LocalDate.now(utc))
-
-  /** 1-based day of the period today, for "day N" labels. */
-  def dayOfPeriod(start: Instant): Int = Period.dayOfPeriod(start, LocalDate.now(utc))
-
-  /** 0..1 elapsed between the period's start and [[Period.expectedEnd]]; pinned to 1 once overrun. */
-  def elapsedFraction(start: Instant): Double = Period.elapsedFraction(start, LocalDate.now(utc))
+  /** The day every as-of rule is read against in the browser. The rules themselves live on [[Period]], in shared, so the page and the server's daily
+    * snapshot read a period the same way — only the day they are asked about differs.
+    */
+  def today: LocalDate = LocalDate.now(utc)
 
   /** Replace the element sharing `item`'s key, or append it if none matches. */
   def upsertById[A, K](xs: List[A], item: A)(key: A => K): List[A] =

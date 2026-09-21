@@ -3,13 +3,13 @@ package ssbudget.backend.db.repository
 import cats.effect.IO
 import ssbudget.shared.model.*
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 
 class PeriodRepositorySpec extends RepositorySpec {
 
   "create and findById returns the period" in {
     val repo   = new PeriodRepositoryImpl(xa)
-    val period = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), None)
+    val period = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), LocalDate.parse("2024-02-25"), None)
 
     for {
       _     <- repo.create(period)
@@ -27,8 +27,9 @@ class PeriodRepositorySpec extends RepositorySpec {
 
   "findCurrent returns open period (no endDate)" in {
     val repo    = new PeriodRepositoryImpl(xa)
-    val closed  = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), Some(Instant.parse("2024-02-24T00:00:00Z")))
-    val current = Period(PeriodId("per-2"), Instant.parse("2024-02-25T00:00:00Z"), None)
+    val closed  =
+      Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), LocalDate.parse("2024-02-25"), Some(Instant.parse("2024-02-24T00:00:00Z")))
+    val current = Period(PeriodId("per-2"), Instant.parse("2024-02-25T00:00:00Z"), LocalDate.parse("2024-03-25"), None)
 
     for {
       _     <- repo.create(closed)
@@ -39,7 +40,8 @@ class PeriodRepositorySpec extends RepositorySpec {
 
   "findCurrent returns None when all periods are closed" in {
     val repo   = new PeriodRepositoryImpl(xa)
-    val closed = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), Some(Instant.parse("2024-02-24T00:00:00Z")))
+    val closed =
+      Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), LocalDate.parse("2024-02-25"), Some(Instant.parse("2024-02-24T00:00:00Z")))
 
     for {
       _     <- repo.create(closed)
@@ -49,9 +51,11 @@ class PeriodRepositorySpec extends RepositorySpec {
 
   "findAll returns periods ordered by startDate descending" in {
     val repo = new PeriodRepositoryImpl(xa)
-    val p1   = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), Some(Instant.parse("2024-02-24T00:00:00Z")))
-    val p2   = Period(PeriodId("per-2"), Instant.parse("2024-02-25T00:00:00Z"), Some(Instant.parse("2024-03-24T00:00:00Z")))
-    val p3   = Period(PeriodId("per-3"), Instant.parse("2024-03-25T00:00:00Z"), None)
+    val p1   =
+      Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), LocalDate.parse("2024-02-25"), Some(Instant.parse("2024-02-24T00:00:00Z")))
+    val p2   =
+      Period(PeriodId("per-2"), Instant.parse("2024-02-25T00:00:00Z"), LocalDate.parse("2024-03-25"), Some(Instant.parse("2024-03-24T00:00:00Z")))
+    val p3   = Period(PeriodId("per-3"), Instant.parse("2024-03-25T00:00:00Z"), LocalDate.parse("2024-04-25"), None)
 
     for {
       _   <- repo.create(p1)
@@ -63,7 +67,7 @@ class PeriodRepositorySpec extends RepositorySpec {
 
   "close sets endDate on period" in {
     val repo    = new PeriodRepositoryImpl(xa)
-    val period  = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), None)
+    val period  = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), LocalDate.parse("2024-02-25"), None)
     val endedAt = Instant.parse("2024-02-24T00:00:00Z")
 
     for {
@@ -73,9 +77,20 @@ class PeriodRepositorySpec extends RepositorySpec {
     } yield found shouldBe Some(period.copy(endDate = Some(endedAt)))
   }
 
+  "updateExpectedEnd moves the expected end without touching anything else" in {
+    val repo   = new PeriodRepositoryImpl(xa)
+    val period = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), LocalDate.parse("2024-02-25"), None)
+
+    for {
+      _     <- repo.create(period)
+      _     <- repo.updateExpectedEnd(PeriodId("per-1"), LocalDate.parse("2024-02-15"))
+      found <- repo.findById(PeriodId("per-1"))
+    } yield found shouldBe Some(period.copy(expectedEnd = LocalDate.parse("2024-02-15")))
+  }
+
   "delete removes period" in {
     val repo   = new PeriodRepositoryImpl(xa)
-    val period = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), None)
+    val period = Period(PeriodId("per-1"), Instant.parse("2024-01-25T00:00:00Z"), LocalDate.parse("2024-02-25"), None)
 
     for {
       _     <- repo.create(period)

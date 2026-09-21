@@ -39,7 +39,8 @@ final case class CategoryBudget(
     *
     * The buckets are CALENDAR MONTHS rather than budget periods, even though the rest of the app is period-centric: spend is bucketed by
     * `substr(booked_at, 1, 7)` in SQL, and imported bank history reaches back long before the first `periods` row — so period buckets would throw
-    * away most of the available history and would weigh periods of unequal length (23 to 40 days, in practice) against each other.
+    * away most of the available history and would weigh periods of unequal length against each other — and since a period's end is a stored date
+    * rather than a payday rule, nothing bounds that length any more.
     */
   def expectedMonthly(monthMap: Map[String, Long], lastCompleteMonth: Int): Long = {
     lazy val values = densify(monthMap, lookbackMonths, lastCompleteMonth).map(_._2)

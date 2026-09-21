@@ -6,30 +6,27 @@ import ssbudget.shared.model.Period
 
 import java.time.{Instant, LocalDate}
 
-/** The rule for when a period is expected to end: the next payday (the 25th) at least two weeks after its start. Anchored to the start — never to
-  * today — so "days left" hits 0 on the payday itself and goes negative if the period isn't closed, instead of rolling to the next month's payday.
+/** The only thing still DERIVED about when a period ends: the date proposed when one is opened. A period stores its own expected end from then on, so
+  * this rule is a starting point the user can correct, never the answer.
+  *
+  * It follows the day the period actually started rather than any fixed payday, so it fits a 25th, a 30th or anything else without being told.
   */
 class PeriodSpec extends AnyFreeSpec with Matchers {
 
-  private def end(startDate: String): LocalDate =
-    Period.expectedEnd(Instant.parse(s"${startDate}T10:00:00Z"))
+  private def proposed(startDate: String): LocalDate =
+    Period.defaultExpectedEnd(Instant.parse(s"${startDate}T10:00:00Z"))
 
-  "A period's expected end" - {
-    "is the following month's payday when the paycheck lands on the 25th" in {
-      end("2026-07-25") shouldBe LocalDate.parse("2026-08-25")
+  "The expected end proposed for a new period" - {
+    "is the same day of the following month, whatever day the period opened on" in {
+      proposed("2026-07-25") shouldBe LocalDate.parse("2026-08-25")
+      proposed("2026-07-30") shouldBe LocalDate.parse("2026-08-30")
+      proposed("2026-07-15") shouldBe LocalDate.parse("2026-08-15")
+      proposed("2026-12-30") shouldBe LocalDate.parse("2027-01-30") // across the year boundary
     }
 
-    "stays anchored to the following month when the paycheck lands a few days early" in {
-      end("2026-07-23") shouldBe LocalDate.parse("2026-08-25") // 25th fell on a weekend, paid the Friday before
-    }
-
-    "stays anchored to the same cycle when the paycheck lands a few days late" in {
-      end("2026-07-27") shouldBe LocalDate.parse("2026-08-25")
-      end("2026-08-02") shouldBe LocalDate.parse("2026-08-25") // very late, already into the next month
-    }
-
-    "spans the year boundary" in {
-      end("2026-12-25") shouldBe LocalDate.parse("2027-01-25")
+    "clamps to the last day of a shorter month" in {
+      proposed("2026-01-31") shouldBe LocalDate.parse("2026-02-28")
+      proposed("2028-01-31") shouldBe LocalDate.parse("2028-02-29") // leap year
     }
   }
 }

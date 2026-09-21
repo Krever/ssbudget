@@ -44,7 +44,7 @@ class BudgetSnapshotService(repos: Repositories) {
       today  = LocalDate.ofInstant(now, ZoneOffset.UTC)
       world <- if date.isAfter(today) then IO.pure(None) else load(List(date), today, now)
       // Before the first period there is nothing to measure, so say so rather than returning a row of zeros.
-      inSpan = world.filter(w => w.periods.headOption.exists(p => !Period.startDay(p.startDate).isAfter(date)))
+      inSpan = world.filter(w => w.periods.headOption.exists(p => !p.startDay.isAfter(date)))
     } yield inSpan.map(snapshot(_, date))
 
   /** Today, plus every earlier day back to the first period that has no row yet. Today is always included: the day is still moving. */
@@ -73,7 +73,7 @@ class BudgetSnapshotService(repos: Repositories) {
           val sorted      = periods.sortBy(_.startDate.toEpochMilli)
           val from        = days.min
           // Category spend is counted from the start of the period a day falls in, so the earliest day dictates how far back to read.
-          val spendFrom   = sorted.findLast(p => !Period.startDay(p.startDate).isAfter(from)).fold(from)(p => Period.startDay(p.startDate))
+          val spendFrom   = sorted.findLast(p => !p.startDay.isAfter(from)).fold(from)(_.startDay)
           // Balances are carried through the ledger only for days in the PAST; today reads the account's live balance, so a pass that writes nothing
           // else has no use for it. This is the difference between the steady state scanning the whole transaction table and not touching it.
           val needsLedger = days.exists(_ != today)
@@ -158,7 +158,7 @@ class BudgetSnapshotService(repos: Repositories) {
       budgetsToSpendCents = budgets.filter(_ > 0).sum,
       budgetsToReceiveCents = -budgets.filter(_ < 0).sum,
       savingsCents = total(AccountRole.Savings),
-      daysRemaining = period.map(p => Period.daysRemaining(p.startDate, day)),
+      daysRemaining = period.map(_.daysRemaining(day)),
       source = if day == w.today then SnapshotSource.Live else SnapshotSource.Reconstructed,
     )
   }
@@ -210,8 +210,8 @@ class BudgetSnapshotService(repos: Repositories) {
     * whose rule changed in June is therefore scored by the June rule all the way back.
     */
   private def budgetRemainings(w: World, period: Period, day: LocalDate): List[Long] = {
-    val periodStart       = Period.startDay(period.startDate)
-    val elapsed           = Period.elapsedFraction(period.startDate, day)
+    val periodStart       = period.startDay
+    val elapsed           = period.elapsedFraction(day)
     // The window ends at the last COMPLETED month, which CategoryBudget.inWindow already enforces — the month `day` falls in never counts.
     val lastCompleteMonth = CategoryBudget.lastCompleteMonthIndex(day)
     w.categories.filter(_.budgetType.isDefined).map { cat =>
@@ -242,7 +242,7 @@ object BudgetSnapshotService {
 
   /** The first day any budget was being kept: the earliest period's start. */
   private def earliestDay(periods: List[Period]): Option[LocalDate] =
-    periods.minByOption(_.startDate.toEpochMilli).map(p => Period.startDay(p.startDate))
+    periods.minByOption(_.startDate.toEpochMilli).map(_.startDay)
 
   /** `(key, currency, bucket, cents)` rows to `key -> bucket -> cents in the primary currency`, each amount converted at the rate in force for its
     * own bucket.
@@ -301,7 +301,7 @@ object BudgetSnapshotService {
 
     /** The period `day` falls in: the last one that had started by then. Periods are contiguous, so that is also the one that had not yet ended. */
     def periodOn(day: LocalDate): Option[Period] =
-      periods.findLast(p => !Period.startDay(p.startDate).isAfter(day))
+      periods.findLast(p => !p.startDay.isAfter(day))
 
     /** A manual override counts from the day it was typed, not for the whole period retrospectively. */
     def overrideOn(periodId: PeriodId, categoryId: CategoryId, day: LocalDate): Option[Long] =

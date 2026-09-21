@@ -3,7 +3,8 @@ package ssbudget.shared.model
 import io.circe.Codec
 import ssbudget.shared.json.EnumCodec
 
-/** How a category's monthly budget predicts the money still to move before the next paycheck. Set per category (None = not a budget):
+/** How a category's monthly budget predicts the money still to move before the next paycheck. The monthly figure is applied to one period UNSCALED,
+  * which assumes a period is roughly a month long — see [[Period]], which no longer enforces that. Set per category (None = not a budget):
   *   - [[Steady]]: time-based (groceries, restaurants, fuel). Reserve the remaining-time share of the budget; overspending never zeroes it out ("you
   *     still have to eat").
   *   - [[Bill]]: one payment per period (kindergarten, rent). Reserve the full expected amount until a payment lands, then 0 (regardless of the exact

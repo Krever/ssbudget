@@ -120,6 +120,14 @@ object Endpoints {
         .out(jsonBody[Period])
         .errorOut(stringBody)
 
+    /** Correct a period's expected end. Returns the updated period so the client can just replace its copy. */
+    val setExpectedEnd: Secured[(PeriodId, SetPeriodExpectedEndRequest), Period] =
+      secureEndpoint.put
+        .in("periods" / path[PeriodId]("id") / "expected-end")
+        .in(jsonBody[SetPeriodExpectedEndRequest])
+        .out(jsonBody[Period])
+        .errorOut(stringBody)
+
     /** Per-period retrospective, newest first. `limit` caps how many periods are summarized (each costs a few aggregate queries). */
     val summaries: Secured[Option[Int], List[PeriodSummary]] =
       secureEndpoint.get
@@ -405,6 +413,7 @@ object Endpoints {
     expenseRecords.unpay,
     periods.list,
     periods.startNew,
+    periods.setExpectedEnd,
     savings.periodBaselines,
     exchangeRates.getAll,
     currencies.getSettings,
@@ -526,6 +535,13 @@ object Endpoints {
 
       val startNew: Client[Unit, Period] =
         baseEndpoint.post.in("periods" / "start").out(jsonBody[Period]).errorOut(stringBody)
+
+      val setExpectedEnd: Client[(PeriodId, SetPeriodExpectedEndRequest), Period] =
+        baseEndpoint.put
+          .in("periods" / path[PeriodId]("id") / "expected-end")
+          .in(jsonBody[SetPeriodExpectedEndRequest])
+          .out(jsonBody[Period])
+          .errorOut(stringBody)
 
       val summaries: Client[Option[Int], List[PeriodSummary]] =
         baseEndpoint.get

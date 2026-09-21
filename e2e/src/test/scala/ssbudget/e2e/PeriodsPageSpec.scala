@@ -1,6 +1,8 @@
 package ssbudget.e2e
 
-import org.openqa.selenium.{By, WebElement}
+import org.openqa.selenium.{By, JavascriptExecutor, WebElement}
+
+import java.time.{LocalDate, ZoneOffset}
 import scala.jdk.CollectionConverters.*
 
 class PeriodsPageSpec extends E2ESpec {
@@ -40,6 +42,21 @@ class PeriodsPageSpec extends E2ESpec {
     // Now should have an active period with progress bar
     val progressBar = card.findElement(By.cssSelector(".progress-bar"))
     progressBar.getAttribute("style") should include("width:")
+  }
+
+  it should "let the expected end be corrected, and count the days left from it" in {
+    ensurePeriodExists()
+    openPeriods()
+
+    val newEnd = LocalDate.now(ZoneOffset.UTC).plusDays(5)
+    setExpectedEnd(newEnd.toString)
+
+    // Days left follows the date that was typed, not any payday inferred from the calendar.
+    eventually(statValue("Days left") shouldBe "5")
+
+    // And it survives a reload, so the correction is stored on the period rather than held in the page.
+    openPeriods()
+    eventually(expectedEndInput().getAttribute("value") shouldBe newEnd.toString)
   }
 
   it should "show progress bar for current period" in {
@@ -102,4 +119,22 @@ class PeriodsPageSpec extends E2ESpec {
       history.findElements(By.xpath(".//span[contains(@class,'badge') and contains(text(),'Active')]")).size() shouldBe 1
     }
   }
+
+  private def expectedEndInput(): WebElement =
+    findCardByDiv("Current Period").findElement(By.cssSelector("input[type='date']"))
+
+  /** Date inputs are typed segment-by-segment in a locale-dependent order, so `sendKeys` is unreliable. Set the value and fire the event Laminar
+    * actually listens for.
+    */
+  private def setExpectedEnd(isoDate: String): Unit =
+    driver
+      .asInstanceOf[JavascriptExecutor]
+      .executeScript(
+        "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('change', { bubbles: true }));",
+        expectedEndInput(),
+        isoDate,
+      )
+
+  private def statValue(label: String): String =
+    findCardByDiv("Current Period").findElement(By.xpath(s".//div[text()='$label']/following-sibling::div")).getText
 }
