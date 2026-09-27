@@ -77,11 +77,18 @@ object AuthRoutes {
         .serverLogic(tokenOpt => _ => logout(sessionService, tokenOpt)),
     )
 
-    // Set or replace the password (authenticated) - no current password needed, so a passkey login suffices
+    // Passkey challenge for an IdentityProof (authenticated)
+    val verifyPasskeyStartRoute = interpreter.toRoutes(
+      AuthEndpoints.verifyPasskeyStart
+        .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
+        .serverLogic(_ => _ => errorsAsLeft(webAuthnService.startVerification())),
+    )
+
+    // Set or replace the password (authenticated, plus an IdentityProof)
     val changePasswordRoute = interpreter.toRoutes(
       AuthEndpoints.changePassword
         .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
-        .serverLogic(_ => req => changePassword(authConfigRepo, passwordService, req)),
+        .serverLogic(_ => req => changePassword(authConfigRepo, passwordService, webAuthnService, req)),
     )
 
     // Passkey registration start (authenticated)
@@ -126,6 +133,7 @@ object AuthRoutes {
       setupRoute <+>
       loginRoute <+>
       logoutRoute <+>
+      verifyPasskeyStartRoute <+>
       changePasswordRoute <+>
       registerPasskeyStartRoute <+>
       registerPasskeyFinishRoute <+>
@@ -186,13 +194,14 @@ object AuthRoutes {
   ): IO[Either[String, AuthStatus]] = {
     // In test mode, return configured=true and loggedIn=true to bypass auth UI
     if testMode then {
-      IO.pure(Right(AuthStatus(configured = true, passkeyCount = 0, loggedIn = true)))
+      IO.pure(Right(AuthStatus(configured = true, passkeyCount = 0, loggedIn = true, hasPassword = false)))
     } else {
       for {
         configOpt    <- authConfigRepo.get
         passkeyCount <- passkeyRepo.count
-        configured    = configOpt.exists(_.passwordHash.isDefined) || passkeyCount > 0
-      } yield Right(AuthStatus(configured, passkeyCount, loggedIn))
+        hasPassword   = configOpt.exists(_.passwordHash.isDefined)
+        configured    = hasPassword || passkeyCount > 0
+      } yield Right(AuthStatus(configured, passkeyCount, loggedIn, hasPassword))
     }
   }
 
@@ -223,35 +232,58 @@ object AuthRoutes {
       sessionService: SessionService,
       req: LoginRequest,
   ): IO[Either[String, CookieValueWithMeta]] = {
-    for {
-      configOpt <- authConfigRepo.get
-      result    <- configOpt match {
-                     case Some(config) if config.passwordHash.isDefined =>
-                       for {
-                         valid  <- passwordService.verify(req.password, config.passwordHash.get)
-                         result <- if valid then {
-                                     sessionService.createSession().map(s => Right(sessionCookie(s.token)))
-                                   } else {
-                                     IO.pure(Left("Invalid password"))
-                                   }
-                       } yield result
-                     case _                                             =>
-                       IO.pure(Left("Authentication not configured"))
-                   }
-    } yield result
+    checkPassword(authConfigRepo, passwordService, req.password).flatMap {
+      case Some(true)  => sessionService.createSession().map(s => Right(sessionCookie(s.token)))
+      case Some(false) => IO.pure(Left("Invalid password"))
+      case None        => IO.pure(Left("Authentication not configured"))
+    }
+  }
+
+  /** Whether `password` matches the stored one; None when no password is set. */
+  private def checkPassword(
+      authConfigRepo: AuthConfigRepository,
+      passwordService: PasswordService,
+      password: String,
+  ): IO[Option[Boolean]] = {
+    authConfigRepo.get.flatMap { configOpt =>
+      configOpt.flatMap(_.passwordHash).traverse(hash => passwordService.verify(password, hash))
+    }
   }
 
   private def changePassword(
       authConfigRepo: AuthConfigRepository,
       passwordService: PasswordService,
+      webAuthnService: WebAuthnService,
       req: ChangePasswordRequest,
   ): IO[Either[String, Unit]] = {
     if req.newPassword.isEmpty then {
       IO.pure(Left("New password is required"))
     } else {
-      passwordService.hash(req.newPassword).flatMap(authConfigRepo.upsert).map(Right(_))
+      confirmIdentity(authConfigRepo, passwordService, webAuthnService, req.proof).flatMap {
+        _.traverse(_ => passwordService.hash(req.newPassword).flatMap(authConfigRepo.upsert))
+      }
     }
   }
+
+  private def confirmIdentity(
+      authConfigRepo: AuthConfigRepository,
+      passwordService: PasswordService,
+      webAuthnService: WebAuthnService,
+      proof: IdentityProof,
+  ): IO[Either[String, Unit]] = {
+    proof match {
+      case IdentityProof.Passkey(assertion)        =>
+        errorsAsLeft(webAuthnService.finishVerification(assertion))
+      case IdentityProof.CurrentPassword(password) =>
+        checkPassword(authConfigRepo, passwordService, password).map {
+          case Some(true)  => Right(())
+          case Some(false) => Left("Current password is incorrect")
+          case None        => Left("No password is set; confirm with a passkey")
+        }
+    }
+  }
+
+  private def errorsAsLeft[A](io: IO[A]): IO[Either[String, A]] = io.attempt.map(_.left.map(_.getMessage))
 
   private def logout(sessionService: SessionService, tokenOpt: Option[String]): IO[Either[String, CookieValueWithMeta]] = {
     for {
@@ -277,18 +309,18 @@ object AuthRoutes {
       webAuthnService: WebAuthnService,
       req: PasskeyRegisterStartRequest,
   ): IO[Either[String, PasskeyRegistrationOptions]] = {
-    webAuthnService.startRegistration(req.displayName).map(Right(_)).handleError(e => Left(e.getMessage))
+    errorsAsLeft(webAuthnService.startRegistration(req.displayName))
   }
 
   private def finishPasskeyRegistration(
       webAuthnService: WebAuthnService,
       req: PasskeyRegistrationResponse,
   ): IO[Either[String, Unit]] = {
-    webAuthnService.finishRegistration(req).map(_ => Right(())).handleError(e => Left(e.getMessage))
+    errorsAsLeft(webAuthnService.finishRegistration(req))
   }
 
   private def startPasskeyLogin(webAuthnService: WebAuthnService): IO[Either[String, PasskeyAuthenticationOptions]] = {
-    webAuthnService.startAuthentication().map(Right(_)).handleError(e => Left(e.getMessage))
+    errorsAsLeft(webAuthnService.startAuthentication())
   }
 
   private def finishPasskeyLogin(

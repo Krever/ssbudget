@@ -7,10 +7,11 @@ import ssbudget.frontend.auth.AuthState
 import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.WebAuthnFacade
-import ssbudget.shared.api.PasskeyInfo
+import ssbudget.shared.api.{ChangePasswordRequest, IdentityProof, PasskeyInfo}
 import ssbudget.shared.model.{Currency, CurrencySetting}
 
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
 import scala.util.{Failure, Success}
 
 object SettingsPage {
@@ -204,7 +205,7 @@ object SettingsPage {
       ),
 
       // Password section
-      passwordCard(apiClient, errorVar, successVar),
+      passwordCard(apiClient, passkeysVar.signal, errorVar, successVar),
 
       // Currencies section
       currenciesCard(errorVar, successVar, addCurrencyCodeVar, refreshingRatesVar),
@@ -232,31 +233,50 @@ object SettingsPage {
 
   private def passwordCard(
       apiClient: ApiClient,
+      passkeys: Signal[List[PasskeyInfo]],
       errorVar: Var[Option[String]],
       successVar: Var[Option[String]],
   ): HtmlElement = {
-    val newVar     = Var("")
-    val confirmVar = Var("")
-    val savingVar  = Var(false)
+    // None until loaded; the current-password field is only offered once one exists
+    val hasPasswordVar = Var(Option.empty[Boolean])
+    val canUsePasskey  = passkeys.map(_.nonEmpty && WebAuthnFacade.isSupported)
+    val currentVar     = Var("")
+    val newVar         = Var("")
+    val confirmVar     = Var("")
+    val savingVar      = Var(false)
 
-    val canSubmitSignal = newVar.signal
+    val canSubmitSignal = canUsePasskey
+      .combineWith(currentVar.signal)
+      .combineWith(newVar.signal)
       .combineWith(confirmVar.signal)
       .combineWith(savingVar.signal)
-      .map { case (next, confirm, saving) =>
-        next.nonEmpty && next == confirm && !saving
+      .map { case (passkey, current, next, confirm, saving) =>
+        (current.nonEmpty || passkey) && next.nonEmpty && next == confirm && !saving
       }
+
+    // A typed current password is used as-is; left blank, the change is confirmed with a passkey instead
+    def proof(): Future[IdentityProof] = {
+      val current = currentVar.now()
+      if current.nonEmpty then {
+        Future.successful(IdentityProof.CurrentPassword(current))
+      } else {
+        apiClient.auth.verifyPasskeyStart().flatMap(WebAuthnFacade.getCredential).map(IdentityProof.Passkey(_))
+      }
+    }
 
     // Only reachable while canSubmitSignal holds: the disabled button also blocks Enter-to-submit
     def submit(): Unit = {
       savingVar.set(true)
       errorVar.set(None)
       successVar.set(None)
-      apiClient.auth.changePassword(newVar.now()).onComplete { result =>
+      proof().map(ChangePasswordRequest(newVar.now(), _)).flatMap(apiClient.auth.changePassword).onComplete { result =>
         savingVar.set(false)
         result match {
           case Success(_)  =>
+            currentVar.set("")
             newVar.set("")
             confirmVar.set("")
+            hasPasswordVar.set(Some(true))
             successVar.set(Some("Password changed"))
           case Failure(ex) =>
             errorVar.set(Some(s"Failed to change password: ${ex.getMessage}"))
@@ -264,12 +284,12 @@ object SettingsPage {
       }
     }
 
-    def passwordInput(placeholderText: String, v: Var[String]): HtmlElement = {
+    def passwordInput(placeholderText: String, autocomplete: String, v: Var[String]): HtmlElement = {
       input(
         cls          := "form-control",
         tpe          := "password",
         placeholder  := placeholderText,
-        autoComplete := "new-password",
+        autoComplete := autocomplete,
         controlled(
           value <-- v.signal,
           onInput.mapToValue --> v.writer,
@@ -279,14 +299,22 @@ object SettingsPage {
 
     div(
       cls := "card mb-4",
+      onMountCallback { _ =>
+        apiClient.auth.status().foreach(status => hasPasswordVar.set(Some(status.hasPassword)))
+      },
       div(cls := "card-header", h5(cls := "mb-0", "Password")),
       div(
         cls   := "card-body",
         form(
           cls := "row g-2 align-items-center",
           onSubmit.preventDefault --> { _ => submit() },
-          div(cls := "col-md", passwordInput("New password", newVar)),
-          div(cls := "col-md", passwordInput("Confirm new password", confirmVar)),
+          child.maybe <-- hasPasswordVar.signal.map { hasPassword =>
+            Option.when(hasPassword.contains(true)) {
+              div(cls := "col-md", passwordInput("Current password", "current-password", currentVar))
+            }
+          },
+          div(cls := "col-md", passwordInput("New password", "new-password", newVar)),
+          div(cls := "col-md", passwordInput("Confirm new password", "new-password", confirmVar)),
           div(
             cls   := "col-md-auto",
             button(
@@ -297,6 +325,15 @@ object SettingsPage {
             ),
           ),
         ),
+        child.maybe <-- canUsePasskey.combineWith(hasPasswordVar.signal).map { case (passkey, hasPassword) =>
+          Option.when(passkey && hasPassword.isDefined) {
+            small(
+              cls := "text-muted d-block mt-2",
+              if hasPassword.contains(true) then "Leave the current password blank to confirm with your passkey instead."
+              else "You'll be asked to confirm with your passkey.",
+            )
+          }
+        },
       ),
     )
   }

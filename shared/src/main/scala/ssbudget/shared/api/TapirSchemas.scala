@@ -116,6 +116,7 @@ object TapirSchemas {
   given Schema[AuthStatus]                    = Schema.derived[AuthStatus]
   given Schema[SetupRequest]                  = Schema.derived[SetupRequest]
   given Schema[LoginRequest]                  = Schema.derived[LoginRequest]
+  given Schema[IdentityProof]                 = Schema.derived[IdentityProof]
   given Schema[ChangePasswordRequest]         = Schema.derived[ChangePasswordRequest]
   given Schema[PasskeyInfo]                   = Schema.derived[PasskeyInfo]
   given Schema[PasskeyRegisterStartRequest]   = Schema.derived[PasskeyRegisterStartRequest]

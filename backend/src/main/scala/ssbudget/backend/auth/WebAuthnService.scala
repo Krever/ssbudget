@@ -16,6 +16,12 @@ trait WebAuthnService {
   def finishRegistration(response: PasskeyRegistrationResponse): IO[Unit]
   def startAuthentication(): IO[PasskeyAuthenticationOptions]
   def finishAuthentication(response: PasskeyAuthenticationResponse): IO[Unit]
+
+  /** Re-confirms the already signed-in user before a sensitive action. Unlike login it demands user verification (biometric/PIN), so an unlocked
+    * browser alone is not enough, and it keeps its own pending challenge so a login attempt can't consume or replace it.
+    */
+  def startVerification(): IO[PasskeyAuthenticationOptions]
+  def finishVerification(response: PasskeyAuthenticationResponse): IO[Unit]
 }
 
 object WebAuthnService {
@@ -32,7 +38,8 @@ object WebAuthnService {
     for {
       pendingRegRef  <- Ref.of[IO, Option[(PublicKeyCredentialCreationOptions, Option[String])]](None)
       pendingAuthRef <- Ref.of[IO, Option[AssertionRequest]](None)
-    } yield new WebAuthnServiceImpl(credentialRepo, rpId, rpName, rpOrigins, pendingRegRef, pendingAuthRef)
+      pendingVerRef  <- Ref.of[IO, Option[AssertionRequest]](None)
+    } yield new WebAuthnServiceImpl(credentialRepo, rpId, rpName, rpOrigins, pendingRegRef, pendingAuthRef, pendingVerRef)
   }
 
   private class WebAuthnServiceImpl(
@@ -42,6 +49,7 @@ object WebAuthnService {
       rpOrigins: Set[String],
       pendingRegistration: Ref[IO, Option[(PublicKeyCredentialCreationOptions, Option[String])]],
       pendingAuthentication: Ref[IO, Option[AssertionRequest]],
+      pendingVerification: Ref[IO, Option[AssertionRequest]],
   ) extends WebAuthnService {
 
     private val rp = RelyingPartyIdentity
@@ -182,14 +190,30 @@ object WebAuthnService {
       }
     }
 
-    override def startAuthentication(): IO[PasskeyAuthenticationOptions] = {
+    override def startAuthentication(): IO[PasskeyAuthenticationOptions] =
+      startAssertion(pendingAuthentication, UserVerificationRequirement.PREFERRED)
+
+    override def finishAuthentication(response: PasskeyAuthenticationResponse): IO[Unit] =
+      finishAssertion(pendingAuthentication, response, "authentication")
+
+    override def startVerification(): IO[PasskeyAuthenticationOptions] =
+      startAssertion(pendingVerification, UserVerificationRequirement.REQUIRED)
+
+    // finishAssertion rejects a response without the UV flag, because the request it answers asked for REQUIRED
+    override def finishVerification(response: PasskeyAuthenticationResponse): IO[Unit] =
+      finishAssertion(pendingVerification, response, "verification")
+
+    private def startAssertion(
+        pending: Ref[IO, Option[AssertionRequest]],
+        userVerification: UserVerificationRequirement,
+    ): IO[PasskeyAuthenticationOptions] = {
       createRelyingParty().flatMap { relyingParty =>
         credentialRepo.findAll.flatMap { credentials =>
           val request = relyingParty.startAssertion(
-            StartAssertionOptions.builder().build(),
+            StartAssertionOptions.builder().userVerification(userVerification).build(),
           )
 
-          pendingAuthentication.set(Some(request)).as {
+          pending.set(Some(request)).as {
             PasskeyAuthenticationOptions(
               challenge = request.getPublicKeyCredentialRequestOptions.getChallenge.getBase64Url,
               rpId = rpId,
@@ -208,8 +232,12 @@ object WebAuthnService {
       }
     }
 
-    override def finishAuthentication(response: PasskeyAuthenticationResponse): IO[Unit] = {
-      pendingAuthentication.getAndSet(None).flatMap {
+    private def finishAssertion(
+        pending: Ref[IO, Option[AssertionRequest]],
+        response: PasskeyAuthenticationResponse,
+        what: String,
+    ): IO[Unit] = {
+      pending.getAndSet(None).flatMap {
         case Some(request) =>
           createRelyingParty().flatMap { relyingParty =>
             val clientResponse = PublicKeyCredential.parseAssertionResponseJson(toAssertionJson(response))
@@ -226,11 +254,11 @@ object WebAuthnService {
               val credId = result.getCredential.getCredentialId.getBase64Url
               credentialRepo.updateSignCount(credId, result.getSignatureCount, Instant.now())
             } else {
-              IO.raiseError(new Exception("Authentication failed"))
+              IO.raiseError(new Exception(s"Passkey $what failed"))
             }
           }
         case None          =>
-          IO.raiseError(new Exception("No pending authentication"))
+          IO.raiseError(new Exception(s"No pending passkey $what"))
       }
     }
 

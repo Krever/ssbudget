@@ -56,7 +56,15 @@ object AuthEndpoints {
       .out(setCookie(SessionCookieName))
       .errorOut(stringBody)
 
-  // Set or replace the password (authenticated)
+  // Challenge for an IdentityProof.Passkey confirming a sensitive action (authenticated; requires user verification)
+  val verifyPasskeyStart: Secured[Unit, PasskeyAuthenticationOptions] =
+    baseEndpoint.post
+      .securityIn(sessionCookie)
+      .in("passkey" / "verify" / "start")
+      .out(jsonBody[PasskeyAuthenticationOptions])
+      .errorOut(stringBody)
+
+  // Set or replace the password (authenticated, plus an IdentityProof)
   val changePassword: Secured[ChangePasswordRequest, Unit] =
     baseEndpoint.post
       .securityIn(sessionCookie)
@@ -118,6 +126,7 @@ object AuthEndpoints {
     setup,
     login,
     logout,
+    verifyPasskeyStart,
     changePassword,
     registerPasskeyStart,
     registerPasskeyFinish,
@@ -145,6 +154,9 @@ object AuthEndpoints {
 
     val logout: Public[Unit, Unit] =
       baseEndpoint.post.in("logout").errorOut(stringBody)
+
+    val verifyPasskeyStart: Public[Unit, PasskeyAuthenticationOptions] =
+      baseEndpoint.post.in("passkey" / "verify" / "start").out(jsonBody[PasskeyAuthenticationOptions]).errorOut(stringBody)
 
     val changePassword: Public[ChangePasswordRequest, Unit] =
       baseEndpoint.post.in("password").in(jsonBody[ChangePasswordRequest]).errorOut(stringBody)

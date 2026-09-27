@@ -9,6 +9,7 @@ final case class AuthStatus(
     configured: Boolean,
     passkeyCount: Int,
     loggedIn: Boolean,
+    hasPassword: Boolean,
 ) derives Codec.AsObject
 
 // Password setup request (initial setup only)
@@ -17,9 +18,16 @@ final case class SetupRequest(password: String) derives Codec.AsObject
 // Password login request
 final case class LoginRequest(password: String) derives Codec.AsObject
 
-// Password change from a signed-in session. The session is the proof of identity, so no current password is asked:
-// someone who signs in with a passkey can (re)set the password without knowing the old one
-final case class ChangePasswordRequest(newPassword: String) derives Codec.AsObject
+// Proof, beyond the session cookie, that the signed-in user is present: the current password, or a fresh user-verified
+// passkey assertion answering `verifyPasskeyStart`
+enum IdentityProof derives Codec.AsObject {
+  case CurrentPassword(password: String)
+  case Passkey(assertion: PasskeyAuthenticationResponse)
+}
+
+// Password change from a signed-in session. A passkey proof lets someone who only has a passkey replace a password they
+// don't know
+final case class ChangePasswordRequest(newPassword: String, proof: IdentityProof) derives Codec.AsObject
 
 // Passkey info for listing
 final case class PasskeyInfo(
