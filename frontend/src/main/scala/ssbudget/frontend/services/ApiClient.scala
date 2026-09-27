@@ -40,6 +40,11 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request(())).map(handleResponse)
     }
 
+    def changePassword(newPassword: String): Future[Unit] = {
+      val request = interpreter.toRequest(AuthEndpoints.client.changePassword, Some(baseUri))
+      backend.send(request(ChangePasswordRequest(newPassword))).map(handleResponse)
+    }
+
     def listPasskeys(): Future[List[PasskeyInfo]] = {
       val request = interpreter.toRequest(AuthEndpoints.client.listPasskeys, Some(baseUri))
       backend.send(request(())).map(handleResponse)

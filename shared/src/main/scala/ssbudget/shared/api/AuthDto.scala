@@ -17,6 +17,10 @@ final case class SetupRequest(password: String) derives Codec.AsObject
 // Password login request
 final case class LoginRequest(password: String) derives Codec.AsObject
 
+// Password change from a signed-in session. The session is the proof of identity, so no current password is asked:
+// someone who signs in with a passkey can (re)set the password without knowing the old one
+final case class ChangePasswordRequest(newPassword: String) derives Codec.AsObject
+
 // Passkey info for listing
 final case class PasskeyInfo(
     credentialId: String,

@@ -203,6 +203,9 @@ object SettingsPage {
         ),
       ),
 
+      // Password section
+      passwordCard(apiClient, errorVar, successVar),
+
       // Currencies section
       currenciesCard(errorVar, successVar, addCurrencyCodeVar, refreshingRatesVar),
 
@@ -221,6 +224,77 @@ object SettingsPage {
             onClick --> { _ =>
               AuthState.logout(apiClient)
             },
+          ),
+        ),
+      ),
+    )
+  }
+
+  private def passwordCard(
+      apiClient: ApiClient,
+      errorVar: Var[Option[String]],
+      successVar: Var[Option[String]],
+  ): HtmlElement = {
+    val newVar     = Var("")
+    val confirmVar = Var("")
+    val savingVar  = Var(false)
+
+    val canSubmitSignal = newVar.signal
+      .combineWith(confirmVar.signal)
+      .combineWith(savingVar.signal)
+      .map { case (next, confirm, saving) =>
+        next.nonEmpty && next == confirm && !saving
+      }
+
+    // Only reachable while canSubmitSignal holds: the disabled button also blocks Enter-to-submit
+    def submit(): Unit = {
+      savingVar.set(true)
+      errorVar.set(None)
+      successVar.set(None)
+      apiClient.auth.changePassword(newVar.now()).onComplete { result =>
+        savingVar.set(false)
+        result match {
+          case Success(_)  =>
+            newVar.set("")
+            confirmVar.set("")
+            successVar.set(Some("Password changed"))
+          case Failure(ex) =>
+            errorVar.set(Some(s"Failed to change password: ${ex.getMessage}"))
+        }
+      }
+    }
+
+    def passwordInput(placeholderText: String, v: Var[String]): HtmlElement = {
+      input(
+        cls          := "form-control",
+        tpe          := "password",
+        placeholder  := placeholderText,
+        autoComplete := "new-password",
+        controlled(
+          value <-- v.signal,
+          onInput.mapToValue --> v.writer,
+        ),
+      )
+    }
+
+    div(
+      cls := "card mb-4",
+      div(cls := "card-header", h5(cls := "mb-0", "Password")),
+      div(
+        cls   := "card-body",
+        form(
+          cls := "row g-2 align-items-center",
+          onSubmit.preventDefault --> { _ => submit() },
+          div(cls := "col-md", passwordInput("New password", newVar)),
+          div(cls := "col-md", passwordInput("Confirm new password", confirmVar)),
+          div(
+            cls   := "col-md-auto",
+            button(
+              cls := "btn btn-primary",
+              tpe := "submit",
+              disabled <-- canSubmitSignal.map(!_),
+              "Change Password",
+            ),
           ),
         ),
       ),

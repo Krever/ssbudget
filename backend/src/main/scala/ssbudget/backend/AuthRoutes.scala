@@ -77,6 +77,13 @@ object AuthRoutes {
         .serverLogic(tokenOpt => _ => logout(sessionService, tokenOpt)),
     )
 
+    // Set or replace the password (authenticated) - no current password needed, so a passkey login suffices
+    val changePasswordRoute = interpreter.toRoutes(
+      AuthEndpoints.changePassword
+        .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
+        .serverLogic(_ => req => changePassword(authConfigRepo, passwordService, req)),
+    )
+
     // Passkey registration start (authenticated)
     val registerPasskeyStartRoute = interpreter.toRoutes(
       AuthEndpoints.registerPasskeyStart
@@ -119,6 +126,7 @@ object AuthRoutes {
       setupRoute <+>
       loginRoute <+>
       logoutRoute <+>
+      changePasswordRoute <+>
       registerPasskeyStartRoute <+>
       registerPasskeyFinishRoute <+>
       loginPasskeyStartRoute <+>
@@ -231,6 +239,18 @@ object AuthRoutes {
                        IO.pure(Left("Authentication not configured"))
                    }
     } yield result
+  }
+
+  private def changePassword(
+      authConfigRepo: AuthConfigRepository,
+      passwordService: PasswordService,
+      req: ChangePasswordRequest,
+  ): IO[Either[String, Unit]] = {
+    if req.newPassword.isEmpty then {
+      IO.pure(Left("New password is required"))
+    } else {
+      passwordService.hash(req.newPassword).flatMap(authConfigRepo.upsert).map(Right(_))
+    }
   }
 
   private def logout(sessionService: SessionService, tokenOpt: Option[String]): IO[Either[String, CookieValueWithMeta]] = {
