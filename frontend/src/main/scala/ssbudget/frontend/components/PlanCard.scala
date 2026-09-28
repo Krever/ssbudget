@@ -305,11 +305,14 @@ object PlanCard {
         val isOverridden = s.overrideRemainingCents.isDefined
         s.category.budgetType.getOrElse(CategoryBudgetType.Steady) match {
           case CategoryBudgetType.Bill         =>
-            // An override decides the settled state (that's the point of setting one); otherwise any movement this period counts as the payment.
-            val isSettled = if isOverridden then complete else spent > 0
+            // An override decides the settled state (that's the point of setting one); otherwise the expected payments all have to land.
+            val made      = s.billPaymentsMade
+            val isSettled = if isOverridden then complete else made >= s.category.billPayments
+            val verb      = if income then "received" else "paid"
             // No trailing tick in the words here: the marker in front of them carries it.
             val text      =
-              if isSettled then (if income then "received" else "paid")
+              if isSettled then verb
+              else if made > 0 && !isOverridden then s"$verb $made of ${s.category.billPayments}"
               else if income then "not received yet"
               else "not paid yet"
             (text, if isSettled then "bg-success" else "bg-secondary", None, Some(isSettled))

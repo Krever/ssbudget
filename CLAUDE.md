@@ -138,6 +138,7 @@ Category / CategoryBudgetOverride:
         method (average|median|fixed)
         lookbackMonths                       -- completed months the average/median sees; NULL = all history
         fixedCents                           -- signed; the figure itself when method = fixed
+      billPayments                           -- payments a Bill expects per period (default 1); each releases 1/N of the budget
   - override: (periodId, categoryId) -> remainingCents   -- per-period manual remaining
 
 ExchangeRate:

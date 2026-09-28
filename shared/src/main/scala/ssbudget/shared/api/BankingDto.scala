@@ -87,16 +87,18 @@ final case class UpdateCategory(
     color: Option[String],
     budgetType: Option[CategoryBudgetType] = None,
     budget: CategoryBudget = CategoryBudget(),
+    billPayments: Int = 1,
 ) derives Codec.AsObject {
 
-  /** The category this request describes, under the id the URL names, with its window clamped to what may actually be stored. Paired with
-    * [[UpdateCategory.of]] so the field list is written once at each end rather than unpacked and repacked by hand.
+  /** The category this request describes, under the id the URL names, with its window and payment count clamped to what may actually be stored.
+    * Paired with [[UpdateCategory.of]] so the field list is written once at each end rather than unpacked and repacked by hand.
     */
-  def toCategory(id: CategoryId): Category = Category(id, name, color, budgetType, budget.normalized)
+  def toCategory(id: CategoryId): Category =
+    Category(id, name, color, budgetType, budget, billPayments).normalized
 }
 
 object UpdateCategory {
-  def of(c: Category): UpdateCategory = UpdateCategory(c.name, c.color, c.budgetType, c.budget)
+  def of(c: Category): UpdateCategory = UpdateCategory(c.name, c.color, c.budgetType, c.budget, c.billPayments)
 }
 
 /** Spending stats for a category, computed server-side from bank transactions (the browser no longer holds them). All amounts are converted to the
@@ -111,6 +113,8 @@ object UpdateCategory {
   *   - `monthlyHistory`: the completed months behind `expectedMonthlyCents`, oldest first and gap months filled in as zero — the series the statistic
   *     actually saw, so the UI can draw the shape behind the number. Capped to the most recent
   *     [[ssbudget.shared.model.CategoryBudget.maxLookbackMonths]].
+  *   - `currentPeriodOutflowCount` / `currentPeriodInflowCount`: how many transactions went out / came in since the current period started — what a
+  *     Bill expecting several payments counts off.
   *
   * Spend is NET (outflows minus inflows), so pure-inflow categories (salary, refunds) show a negative figure instead of 0, and refunds reduce a
   * category's spend.
@@ -123,6 +127,8 @@ final case class CategorySummary(
     currency: Currency,
     overrideRemainingCents: Option[Long] = None,
     monthlyHistory: List[MonthlySpend] = Nil,
+    currentPeriodOutflowCount: Int = 0,
+    currentPeriodInflowCount: Int = 0,
 ) derives Codec.AsObject {
 
   /** Which way this category's money flows: `1` when it is spent, `-1` when it arrives (its net spend, and so its budget, is negative). This is the
@@ -141,12 +147,23 @@ final case class CategorySummary(
     */
   def movedMagnitude: Long = currentPeriodSpentCents * direction
 
+  /** How many of a Bill's `category.billPayments` have been made this period — see [[CategoryBudgetType.billPaymentsMade]]. */
+  def billPaymentsMade: Int =
+    CategoryBudgetType.billPaymentsMade(movedMagnitude, if direction > 0 then currentPeriodOutflowCount else currentPeriodInflowCount)
+
   /** What is still expected to move this period, as a magnitude in the category's own direction. A manual override wins over the budget-type formula
     * — the user knows something the transactions don't yet show (e.g. the bill was already paid) — and is stored signed, so it converts the same way.
     */
   def remainingMagnitude(elapsed: Double): Long =
     overrideRemainingCents.map(_ * direction).getOrElse {
-      CategoryBudgetType.remaining(category.budgetType.getOrElse(CategoryBudgetType.Steady), expectedMagnitude, movedMagnitude, elapsed)
+      CategoryBudgetType.remaining(
+        category.budgetType.getOrElse(CategoryBudgetType.Steady),
+        expectedMagnitude,
+        movedMagnitude,
+        elapsed,
+        billPaymentsMade,
+        category.billPayments,
+      )
     }
 
   /** Money still expected to move in this category before the next paycheck, SIGNED: positive is still to be spent, negative is still to arrive. This

@@ -69,6 +69,21 @@ class CategoryRepositorySpec extends RepositorySpec {
     } yield found shouldBe Some(cleared)
   }
 
+  "a Bill's expected payment count survives create and update" in {
+    val repo  = new CategoryRepositoryImpl(xa)
+    val bill  = category("c-1", "Kindergarten").copy(budgetType = Some(CategoryBudgetType.Bill), billPayments = 2)
+    val tuned = bill.copy(billPayments = 3)
+    for {
+      _       <- repo.create(bill)
+      created <- repo.findById(CategoryId("c-1"))
+      _       <- repo.update(tuned)
+      updated <- repo.findById(CategoryId("c-1"))
+    } yield {
+      created shouldBe Some(bill)
+      updated shouldBe Some(tuned)
+    }
+  }
+
   "delete removes the category" in {
     val repo = new CategoryRepositoryImpl(xa)
     for {

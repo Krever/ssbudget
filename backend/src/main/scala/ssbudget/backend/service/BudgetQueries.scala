@@ -71,6 +71,7 @@ class CategorySummaryService(repos: Repositories) {
     *   - `currency` = the primary currency.
     *   - `overrideRemainingCents` = the user's manual remaining-amount override for the current period, when set.
     *   - `monthlyHistory` = the recent completed months behind the figure, for the chart under a category's settings.
+    *   - `currentPeriodOutflowCount` / `currentPeriodInflowCount` = transactions out / in since the current period started, for a Bill's payments.
     */
 
   def summaries: IO[List[CategorySummary]] =
@@ -87,6 +88,7 @@ class CategorySummaryService(repos: Repositories) {
       // NET spend (inflows subtract). All completed-month spend (current partial month excluded by `< currentMonth`), per (cat, currency, YYYY-MM).
       histRows    <- repos.bankTransactions.monthlySpendByCategory(java.time.Instant.EPOCH, currentMonth, includeInflows = true)
       curRows     <- repos.bankTransactions.spendByCategoryBetween(periodStart, None, includeInflows = true)
+      curCounts   <- repos.bankTransactions.paymentCountsByCategoryBetween(periodStart, None)
       prevRows    <- prevOpt match {
                        case Some(p) =>
                          val (from, to) = periodWindow(p)
@@ -110,6 +112,7 @@ class CategorySummaryService(repos: Repositories) {
         rows.groupBy(_._1).view.mapValues(_.map { case (_, cur, cents) => toPrimary(cents, cur) }.sum).toMap
       val curByCat                                                                  = sumByCat(curRows)
       val prevByCat                                                                 = sumByCat(prevRows)
+      val countsByCat                                                               = curCounts.map { case (id, out, in) => id -> (out, in) }.toMap
       cats.map { cat =>
         val monthMap = byCatMonth.getOrElse(cat.id, Map.empty[String, Long])
         CategorySummary(
@@ -121,6 +124,8 @@ class CategorySummaryService(repos: Repositories) {
           overrideRemainingCents = overrides.get(cat.id),
           // The same months the statistic ran over, each already flagged with whether its window counted it.
           monthlyHistory = cat.budget.chartSeries(monthMap, lastCompleteMonth),
+          currentPeriodOutflowCount = countsByCat.get(cat.id).fold(0)(_._1),
+          currentPeriodInflowCount = countsByCat.get(cat.id).fold(0)(_._2),
         )
       }
     }

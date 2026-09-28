@@ -16,12 +16,13 @@ trait CategoryRepository {
 
 class CategoryRepositoryImpl(xa: Transactor[IO]) extends CategoryRepository {
 
-  private val columns = fr"id, name, color, budget_type, budget_method, budget_lookback_months, budget_fixed_cents"
+  private val columns = fr"id, name, color, budget_type, budget_method, budget_lookback_months, budget_fixed_cents, bill_payments"
 
   override def create(category: Category): IO[Unit] =
-    sql"""INSERT INTO categories (id, name, color, budget_type, budget_method, budget_lookback_months, budget_fixed_cents)
+    sql"""INSERT INTO categories (id, name, color, budget_type, budget_method, budget_lookback_months, budget_fixed_cents, bill_payments)
           VALUES (${category.id}, ${category.name}, ${category.color}, ${category.budgetType},
-                  ${category.budget.method}, ${category.budget.lookbackMonths}, ${category.budget.fixedCents})""".update.run
+                  ${category.budget.method}, ${category.budget.lookbackMonths}, ${category.budget.fixedCents},
+                  ${category.billPayments})""".update.run
       .transact(xa)
       .void
 
@@ -35,7 +36,7 @@ class CategoryRepositoryImpl(xa: Transactor[IO]) extends CategoryRepository {
     sql"""UPDATE categories
           SET name = ${category.name}, color = ${category.color}, budget_type = ${category.budgetType},
               budget_method = ${category.budget.method}, budget_lookback_months = ${category.budget.lookbackMonths},
-              budget_fixed_cents = ${category.budget.fixedCents}
+              budget_fixed_cents = ${category.budget.fixedCents}, bill_payments = ${category.billPayments}
           WHERE id = ${category.id}""".update.run
       .transact(xa)
       .void

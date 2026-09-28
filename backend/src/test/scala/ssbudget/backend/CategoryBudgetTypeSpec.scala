@@ -16,7 +16,7 @@ class CategoryBudgetTypeSpec extends AnyFreeSpec with Matchers {
   private val halfway = 0.5
 
   private def remaining(t: CategoryBudgetType, budget: Long, moved: Long, elapsed: Double = halfway): Long =
-    CategoryBudgetType.remaining(t, budget, moved, elapsed)
+    CategoryBudgetType.remaining(t, budget, moved, elapsed, CategoryBudgetType.billPaymentsMade(moved, 1), 1)
 
   "The budget formulas, in magnitudes" - {
     "reserve the remaining-time share of a Steady budget, whatever has already moved" in {
@@ -30,6 +30,17 @@ class CategoryBudgetTypeSpec extends AnyFreeSpec with Matchers {
       remaining(CategoryBudgetType.Bill, 100000L, 1L) shouldBe 0L
       // Movement the wrong way is no progress: nothing has been paid (or received) yet.
       remaining(CategoryBudgetType.Bill, 100000L, -500L) shouldBe 100000L
+    }
+
+    "release an equal share of a multi-payment Bill per payment, whatever each one's size" in {
+      def bill(moved: Long, transactions: Int) =
+        CategoryBudgetType.remaining(CategoryBudgetType.Bill, 100000L, moved, halfway, CategoryBudgetType.billPaymentsMade(moved, transactions), 2)
+      bill(0L, 0) shouldBe 100000L
+      bill(10L, 1) shouldBe 50000L
+      bill(90000L, 2) shouldBe 0L
+      bill(90000L, 3) shouldBe 0L // an extra payment never reserves below zero
+      // Net movement the wrong way is no progress, however many transactions it took.
+      bill(-500L, 2) shouldBe 100000L
     }
 
     "draw a Subscription pool down to zero and never below" in {

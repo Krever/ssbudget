@@ -648,7 +648,10 @@ object TransactionsPage {
   /** A category's budget settings as one scannable line: how it's drawn down, then how its figure is derived and over how long — "Steady · median 6".
     * A category that isn't a budget reads as "—"; its figure is still computed and shown, but nothing consumes it.
     */
-  private def budgetSummary(c: Category): String = c.budgetType.fold("—")(t => s"${t.toString} · ${c.budget.summary}")
+  private def budgetSummary(c: Category): String = c.budgetType.fold("—") { t =>
+    val payments = if t == CategoryBudgetType.Bill && c.billPayments > 1 then s" ×${c.billPayments}" else ""
+    s"${t.toString}$payments · ${c.budget.summary}"
+  }
 
   /** Inline explanation of the budget types (shown in the categories card on demand). Each type predicts the money still needed before the next
     * paycheck differently — see also `CategoryBudgetType.remaining`.
@@ -665,7 +668,8 @@ object TransactionsPage {
         ),
         li(
           span(cls := "fw-semibold", "Bill"),
-          " — one payment per period (rent, kindergarten): reserves the full amount until any payment lands this period, then 0.",
+          " — a set number of payments per period (rent, kindergarten): reserves the full amount and releases an equal share as each payment " +
+            "lands, whatever its size. Payments (default 1) says how many to expect.",
         ),
         li(
           span(cls := "fw-semibold", "Subscription"),
@@ -813,6 +817,25 @@ object TransactionsPage {
         commitOnEnter,
       )
 
+    /** How many payments a Bill expects per period. Only a Bill counts payments, hence disabled for the other types. */
+    def paymentsInput(c: Category): HtmlElement =
+      input(
+        cls          := "form-control form-control-sm text-center",
+        tpe          := "number",
+        minAttr      := "1",
+        maxAttr      := Category.maxBillPayments.toString,
+        stepAttr     := "1",
+        styleAttr    := "width: 4rem",
+        title        := "Payments expected per period; each one that lands releases its equal share of the budget",
+        disabled     := !c.budgetType.contains(CategoryBudgetType.Bill),
+        defaultValue := c.billPayments.toString,
+        onBlur.mapToValue --> { v =>
+          val payments = v.trim.toIntOption.getOrElse(c.billPayments) // the server clamps it
+          if payments != c.billPayments then saveCategory(c.copy(billPayments = payments))
+        },
+        commitOnEnter,
+      )
+
     /** The typed-in figure. The mirror of [[monthsInput]]: it only applies to a method that does NOT read history, so it's disabled for the others
       * rather than hidden — the strip keeps its shape whichever method is selected.
       */
@@ -843,6 +866,7 @@ object TransactionsPage {
           div(
             cls := "d-flex flex-wrap align-items-center gap-3 px-2 pt-2",
             InlineEdit.labelled("Type", typeSelect(c)),
+            InlineEdit.labelled("Payments", paymentsInput(c)),
             InlineEdit.labelled("Method", methodSelect(c, summary)),
             InlineEdit.labelled("Months", monthsInput(c)),
             InlineEdit.labelled("Amount", fixedInput(c)),

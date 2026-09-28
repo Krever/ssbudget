@@ -109,7 +109,15 @@ class BudgetSnapshotService(repos: Repositories) {
                 records = records.view.mapValues(_.map(r => r.expenseDefId -> r).toMap).toMap,
                 overrides = overrides.map { case (p, c, cents, at) => (p, c) -> (cents, at) }.toMap,
                 monthlyByCat = byBucket(monthly, rateTable)(ym => LocalDate.parse(ym + "-01")),
-                dailyByCat = byDay(dailyCat, rateTable),
+                dailyByCat = byDay(dailyCat.map { case (cat, cur, d, cents, _, _) => (cat, cur, d, cents) }, rateTable),
+                // Counts need no conversion, so the currency rows of a day simply add up.
+                dailyCountsByCat = dailyCat
+                  .groupBy(_._1)
+                  .view
+                  .mapValues {
+                    _.groupMapReduce(r => LocalDate.parse(r._3))(r => (r._5, r._6)) { case ((o1, i1), (o2, i2)) => (o1 + o2, i1 + i2) }
+                  }
+                  .toMap,
                 // A card group's cards are several bank accounts feeding one app account, so re-key before grouping and they simply add up.
                 dailyByAccount = byDay(dailyAcc.flatMap { case (uid, cur, d, c) => uidIndex.get(uid).map((_, cur, d, c)) }, rateTable),
               ),
@@ -210,15 +218,16 @@ class BudgetSnapshotService(repos: Repositories) {
     * whose rule changed in June is therefore scored by the June rule all the way back.
     */
   private def budgetRemainings(w: World, period: Period, day: LocalDate): List[Long] = {
-    val periodStart       = period.startDay
-    val elapsed           = period.elapsedFraction(day)
+    val periodStart                                                                        = period.startDay
+    val elapsed                                                                            = period.elapsedFraction(day)
     // The window ends at the last COMPLETED month, which CategoryBudget.inWindow already enforces — the month `day` falls in never counts.
-    val lastCompleteMonth = CategoryBudget.lastCompleteMonthIndex(day)
+    val lastCompleteMonth                                                                  = CategoryBudget.lastCompleteMonthIndex(day)
+    // The category's per-day values from the period's start up to `day` — the period-to-date window every figure below is summed over.
+    def toDate[A](byDay: Map[CategoryId, Map[LocalDate, A]], cat: CategoryId): Iterable[A] =
+      byDay.getOrElse(cat, Map.empty).collect { case (d, a) if !d.isBefore(periodStart) && !d.isAfter(day) => a }
     w.categories.filter(_.budgetType.isDefined).map { cat =>
-      val spent = w.dailyByCat
-        .getOrElse(cat.id, Map.empty)
-        .collect { case (d, cents) if !d.isBefore(periodStart) && !d.isAfter(day) => cents }
-        .sum
+      val spent               = toDate(w.dailyByCat, cat.id).sum
+      val (outflows, inflows) = toDate(w.dailyCountsByCat, cat.id).foldLeft((0, 0)) { case ((o, i), (o1, i1)) => (o + o1, i + i1) }
       CategorySummary(
         category = cat,
         expectedMonthlyCents = cat.budget.expectedMonthly(w.monthlyByCat.getOrElse(cat.id, Map.empty), lastCompleteMonth),
@@ -226,6 +235,8 @@ class BudgetSnapshotService(repos: Repositories) {
         lastPeriodSpentCents = 0L,
         currency = w.rates.primary,
         overrideRemainingCents = w.overrideOn(period.id, cat.id, day),
+        currentPeriodOutflowCount = outflows,
+        currentPeriodInflowCount = inflows,
       ).remainingCents(elapsed)
     }
   }
@@ -286,17 +297,18 @@ object BudgetSnapshotService {
   final private case class World(
       today: LocalDate,
       capturedAt: Instant,
-      periods: List[Period],                               // oldest first
+      periods: List[Period],                                         // oldest first
       accounts: List[Account],
       defs: List[BudgetItemDefinition],
       categories: List[Category],
       rates: RateTable,
-      snapshots: Map[AccountId, List[BalanceSnapshot]],    // oldest first
+      snapshots: Map[AccountId, List[BalanceSnapshot]],              // oldest first
       records: Map[PeriodId, Map[ExpenseDefId, ExpenseRecord]],
       overrides: Map[(PeriodId, CategoryId), (Long, Instant)],
-      monthlyByCat: Map[CategoryId, Map[String, Long]],    // "YYYY-MM" -> net spend
-      dailyByCat: Map[CategoryId, Map[LocalDate, Long]],   // day -> net spend
-      dailyByAccount: Map[AccountId, Map[LocalDate, Long]], // day -> signed movement
+      monthlyByCat: Map[CategoryId, Map[String, Long]],              // "YYYY-MM" -> net spend
+      dailyByCat: Map[CategoryId, Map[LocalDate, Long]],             // day -> net spend
+      dailyCountsByCat: Map[CategoryId, Map[LocalDate, (Int, Int)]], // day -> (outflows, inflows)
+      dailyByAccount: Map[AccountId, Map[LocalDate, Long]],          // day -> signed movement
   ) {
 
     /** The period `day` falls in: the last one that had started by then. Periods are contiguous, so that is also the one that had not yet ended. */
