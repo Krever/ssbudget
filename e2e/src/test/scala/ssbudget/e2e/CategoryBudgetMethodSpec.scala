@@ -1,7 +1,7 @@
 package ssbudget.e2e
 
 import org.openqa.selenium.support.ui.Select
-import org.openqa.selenium.{By, Keys, WebElement}
+import org.openqa.selenium.{By, JavascriptExecutor, Keys, WebElement}
 
 import scala.jdk.CollectionConverters.*
 
@@ -111,6 +111,49 @@ class CategoryBudgetMethodSpec extends E2ESpec {
     eventually(new Select(field("Method")).getFirstSelectedOption.getText shouldBe "Fixed")
     eventually(field("Amount").getAttribute("value") shouldBe "1234")
     expectedShouldBe("1,234.00")
+  }
+
+  /** The figures under the table are reloaded after every save, and on a real connection they can arrive while the next field is being typed into.
+    * The reload must not replace that field: it would lose what was typed, and the blur that saves it with it. Here the reload is held back on
+    * purpose so that it lands in the middle of the typing, and the figure is then submitted with the Save button rather than by leaving the field.
+    */
+  it should "keep a typed figure through a reload of the figures, and save it with the Save button" in {
+    openSettings()
+    choose("Method", "average")
+    expectedShouldBe("400.00")
+
+    // Hold back every summaries reload from now on.
+    driver
+      .asInstanceOf[JavascriptExecutor]
+      .executeScript(
+        """const f = window.fetch;
+          |window.fetch = (u, o) => {
+          |  const url = typeof u === 'string' ? u : u.url;
+          |  return url.includes('categories/summaries') ? new Promise(r => setTimeout(r, 1500)).then(() => f(u, o)) : f(u, o);
+          |};""".stripMargin,
+      )
+
+    choose("Method", "fixed")                // saves, then starts the held-back reload
+    eventually(field("Amount").isEnabled shouldBe true)
+    eventually {
+      val f = field("Amount")
+      f.sendKeys(Keys.END.toString + Keys.BACK_SPACE.toString * f.getAttribute("value").length + "4321")
+    }
+    def save = settings.findElement(By.xpath(".//button[text()='Save']"))
+    eventually(save.isEnabled shouldBe true) // a change that is not saved yet
+
+    // The reload lands: the row shows the fixed figure, and the field still holds what was typed.
+    expectedShouldBe("1,234.00")
+    field("Amount").getAttribute("value") shouldBe "4321"
+
+    save.click()
+    expectedShouldBe("4,321.00")
+    eventually(save.isEnabled shouldBe false)
+
+    // And it is stored, not just shown.
+    openSettings()
+    eventually(field("Amount").getAttribute("value") shouldBe "4321")
+    expectedShouldBe("4,321.00")
   }
 
   /** The history chart under the controls: one dot per completed month, dimmed when the window excludes it. Charting the same series the statistic

@@ -693,7 +693,7 @@ object TransactionsPage {
 
   private def categoriesCard(
       catsVar: Var[List[Category]],
-      summaries: Signal[List[CategorySummary]],
+      summaries: StrictSignal[List[CategorySummary]],
       apiClient: ApiClient,
       reloadCategories: () => Unit,
       reloadSummaries: () => Unit,
@@ -740,14 +740,25 @@ object TransactionsPage {
         case Failure(_) => ()
       }
 
-    def saveBudget(c: Category)(f: CategoryBudget => CategoryBudget): Unit = saveCategory(c.copy(budget = f(c.budget)))
+    /** Apply an edit to the category as it is NOW, and save it only if it changed something. The settings strip outlives many saves, so its controls
+      * must not hold on to the category they were first drawn with: an edit to a stale copy would revert the fields saved since.
+      */
+    def editCategory(id: CategoryId)(f: Category => Category): Unit =
+      catsVar.now().find(_.id == id).foreach { c =>
+        val next = f(c)
+        if next != c then saveCategory(next)
+      }
+
+    def editBudget(id: CategoryId)(f: CategoryBudget => CategoryBudget): Unit = editCategory(id)(c => c.copy(budget = f(c.budget)))
 
     /** Switching to Fixed seeds the amount with whatever the statistic was showing, so the cell starts where the eye left it instead of at zero. */
-    def setBudgetMethod(c: Category, summary: Option[CategorySummary], method: CategoryBudgetMethod): Unit =
-      saveBudget(c) { b =>
+    def setBudgetMethod(id: CategoryId, method: CategoryBudgetMethod): Unit = {
+      val summary = summaries.now().find(_.category.id == id)
+      editBudget(id) { b =>
         val seeded = if method == CategoryBudgetMethod.Fixed && b.fixedCents.isEmpty then summary.map(_.expectedMonthlyCents) else b.fixedCents
         b.copy(method = method, fixedCents = seeded)
       }
+    }
 
     // Drill-through cell: the period spend figures are links into the transaction table below, filtered to that category + window — like clicking a
     // number in a pivot table. Only linked when there is something to show; a zero would drill into an empty list.
@@ -771,109 +782,136 @@ object TransactionsPage {
     // Blurring is what commits an inline cell, so Enter just leaves the field rather than duplicating the save.
     val commitOnEnter = onKeyDown.filter(_.key == "Enter") --> { ev => ev.target.asInstanceOf[dom.html.Input].blur() }
 
-    /** The one enum dropdown. Options carry their wire value and their label; the current one is marked with `selected :=` rather than `value :=` on
-      * the select, which would be applied before the options mount and fall back to the first one.
+    /** The one enum dropdown. Options carry their wire value and their label; the current one is marked with `selected <--` rather than `value <--`
+      * on the select, which would be applied before the options mount and fall back to the first one.
       */
-    def enumSelect(options: List[(String, String)], current: String, onPick: String => Unit): HtmlElement =
+    def enumSelect(options: List[(String, String)], current: Signal[String], onPick: String => Unit): HtmlElement =
       select(
         cls := "form-select form-select-sm w-auto",
         onChange.mapToValue --> { v => onPick(v) },
-        options.map { case (v, text) => option(value := v, selected := v == current, text) },
+        options.map { case (v, text) => option(value := v, selected <-- current.map(_ == v), text) },
       )
 
     /** How the category's monthly figure is derived. */
-    def methodSelect(c: Category, summary: Option[CategorySummary]): HtmlElement =
+    def methodSelect(id: CategoryId, cat: Signal[Category]): HtmlElement =
       enumSelect(
         CategoryBudgetMethod.values.toList.map(m => CategoryBudgetMethod.asString(m) -> CategoryBudgetMethod.label(m)),
-        CategoryBudgetMethod.asString(c.budget.method),
-        v => CategoryBudgetMethod.fromString(v).foreach(setBudgetMethod(c, summary, _)),
+        cat.map(c => CategoryBudgetMethod.asString(c.budget.method)),
+        v => CategoryBudgetMethod.fromString(v).foreach(setBudgetMethod(id, _)),
       )
 
     /** How that figure is drawn down over the period — or Off, for a category that isn't a budget at all. */
-    def typeSelect(c: Category): HtmlElement =
+    def typeSelect(id: CategoryId, cat: Signal[Category]): HtmlElement =
       enumSelect(
         (offBudgetType -> "Off") :: CategoryBudgetType.values.toList.map(t => CategoryBudgetType.asString(t) -> t.toString),
-        c.budgetType.fold(offBudgetType)(CategoryBudgetType.asString),
-        v => saveCategory(c.copy(budgetType = if v == offBudgetType then None else CategoryBudgetType.fromString(v).toOption)),
+        cat.map(_.budgetType.fold(offBudgetType)(CategoryBudgetType.asString)),
+        v => editCategory(id)(_.copy(budgetType = if v == offBudgetType then None else CategoryBudgetType.fromString(v).toOption)),
       )
 
+    /** The text a field shows for a stored value. It is written again only when the STORED value changes, so a save of some other field does not
+      * overwrite what is being typed here.
+      */
+    def stored[A](cat: Signal[Category])(f: Category => A)(show: A => String): Mod[Input] =
+      value <-- cat.map(f).distinct.map(show)
+
     /** How far back the average/median looks. Meaningless for a figure that never reads history, hence disabled there. */
-    def monthsInput(c: Category): HtmlElement =
+    def monthsInput(id: CategoryId, cat: Signal[Category]): HtmlElement =
       input(
-        cls          := "form-control form-control-sm text-center",
-        tpe          := "number",
-        minAttr      := "1",
-        maxAttr      := CategoryBudget.maxLookbackMonths.toString,
-        stepAttr     := "1",
-        styleAttr    := "width: 5rem",
-        placeholder  := "all",
-        title        := s"Completed months the average/median looks back over; blank = all history (at most ${CategoryBudget.maxLookbackMonths})",
-        disabled     := !c.budget.derivesFromHistory,
-        defaultValue := c.budget.lookbackMonths.map(_.toString).getOrElse(""),
-        onBlur.mapToValue --> { v =>
-          val months = v.trim.toIntOption.filter(_ > 0)
-          if months != c.budget.lookbackMonths then saveBudget(c)(_.copy(lookbackMonths = months))
-        },
+        cls         := "form-control form-control-sm text-center",
+        tpe         := "number",
+        minAttr     := "1",
+        maxAttr     := CategoryBudget.maxLookbackMonths.toString,
+        stepAttr    := "1",
+        styleAttr   := "width: 5rem",
+        placeholder := "all",
+        title       := s"Completed months the average/median looks back over; blank = all history (at most ${CategoryBudget.maxLookbackMonths})",
+        disabled <-- cat.map(!_.budget.derivesFromHistory),
+        stored(cat)(_.budget.lookbackMonths)(_.map(_.toString).getOrElse("")),
+        onBlur.mapToValue --> { v => editBudget(id)(_.copy(lookbackMonths = v.trim.toIntOption.filter(_ > 0))) },
         commitOnEnter,
       )
 
     /** How many payments a Bill expects per period. Only a Bill counts payments, hence disabled for the other types. */
-    def paymentsInput(c: Category): HtmlElement =
+    def paymentsInput(id: CategoryId, cat: Signal[Category]): HtmlElement =
       input(
-        cls          := "form-control form-control-sm text-center",
-        tpe          := "number",
-        minAttr      := "1",
-        maxAttr      := Category.maxBillPayments.toString,
-        stepAttr     := "1",
-        styleAttr    := "width: 4rem",
-        title        := "Payments expected per period; each one that lands releases its equal share of the budget",
-        disabled     := !c.budgetType.contains(CategoryBudgetType.Bill),
-        defaultValue := c.billPayments.toString,
+        cls       := "form-control form-control-sm text-center",
+        tpe       := "number",
+        minAttr   := "1",
+        maxAttr   := Category.maxBillPayments.toString,
+        stepAttr  := "1",
+        styleAttr := "width: 4rem",
+        title     := "Payments expected per period; each one that lands releases its equal share of the budget",
+        disabled <-- cat.map(!_.budgetType.contains(CategoryBudgetType.Bill)),
+        stored(cat)(_.billPayments)(_.toString),
         onBlur.mapToValue --> { v =>
-          val payments = v.trim.toIntOption.getOrElse(c.billPayments) // the server clamps it
-          if payments != c.billPayments then saveCategory(c.copy(billPayments = payments))
+          editCategory(id)(c => c.copy(billPayments = v.trim.toIntOption.getOrElse(c.billPayments))) // the server clamps it
         },
         commitOnEnter,
       )
 
-    /** The typed-in figure. The mirror of [[monthsInput]]: it only applies to a method that does NOT read history, so it's disabled for the others
-      * rather than hidden — the strip keeps its shape whichever method is selected.
+    /** The typed-in figure and its Save button. The mirror of [[monthsInput]]: it only applies to a method that does NOT read history, so it's
+      * disabled for the others rather than hidden — the strip keeps its shape whichever method is selected.
+      *
+      * Leaving the field saves it, like the other fields. The Save button next to it does the same, so there is a visible way to submit, and it is
+      * enabled only while the typed figure differs from the stored one — so it also shows that a change is not saved yet.
       */
-    def fixedInput(c: Category): HtmlElement =
-      InlineEdit
-        // No placeholder: the strip already labels this field, and "Amount" inside an "Amount" box just says it twice.
-        .moneyInput(c.budget.fixedCents, placeholderText = "")
-        .amend(
-          cls       := "font-monospace",
-          styleAttr := "width: 8rem",
-          title     := "Monthly figure for this category (negative if the money comes in)",
-          disabled  := c.budget.derivesFromHistory,
-          onBlur.mapToValue --> { v =>
-            val cents = InlineEdit.parseCentsOpt(v)
-            if cents != c.budget.fixedCents then saveBudget(c)(_.copy(fixedCents = cents))
-          },
-          commitOnEnter,
-        )
+    def fixedControls(id: CategoryId, cat: Signal[Category]): List[HtmlElement] = {
+      val draft          = Var("")
+      val storedText     = cat.map(_.budget.fixedCents).distinct.map(_.map(c => (c / 100.0).toString).getOrElse(""))
+      def commit(): Unit = editBudget(id)(_.copy(fixedCents = InlineEdit.parseCentsOpt(draft.now())))
+      val unsaved        = draft.signal.combineWith(cat).map { case (text, c) => InlineEdit.parseCentsOpt(text) != c.budget.fixedCents }
+      // Two siblings rather than one input group: tests and the label find the field as a direct child of the labelled block.
+      List(
+        InlineEdit
+          // No placeholder: the strip already labels this field, and "Amount" inside an "Amount" box just says it twice.
+          .moneyInput(None, placeholderText = "")
+          .amend(
+            cls       := "font-monospace",
+            styleAttr := "width: 8rem",
+            title     := "Monthly figure for this category (negative if the money comes in)",
+            disabled <-- cat.map(_.budget.derivesFromHistory),
+            value <-- storedText,
+            onInput.mapToValue --> draft.writer,
+            onBlur --> { _ => commit() },
+            commitOnEnter,
+            storedText --> draft.writer,
+          ),
+        button(
+          tpe         := "button",
+          cls         := "btn btn-sm btn-outline-primary",
+          "Save",
+          // Keep the focus in the field: a blur would save first, and the click would then send the same edit again.
+          onMouseDown.preventDefault --> { _ => () },
+          disabled <-- cat.map(_.budget.derivesFromHistory).combineWith(unsaved).map { case (fromHistory, changed) => fromHistory || !changed },
+          onClick --> { _ => commit() },
+        ),
+      )
+    }
 
     /** The settings strip: every control that writes to a category, plus the history the derived ones read. The table itself stays read-only so the
       * figures in it can be scanned like a spreadsheet, and this opens on demand rather than putting four controls on every row.
+      *
+      * It is drawn ONCE per opening and its controls follow `cat`. Drawing it again on every reload would replace a field while it is being typed
+      * into, which loses the typed value and the blur that saves it.
       */
-    def settingsRow(c: Category, summary: Option[CategorySummary]): HtmlElement =
+    def settingsRow(id: CategoryId, cat: Signal[Category], summary: Signal[Option[CategorySummary]]): HtmlElement =
       tr(
         cls := "budget-settings table-light",
         td(
           colSpan := columnCount,
           div(
             cls := "d-flex flex-wrap align-items-center gap-3 px-2 pt-2",
-            InlineEdit.labelled("Type", typeSelect(c)),
-            InlineEdit.labelled("Payments", paymentsInput(c)),
-            InlineEdit.labelled("Method", methodSelect(c, summary)),
-            InlineEdit.labelled("Months", monthsInput(c)),
-            InlineEdit.labelled("Amount", fixedInput(c)),
+            InlineEdit.labelled("Type", typeSelect(id, cat)),
+            InlineEdit.labelled("Payments", paymentsInput(id, cat)),
+            InlineEdit.labelled("Method", methodSelect(id, cat)),
+            InlineEdit.labelled("Months", monthsInput(id, cat)),
+            InlineEdit.labelled("Amount", fixedControls(id, cat)*),
           ),
           div(
             cls := "px-2 pb-2",
-            summary.map(s0 => Sparkline.monthly(s0.monthlyHistory, s0.direction, s0.expectedMagnitude, s0.currency, c.name)),
+            child.maybe <-- summary.combineWith(cat.map(_.name).distinct).map { case (s, name) =>
+              s.map(s0 => Sparkline.monthly(s0.monthlyHistory, s0.direction, s0.expectedMagnitude, s0.currency, name))
+            },
           ),
         ),
       )
@@ -959,18 +997,19 @@ object TransactionsPage {
               th(),
             ),
           ),
-          tbody(
-            children <-- catsVar.signal.combineWith(summaries).combineWith(expanded.signal).map { case (cats, summs, open) =>
-              if cats.isEmpty then List(tr(td(colSpan := columnCount, cls := "text-muted small text-center py-2", "No categories yet.")))
-              else {
-                val byId = summs.map(s => s.category.id -> s).toMap
-                cats.flatMap { c =>
-                  val summary = byId.get(c.id)
-                  categoryRow(c, summary, open(c.id)) :: Option.when(open(c.id))(settingsRow(c, summary)).toList
-                }
-              }
-            },
+          child.maybe <-- catsVar.signal.map(cats =>
+            Option.when(cats.isEmpty)(tbody(tr(td(colSpan := columnCount, cls := "text-muted small text-center py-2", "No categories yet.")))),
           ),
+          // One <tbody> per category, kept by id: a reload redraws its figures but keeps its elements, so an open settings strip is not replaced
+          // under the cursor. A table may have many bodies, and each one holds a row together with its strip.
+          children <-- catsVar.signal.split(_.id) { (id, _, cat) =>
+            val summary = summaries.map(_.find(_.category.id == id))
+            val isOpen  = expanded.signal.map(_(id)).distinct
+            tbody(
+              child <-- cat.combineWith(summary).combineWith(isOpen).map { case (c, s, open) => categoryRow(c, s, open) },
+              child.maybe <-- isOpen.map(open => Option.when(open)(settingsRow(id, cat, summary))),
+            )
+          },
         ),
       )
 
