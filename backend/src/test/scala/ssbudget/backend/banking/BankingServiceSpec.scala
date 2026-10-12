@@ -15,11 +15,13 @@ class FakeEnableBankingApi(
     balances: Map[String, EbBalance] = Map.empty,
     details: Map[String, EbAccountDetails] = Map.empty,
     sessionAccounts: List[EbAccountRef] = Nil,
+    balanceError: Option[String] = None, // when set, every balance fetch fails with this text
 ) extends EnableBankingApi {
   override def listAspsps(country: Option[String])                                                                          = IO.pure(Right(Nil))
   override def startAuthorization(aspspName: String, aspspCountry: String, s: String)                                       = IO.pure(Right("https://bank.example/redirect"))
   override def createSession(code: String)                                                                                  = IO.pure(Right(EbSession("sess-1", sessionAccounts, None)))
-  override def getBalances(accountUid: String)                                                                              = IO.pure(balances.get(accountUid).toRight(s"no balance for $accountUid"))
+  override def getBalances(accountUid: String)                                                                              =
+    IO.pure(balanceError.map(Left(_)).getOrElse(balances.get(accountUid).toRight(s"no balance for $accountUid")))
   override def getAccountDetails(accountUid: String)                                                                        = IO.pure(details.get(accountUid).toRight(s"no details for $accountUid"))
   override def getTransactions(accountUid: String, dateFrom: LocalDate, dateTo: LocalDate, continuationKey: Option[String]) =
     IO.pure(Right(EbTransactionsPage(Nil, None)))
@@ -319,5 +321,26 @@ class BankingServiceSpec extends RepositorySpec {
       _   <- svc.sync(BankConnectionId("c-1"))
       acc <- repos.accounts.findById(AccountId("acc-1"))
     } yield acc.map(_.balanceCents) shouldBe Some(0) // unchanged
+  }
+
+  "sync marks the connection Expired when the bank says the session is closed" in {
+    val closed       = """EB GET accounts/uid-1/balances failed: {"code":401,"message":"Session is closed","error":"CLOSED_SESSION"}"""
+    val (svc, repos) = service(Some(new FakeEnableBankingApi(balanceError = Some(closed))))
+    for {
+      _    <- activeConnection(repos, "c-1")
+      _    <- repos.bankConnections.createLink(link("l-1", "c-1", "uid-1"))
+      _    <- svc.sync(BankConnectionId("c-1"))
+      conn <- repos.bankConnections.findById(BankConnectionId("c-1"))
+    } yield conn.map(_.status) shouldBe Some(ConnectionStatus.Expired)
+  }
+
+  "sync keeps the connection Active when a balance fetch fails for another reason" in {
+    val (svc, repos) = service(Some(new FakeEnableBankingApi(balanceError = Some("EB GET accounts/uid-1/balances failed: 503"))))
+    for {
+      _    <- activeConnection(repos, "c-1")
+      _    <- repos.bankConnections.createLink(link("l-1", "c-1", "uid-1"))
+      _    <- svc.sync(BankConnectionId("c-1"))
+      conn <- repos.bankConnections.findById(BankConnectionId("c-1"))
+    } yield conn.map(_.status) shouldBe Some(ConnectionStatus.Active)
   }
 }

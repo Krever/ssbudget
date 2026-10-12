@@ -3,12 +3,11 @@ package ssbudget.frontend.pages
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 import ssbudget.frontend.components.InlineEdit
-import ssbudget.frontend.services.ApiClient
+import ssbudget.frontend.services.{ApiClient, BankRenewal}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.shared.api.{
   Aspsp,
   BankConnectionView,
-  ConnectBankRequest,
   CreateAccount,
   CreateCardGroup,
   ImportTransactionsRequest,
@@ -23,10 +22,12 @@ import ssbudget.shared.model.{
   BalanceSource,
   BankAccountLink,
   BankAccountLinkId,
+  BankConnection,
   BankConnectionId,
   BankLinkTarget,
   CardGroup,
   CardGroupId,
+  ConnectionHealth,
   ConnectionStatus,
   Currency,
   ImportItemStatus,
@@ -37,6 +38,7 @@ import ssbudget.shared.model.{
 }
 
 import scala.concurrent.ExecutionContext.Implicits.global
+import java.time.Instant
 import scala.util.{Failure, Success}
 
 object BankingPage {
@@ -105,12 +107,17 @@ object BankingPage {
       if name.nonEmpty then {
         connectingVar.set(true)
         errorVar.set(None)
-        apiClient.banking.connect(ConnectBankRequest(name, countryVar.now().trim.toUpperCase)).onComplete {
-          case Success(res) => dom.window.location.href = res.redirectUrl // off to the bank for SCA
-          case Failure(ex)  =>
-            connectingVar.set(false)
-            errorVar.set(Some(s"Failed to start connection: ${ex.getMessage}"))
+        BankRenewal.start(apiClient, List(BankRenewal.Bank(name, countryVar.now().trim.toUpperCase))) { ex =>
+          connectingVar.set(false)
+          errorVar.set(Some(s"Failed to start connection: ${ex.getMessage}"))
         }
+      }
+    }
+
+    def renew(conn: BankConnection): Unit = {
+      errorVar.set(None)
+      BankRenewal.start(apiClient, List(BankRenewal.Bank.of(conn))) { ex =>
+        errorVar.set(Some(s"Failed to start the bank login: ${ex.getMessage}"))
       }
     }
 
@@ -284,6 +291,7 @@ object BankingPage {
             disconnect,
             sync,
             importTx,
+            renew,
             link,
             createAndLink,
           )
@@ -518,9 +526,11 @@ object BankingPage {
     val formErrorV  = Var(Option.empty[String])
 
     def submit(): Unit = {
-      val name  = nameVar.now().trim
-      val limit = InlineEdit.parseCentsOpt(limitVar.now()).toRight("Enter a valid limit amount, e.g. 10000.").flatMap(CardGroup.validLimit)
-      (if name.isEmpty then Left("Enter a group name.") else limit) match {
+      val name                        = nameVar.now().trim
+      val limit: Either[String, Long] =
+        if name.isEmpty then Left("Enter a group name.")
+        else InlineEdit.parseCentsOpt(limitVar.now()).toRight("Enter a valid limit amount, e.g. 10000.").flatMap(CardGroup.validLimit)
+      limit match {
         case Left(err)    => formErrorV.set(Some(err))
         case Right(cents) =>
           formErrorV.set(None)
@@ -656,13 +666,14 @@ object BankingPage {
       disconnect: BankConnectionId => Unit,
       sync: BankConnectionId => Unit,
       importTx: (BankConnectionId, Option[Int]) => Unit,
+      renew: BankConnection => Unit,
       link: (BankAccountLinkId, BankLinkTarget) => Unit,
       createAndLink: (BankAccountLinkId, String, Currency) => Unit,
   ): HtmlElement =
     div(
       child <-- connections.combineWith(accounts).combineWith(cardGroups).map { case (conns, accs, groups) =>
         if conns.isEmpty then p(cls := "text-muted", "No banks connected yet.")
-        else div(conns.map(v => connectionCard(v, accs, groups, syncingVar, importingVar, disconnect, sync, importTx, link, createAndLink)))
+        else div(conns.map(v => connectionCard(v, accs, groups, syncingVar, importingVar, disconnect, sync, importTx, renew, link, createAndLink)))
       },
     )
 
@@ -675,10 +686,12 @@ object BankingPage {
       disconnect: BankConnectionId => Unit,
       sync: BankConnectionId => Unit,
       importTx: (BankConnectionId, Option[Int]) => Unit,
+      renew: BankConnection => Unit,
       link: (BankAccountLinkId, BankLinkTarget) => Unit,
       createAndLink: (BankAccountLinkId, String, Currency) => Unit,
   ): HtmlElement = {
     val conn      = view.connection
+    val health    = conn.health(Instant.now())
     val monthsVar = Var("0") // "0" = incremental (new only); otherwise months to backfill
     div(
       cls := "card mb-3",
@@ -689,7 +702,7 @@ object BankingPage {
           div(
             h5(cls := "mb-1", conn.aspspName, span(cls := "text-muted small ms-2", conn.aspspCountry)),
             statusBadge(conn.status),
-            conn.validUntil.map(v => small(cls := "text-muted ms-2", s"Valid until ${v.toString.take(10)}")).getOrElse(emptyNode),
+            consentNote(conn, health),
             view.accounts
               .flatMap(_.lastSyncedAt)
               .maxOption
@@ -709,6 +722,13 @@ object BankingPage {
                 },
                 onClick --> { _ => sync(conn.id) },
               ),
+              if health != ConnectionHealth.Ok then button(
+                cls   := "btn btn-warning",
+                title := "Log in to the bank again; history and links are kept",
+                "Renew",
+                onClick --> { _ => renew(conn) },
+              )
+              else emptyNode,
               button(cls := "btn btn-outline-danger", "Disconnect", onClick --> { _ => disconnect(conn.id) }),
             ),
             div(
@@ -813,6 +833,18 @@ object BankingPage {
         ),
       ),
     )
+  }
+
+  /** The consent end date, coloured by how soon a new login is due. */
+  private def consentNote(conn: BankConnection, health: ConnectionHealth): Node = {
+    val date = conn.validUntil.map(Formatting.formatIso)
+    health match {
+      case ConnectionHealth.NeedsRenewal   =>
+        small(cls := "text-danger ms-2", date.fold("Access ended")(d => s"Access ended $d"), " — renew to sync again")
+      case ConnectionHealth.ExpiresSoon(d) =>
+        small(cls := "text-warning-emphasis ms-2", s"Access ends ${date.getOrElse("")} ($d ${if d == 1 then "day" else "days"} left)")
+      case ConnectionHealth.Ok             => date.fold(emptyNode)(d => small(cls := "text-muted ms-2", s"Valid until $d"))
+    }
   }
 
   private def statusBadge(status: ConnectionStatus): HtmlElement = {

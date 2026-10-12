@@ -112,7 +112,8 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
       client.getTransactions(link.ebAccountUid, from, to, continuationKey).flatMap {
         case Left(err)    =>
           // Best-effort: stop this account, keep what we imported, but surface why.
-          IO(log.warn(s"[import] ${link.ebAccountUid}: fetch failed on page ${page + 1}: $err")).as((imported, skipped))
+          BankingService.expireIfSessionEnded(repos, connId, err) *>
+            IO(log.warn(s"[import] ${link.ebAccountUid}: fetch failed on page ${page + 1}: $err")).as((imported, skipped))
         case Right(page0) =>
           for {
             _          <- IO(log.info(s"[import] ${link.ebAccountUid}: page ${page + 1} → ${page0.transactions.size} tx"))

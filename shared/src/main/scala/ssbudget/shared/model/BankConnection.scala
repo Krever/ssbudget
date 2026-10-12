@@ -53,7 +53,37 @@ final case class BankConnection(
     validUntil: Option[Instant], // access.valid_until returned by Enable Banking
     authState: Option[String],   // CSRF nonce for the redirect, cleared once authorized
     createdAt: Instant,
-) derives Codec.AsObject
+) derives Codec.AsObject {
+
+  /** Whether the consent still lets us read the bank. A Pending connection is an authorization in progress, not a bank in use, so it is never
+    * reported. Consent end dates are fixed under PSD2: the only cure is a new login at the bank.
+    */
+  def health(now: Instant): ConnectionHealth = status match {
+    case ConnectionStatus.Pending                            => ConnectionHealth.Ok
+    case ConnectionStatus.Expired | ConnectionStatus.Revoked => ConnectionHealth.NeedsRenewal
+    case ConnectionStatus.Active                             =>
+      validUntil match {
+        case Some(until) if !until.isAfter(now) => ConnectionHealth.NeedsRenewal
+        case Some(until)                        =>
+          val days = java.time.Duration.between(now, until).toDays
+          if days < ConnectionHealth.warningDays then ConnectionHealth.ExpiresSoon(days) else ConnectionHealth.Ok
+        case None                               => ConnectionHealth.Ok
+      }
+  }
+}
+
+/** How urgently a bank connection needs a new login. */
+enum ConnectionHealth {
+  case Ok
+  case ExpiresSoon(daysLeft: Long) // whole days until the consent ends; 0 = ends today
+  case NeedsRenewal                // the bank no longer gives us data
+}
+
+object ConnectionHealth {
+
+  /** Days ahead of the consent end date that a renewal is offered. */
+  val warningDays: Long = 7
+}
 
 /** What an Enable Banking account's balance feeds into. A bank account either mirrors a single app [[Account]] directly, or contributes as a member
   * of a shared-limit [[CardGroup]] — mutually exclusive, so this is one sum type rather than several nullable ids.

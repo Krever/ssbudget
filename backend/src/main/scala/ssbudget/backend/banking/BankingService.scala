@@ -339,6 +339,7 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
     for {
       detailsE  <- client.getAccountDetails(link.ebAccountUid)
       balanceE  <- client.getBalances(link.ebAccountUid)
+      _         <- balanceE.left.toOption.traverse_(BankingService.expireIfSessionEnded(repos, link.connectionId, _))
       details    = detailsE.toOption
       balance    = balanceE.toOption
       label      = link.name.orElse(details.flatMap(_.name)).orElse(link.product).getOrElse(link.ebAccountUid.take(8))
@@ -397,5 +398,19 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
           _          <- targetAccts.traverse_(reconcileAccountSource)
           _          <- recomputeCardGroups
         } yield Right(())
+    }
+}
+
+object BankingService {
+
+  /** Records that the bank has ended a connection's session (revoke, password change, consent end), so the renewal banner shows it at once. Only an
+    * Active connection changes; the error decides, see [[EnableBankingClient.sessionEnded]].
+    */
+  def expireIfSessionEnded(repos: Repositories, connectionId: BankConnectionId, error: String): IO[Unit] =
+    IO.whenA(EnableBankingClient.sessionEnded(error)) {
+      repos.bankConnections.findById(connectionId).flatMap {
+        case Some(conn) if conn.status == ConnectionStatus.Active => repos.bankConnections.update(conn.copy(status = ConnectionStatus.Expired))
+        case _                                                    => IO.unit
+      }
     }
 }

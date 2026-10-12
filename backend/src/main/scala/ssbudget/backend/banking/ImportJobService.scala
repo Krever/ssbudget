@@ -144,27 +144,30 @@ class ImportJobService(
 
   private def runSyncAll(reporter: Reporter): IO[Unit] =
     for {
-      conns <- repos.bankConnections.findAll
-      active = conns.filter(_.sessionId.isDefined) // skip connections still pending authorization
-      _     <- active.traverse_ { conn =>
-                 val bank = conn.aspspName
-                 // Sync + import are attempted independently so one failing doesn't suppress the other; problems become warnings.
-                 for {
-                   syncE <- bankingService.sync(conn.id).handleError(t => Left(t.getMessage))
-                   _     <- syncE match {
-                              case Left(e)        => reporter.warn(bank, s"balance sync — $e")
-                              case Right(outcome) => outcome.warnings.traverse_(w => reporter.warn(bank, s"balance — $w"))
-                            }
-                   impE  <- importService
-                              .importTransactions(
-                                conn.id,
-                                ImportTransactionsRequest(None),
-                                onAccountStart = acct => reporter.itemRunning(bank, acct),
-                                onAccountDone = (acct, imp, skp) => reporter.itemDone(bank, acct, imp, skp),
-                              )
-                              .handleError(t => Left(t.getMessage))
-                   _     <- impE.left.toOption.traverse_(e => reporter.failConnection(bank, s"import — $e"))
-                 } yield ()
-               }
+      conns           <- repos.bankConnections.findAll
+      now             <- IO.realTimeInstant
+      // Skip connections still pending authorization. A lapsed consent fails every call: say once what to do instead of an error per account.
+      (lapsed, usable) = conns.filter(_.sessionId.isDefined).partition(_.health(now) == ConnectionHealth.NeedsRenewal)
+      _               <- lapsed.traverse_(c => reporter.warn(c.aspspName, "bank access has ended — renew it from the banner to sync again"))
+      _               <- usable.traverse_ { conn =>
+                           val bank = conn.aspspName
+                           // Sync + import are attempted independently so one failing doesn't suppress the other; problems become warnings.
+                           for {
+                             syncE <- bankingService.sync(conn.id).handleError(t => Left(t.getMessage))
+                             _     <- syncE match {
+                                        case Left(e)        => reporter.warn(bank, s"balance sync — $e")
+                                        case Right(outcome) => outcome.warnings.traverse_(w => reporter.warn(bank, s"balance — $w"))
+                                      }
+                             impE  <- importService
+                                        .importTransactions(
+                                          conn.id,
+                                          ImportTransactionsRequest(None),
+                                          onAccountStart = acct => reporter.itemRunning(bank, acct),
+                                          onAccountDone = (acct, imp, skp) => reporter.itemDone(bank, acct, imp, skp),
+                                        )
+                                        .handleError(t => Left(t.getMessage))
+                             _     <- impE.left.toOption.traverse_(e => reporter.failConnection(bank, s"import — $e"))
+                           } yield ()
+                         }
     } yield ()
 }

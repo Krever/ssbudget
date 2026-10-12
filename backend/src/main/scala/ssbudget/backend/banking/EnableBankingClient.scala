@@ -82,9 +82,7 @@ class EnableBankingClient(config: EnableBankingConfig, jwt: EnableBankingJwt, ba
   /** DELETE /sessions/{id} — revoke the consent at the bank. Best-effort. */
   def deleteSession(sessionId: String): IO[Either[String, Unit]] =
     jwt.token.flatMap { t =>
-      backend
-        .send(basicRequest.delete(buildUri(Seq("sessions", sessionId), Map.empty)).auth.bearer(t).response(asString))
-        .map(_.body.left.map(e => s"EB DELETE sessions/$sessionId failed: $e").map(_ => ()))
+      send(s"EB DELETE sessions/$sessionId", basicRequest.delete(buildUri(Seq("sessions", sessionId), Map.empty)).auth.bearer(t)).map(_.map(_ => ()))
     }
 
   private def buildUri(segments: Seq[String], params: Map[String, String]): Uri = {
@@ -94,28 +92,46 @@ class EnableBankingClient(config: EnableBankingConfig, jwt: EnableBankingJwt, ba
 
   private def get(segments: Seq[String], params: Map[String, String]): IO[Either[String, String]] =
     jwt.token.flatMap { t =>
-      backend
-        .send(basicRequest.get(buildUri(segments, params)).auth.bearer(t).response(asString))
-        .map(_.body.left.map(e => s"EB GET ${segments.mkString("/")} failed: $e"))
+      send(s"EB GET ${segments.mkString("/")}", basicRequest.get(buildUri(segments, params)).auth.bearer(t))
     }
 
   private def post(segments: Seq[String], body: Json): IO[Either[String, String]] =
     jwt.token.flatMap { t =>
-      backend
-        .send(
-          basicRequest
-            .post(buildUri(segments, Map.empty))
-            .auth
-            .bearer(t)
-            .contentType("application/json")
-            .body(body.noSpaces)
-            .response(asString),
-        )
-        .map(_.body.left.map(e => s"EB POST ${segments.mkString("/")} failed: $e"))
+      send(
+        s"EB POST ${segments.mkString("/")}",
+        basicRequest.post(buildUri(segments, Map.empty)).auth.bearer(t).contentType("application/json").body(body.noSpaces),
+      )
     }
+
+  /** Sends a request and reports every failure as a `Left`: an HTTP error with the bank's body, and also a transport failure (timeout, reset, TLS),
+    * which sttp raises as an exception whose own message ("Exception when sending request") hides the cause.
+    */
+  private def send(label: String, request: Request[Either[String, String], Any]): IO[Either[String, String]] =
+    backend
+      .send(request.response(asString))
+      .map(_.body.left.map(e => s"$label failed: $e"))
+      .handleError(t => Left(s"$label failed: ${describeFailure(t)}"))
 }
 
 object EnableBankingClient {
+
+  /** Enable Banking error codes that mean the consent is gone and only a new login at the bank brings the data back. */
+  private val sessionEndedCodes = List("CLOSED_SESSION", "EXPIRED_SESSION", "REVOKED_SESSION")
+
+  /** True when an error this client returned says the session has ended. Its HTTP errors hold the bank's JSON body, which names the code. */
+  def sessionEnded(error: String): Boolean = sessionEndedCodes.exists(error.contains)
+
+  /** The messages of a failure and of each cause below it, with the exception class where a message is missing, e.g. "Exception when sending request
+    * ← HttpTimeoutException: request timed out". The deepest cause is usually the one that says what happened.
+    */
+  def describeFailure(t: Throwable): String =
+    Iterator
+      .iterate(Option(t))(_.flatMap(c => Option(c.getCause)))
+      .takeWhile(_.isDefined)
+      .flatten
+      .take(5)
+      .map(c => Option(c.getMessage).filter(_.nonEmpty).fold(c.getClass.getSimpleName)(m => s"${c.getClass.getSimpleName}: $m"))
+      .mkString(" ← ")
 
   /** An account authorized within an Enable Banking session. Enable Banking's shape varies by bank, so all metadata besides the uid is optional. */
   final case class EbAccountRef(uid: String, name: Option[String], currency: Option[String], iban: Option[String])
