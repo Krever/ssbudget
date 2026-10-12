@@ -26,3 +26,10 @@ final case class CardGroup(
     if memberAvailableCents.isEmpty then None
     else Some(memberAvailableCents.sum - (memberAvailableCents.size - 1).toLong * limitCents)
 }
+
+object CardGroup {
+
+  /** The one rule for a shared limit: it must be positive. Create and edit, in the frontend and the backend, check it here. */
+  def validLimit(limitCents: Long): Either[String, Long] =
+    Either.cond(limitCents > 0, limitCents, "The limit must be greater than zero.")
+}

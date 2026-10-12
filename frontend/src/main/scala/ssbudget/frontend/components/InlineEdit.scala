@@ -34,10 +34,17 @@ object InlineEdit {
       tpe          := "number",
       stepAttr     := "0.01",
       placeholder  := placeholderText,
-      defaultValue := defaultCents.map(c => (c / 100.0).toString).getOrElse(""),
+      defaultValue := defaultCents.map(centsText).getOrElse(""),
       onMountCallback(ctx => refCallback(ctx.thisNode.ref.asInstanceOf[org.scalajs.dom.html.Input])),
       Option.when(autoFocus)(onMountFocus),
     )
+
+  /** Cents as the text a [[moneyInput]] shows (major units). The inverse of [[parseCentsOpt]]. */
+  def centsText(cents: Long): String = (cents / 100.0).toString
+
+  /** Blurring is what commits an inline cell, so Enter just leaves the field rather than duplicating the save. */
+  val commitOnEnter: Modifier[HtmlElement] =
+    onKeyDown.filter(_.key == "Enter") --> { ev => ev.target.asInstanceOf[org.scalajs.dom.html.Input].blur() }
 
   /** Cents from a [[moneyInput]] — 0 for anything unparseable, including a not-yet-mounted (and therefore null) ref. */
   def parseCents(input: org.scalajs.dom.html.Input): Long =

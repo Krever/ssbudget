@@ -28,6 +28,9 @@ final case class LinkCardGroupRequest(accountId: Option[AccountId]) derives Code
 /** Create a shared-limit credit-card group (initially unlinked; link it to an app account afterwards to feed the budget). */
 final case class CreateCardGroup(name: String, limitCents: Long, currency: Currency) derives Codec.AsObject
 
+/** Set a card group's shared limit. Use it when the bank changes the limit: the remaining-limit formula is only as correct as this value. */
+final case class UpdateCardGroupLimit(limitCents: Long) derives Codec.AsObject
+
 /** Import transactions for a connection. `monthsBack = None` = incremental (only newer than what we have); `Some(n)` = backfill the last n months. */
 final case class ImportTransactionsRequest(monthsBack: Option[Int]) derives Codec.AsObject
 

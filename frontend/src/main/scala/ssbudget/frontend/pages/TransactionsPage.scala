@@ -779,9 +779,6 @@ object TransactionsPage {
         },
       )
 
-    // Blurring is what commits an inline cell, so Enter just leaves the field rather than duplicating the save.
-    val commitOnEnter = onKeyDown.filter(_.key == "Enter") --> { ev => ev.target.asInstanceOf[dom.html.Input].blur() }
-
     /** The one enum dropdown. Options carry their wire value and their label; the current one is marked with `selected <--` rather than `value <--`
       * on the select, which would be applied before the options mount and fall back to the first one.
       */
@@ -828,7 +825,7 @@ object TransactionsPage {
         disabled <-- cat.map(!_.budget.derivesFromHistory),
         stored(cat)(_.budget.lookbackMonths)(_.map(_.toString).getOrElse("")),
         onBlur.mapToValue --> { v => editBudget(id)(_.copy(lookbackMonths = v.trim.toIntOption.filter(_ > 0))) },
-        commitOnEnter,
+        InlineEdit.commitOnEnter,
       )
 
     /** How many payments a Bill expects per period. Only a Bill counts payments, hence disabled for the other types. */
@@ -846,7 +843,7 @@ object TransactionsPage {
         onBlur.mapToValue --> { v =>
           editCategory(id)(c => c.copy(billPayments = v.trim.toIntOption.getOrElse(c.billPayments))) // the server clamps it
         },
-        commitOnEnter,
+        InlineEdit.commitOnEnter,
       )
 
     /** The typed-in figure and its Save button. The mirror of [[monthsInput]]: it only applies to a method that does NOT read history, so it's
@@ -857,7 +854,7 @@ object TransactionsPage {
       */
     def fixedControls(id: CategoryId, cat: Signal[Category]): List[HtmlElement] = {
       val draft          = Var("")
-      val storedText     = cat.map(_.budget.fixedCents).distinct.map(_.map(c => (c / 100.0).toString).getOrElse(""))
+      val storedText     = cat.map(_.budget.fixedCents).distinct.map(_.map(InlineEdit.centsText).getOrElse(""))
       def commit(): Unit = editBudget(id)(_.copy(fixedCents = InlineEdit.parseCentsOpt(draft.now())))
       val unsaved        = draft.signal.combineWith(cat).map { case (text, c) => InlineEdit.parseCentsOpt(text) != c.budget.fixedCents }
       // Two siblings rather than one input group: tests and the label find the field as a direct child of the labelled block.
@@ -873,7 +870,7 @@ object TransactionsPage {
             value <-- storedText,
             onInput.mapToValue --> draft.writer,
             onBlur --> { _ => commit() },
-            commitOnEnter,
+            InlineEdit.commitOnEnter,
             storedText --> draft.writer,
           ),
         button(

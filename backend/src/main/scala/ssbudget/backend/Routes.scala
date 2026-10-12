@@ -98,6 +98,7 @@ object Routes {
       route(Endpoints.banking.createCardGroup)(dto => bankingService.createCardGroup(dto)),
       route(Endpoints.banking.deleteCardGroup)(id => bankingService.deleteCardGroup(id)),
       route(Endpoints.banking.linkCardGroup) { case (id, req) => bankingService.linkCardGroup(id, req) },
+      route(Endpoints.banking.updateCardGroupLimit) { case (id, req) => bankingService.updateCardGroupLimit(id, req) },
       route(Endpoints.banking.importTransactions) { case (id, req) => importJobService.startImport(id, req).map(Right(_)) },
       // Background import/sync jobs (status, history, errors)
       route(Endpoints.jobs.list)(_ => importJobService.listRecent.map(Right(_))),

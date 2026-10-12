@@ -237,6 +237,11 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request((id, req))).map(handleResponse)
     }
 
+    def updateCardGroupLimit(id: CardGroupId, req: UpdateCardGroupLimit): Future[List[CardGroup]] = {
+      val request = interpreter.toRequest(Endpoints.client.banking.updateCardGroupLimit, Some(baseUri))
+      backend.send(request((id, req))).map(handleResponse)
+    }
+
     def importTransactions(id: BankConnectionId, req: ImportTransactionsRequest): Future[ImportJob] = {
       val request = interpreter.toRequest(Endpoints.client.banking.importTransactions, Some(baseUri))
       backend.send(request((id, req))).map(handleResponse)

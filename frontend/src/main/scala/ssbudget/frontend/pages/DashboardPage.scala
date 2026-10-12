@@ -2,7 +2,7 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
-import ssbudget.frontend.components.{Badges, Loading, PlanCard, TriageCard}
+import ssbudget.frontend.components.{Badges, InlineEdit, Loading, PlanCard, TriageCard}
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -319,7 +319,7 @@ object DashboardPage {
             cls          := "form-control form-control-sm text-end",
             tpe          := "number",
             stepAttr     := "0.01",
-            defaultValue := (account.balanceCents / 100.0).toString,
+            defaultValue := InlineEdit.centsText(account.balanceCents),
             onInput.mapToValue --> { v => v.toDoubleOption.foreach(d => editedBalances.update(_.updated(account.id, (d * 100).toLong))) },
           ),
           span(cls       := "input-group-text py-0", account.currency.code),

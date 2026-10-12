@@ -206,6 +206,13 @@ object Endpoints {
         .out(jsonBody[List[CardGroup]])
         .errorOut(stringBody)
 
+    val updateCardGroupLimit: Secured[(CardGroupId, UpdateCardGroupLimit), List[CardGroup]] =
+      secureEndpoint.put
+        .in("banking" / "card-groups" / path[CardGroupId]("id") / "limit")
+        .in(jsonBody[UpdateCardGroupLimit])
+        .out(jsonBody[List[CardGroup]])
+        .errorOut(stringBody)
+
     // Kicks off a background import and returns the tracked job immediately (Running). Poll `jobs.get` for progress/result.
     val importTransactions: Secured[(BankConnectionId, ImportTransactionsRequest), ImportJob] =
       secureEndpoint.post
@@ -433,6 +440,7 @@ object Endpoints {
     banking.createCardGroup,
     banking.deleteCardGroup,
     banking.linkCardGroup,
+    banking.updateCardGroupLimit,
     banking.importTransactions,
     jobs.list,
     jobs.get,
@@ -598,6 +606,13 @@ object Endpoints {
 
       val deleteCardGroup: Client[CardGroupId, Unit] =
         baseEndpoint.delete.in("banking" / "card-groups" / path[CardGroupId]("id")).errorOut(stringBody)
+
+      val updateCardGroupLimit: Client[(CardGroupId, UpdateCardGroupLimit), List[CardGroup]] =
+        baseEndpoint.put
+          .in("banking" / "card-groups" / path[CardGroupId]("id") / "limit")
+          .in(jsonBody[UpdateCardGroupLimit])
+          .out(jsonBody[List[CardGroup]])
+          .errorOut(stringBody)
 
       val linkCardGroup: Client[(CardGroupId, LinkCardGroupRequest), List[CardGroup]] =
         baseEndpoint.post

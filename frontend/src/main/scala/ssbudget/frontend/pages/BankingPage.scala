@@ -14,6 +14,7 @@ import ssbudget.shared.api.{
   ImportTransactionsRequest,
   LinkAccountRequest,
   LinkCardGroupRequest,
+  UpdateCardGroupLimit,
 }
 import ssbudget.shared.model.{
   Account,
@@ -168,6 +169,14 @@ object BankingPage {
       }
     }
 
+    def setGroupLimit(id: CardGroupId, limitCents: Long): Unit = {
+      errorVar.set(None)
+      apiClient.banking.updateCardGroupLimit(id, UpdateCardGroupLimit(limitCents)).onComplete {
+        case Success(gs) => cardGroupsVar.set(gs); loadAccounts()
+        case Failure(ex) => errorVar.set(Some(s"Failed to update card group limit: ${ex.getMessage}"))
+      }
+    }
+
     def createAndLinkGroup(groupId: CardGroupId, name: String, currency: Currency): Unit = {
       errorVar.set(None)
       apiClient.accounts.create(CreateAccount(name, currency, AccountRole.Spending)).onComplete {
@@ -253,7 +262,16 @@ object BankingPage {
         )
       }),
       connectCard(countryVar, aspspNameVar, aspspsVar, connectingVar, loadAspsps, connect),
-      cardGroupsCard(cardGroupsVar.signal, connectionsVar.signal, accountsVar.signal, createGroup, deleteGroup, linkGroup, createAndLinkGroup),
+      cardGroupsCard(
+        cardGroupsVar.signal,
+        connectionsVar.signal,
+        accountsVar.signal,
+        createGroup,
+        deleteGroup,
+        linkGroup,
+        setGroupLimit,
+        createAndLinkGroup,
+      ),
       child <-- loadingVar.signal.map { loading =>
         if loading then div(cls := "text-center py-3", div(cls := "spinner-border text-primary"))
         else
@@ -491,6 +509,7 @@ object BankingPage {
       createGroup: (String, Long, String) => Unit,
       deleteGroup: CardGroupId => Unit,
       linkGroup: (CardGroupId, Option[AccountId]) => Unit,
+      setGroupLimit: (CardGroupId, Long) => Unit,
       createAndLinkGroup: (CardGroupId, String, Currency) => Unit,
   ): HtmlElement = {
     val nameVar     = Var("")
@@ -500,14 +519,14 @@ object BankingPage {
 
     def submit(): Unit = {
       val name  = nameVar.now().trim
-      val cents = InlineEdit.parseCentsOpt(limitVar.now())
-      if name.isEmpty then formErrorV.set(Some("Enter a group name."))
-      else if cents.isEmpty then formErrorV.set(Some("Enter a valid limit amount, e.g. 10000."))
-      else {
-        formErrorV.set(None)
-        createGroup(name, cents.get, currencyVar.now().trim.toUpperCase)
-        nameVar.set("")
-        limitVar.set("")
+      val limit = InlineEdit.parseCentsOpt(limitVar.now()).toRight("Enter a valid limit amount, e.g. 10000.").flatMap(CardGroup.validLimit)
+      (if name.isEmpty then Left("Enter a group name.") else limit) match {
+        case Left(err)    => formErrorV.set(Some(err))
+        case Right(cents) =>
+          formErrorV.set(None)
+          createGroup(name, cents, currencyVar.now().trim.toUpperCase)
+          nameVar.set("")
+          limitVar.set("")
       }
     }
 
@@ -519,7 +538,8 @@ object BankingPage {
         p(
           cls := "text-muted small",
           "Cards that share one credit limit. Remaining limit = sum of the cards' available balances − (cards − 1) × limit. " +
-            "Link a group to one of your accounts (or create one) so the remaining limit counts toward your balance; assign your cards below, then Sync.",
+            "Link a group to one of your accounts (or create one) so the remaining limit counts toward your balance; assign your cards below, then Sync. " +
+            "The bank does not report the limit: when it changes, edit it here.",
         ),
         child <-- groups.combineWith(connections).combineWith(accounts).map { case (gs, conns, accs) =>
           if gs.isEmpty then p(cls := "text-muted mb-3", "No card groups yet.")
@@ -529,7 +549,7 @@ object BankingPage {
               thead(
                 tr(th("Group"), th(cls := "text-end", "Limit"), th(cls := "text-end", "Remaining"), th("Cards"), th("Mirror account"), th()),
               ),
-              tbody(gs.map(g => cardGroupRow(g, conns, accs, deleteGroup, linkGroup, createAndLinkGroup))),
+              tbody(gs.map(g => cardGroupRow(g, conns, accs, deleteGroup, linkGroup, setGroupLimit, createAndLinkGroup))),
             )
         },
         // New group form
@@ -572,6 +592,7 @@ object BankingPage {
       accounts: List[Account],
       deleteGroup: CardGroupId => Unit,
       linkGroup: (CardGroupId, Option[AccountId]) => Unit,
+      setGroupLimit: (CardGroupId, Long) => Unit,
       createAndLinkGroup: (CardGroupId, String, Currency) => Unit,
   ): HtmlElement = {
     val members    = conns.flatMap(_.accounts).filter(_.target == BankLinkTarget.CardGroupMember(g.id))
@@ -581,7 +602,27 @@ object BankingPage {
     val linkable   = accounts.filter(a => a.role == AccountRole.Spending && (a.balanceSource != BalanceSource.CardGroup || g.accountId.contains(a.id)))
     tr(
       td(strong(g.name)),
-      td(cls := "text-end font-monospace", MoneyFormatter.formatSimple(g.limitCents, g.currency)),
+      td(
+        cls  := "text-end",
+        // Edit in place: the bank does not report the limit, so a change at the bank must be typed here. Saves on blur or Enter.
+        div(
+          cls       := "d-inline-block",
+          styleAttr := "width: 8rem",
+          InlineEdit
+            .moneyInput(Some(g.limitCents), placeholderText = "Limit")
+            .amend(
+              cls := "font-monospace",
+              InlineEdit.commitOnEnter,
+              onBlur --> { ev =>
+                val in = ev.target.asInstanceOf[dom.html.Input]
+                InlineEdit.parseCentsOpt(in.value).flatMap(c => CardGroup.validLimit(c).toOption) match {
+                  case Some(c) => if c != g.limitCents then setGroupLimit(g.id, c)
+                  case None    => in.value = InlineEdit.centsText(g.limitCents) // reject: show the stored limit again
+                }
+              },
+            ),
+        ),
+      ),
       td(cls := "text-end font-monospace", remaining.map(r => MoneyFormatter.formatSimple(r, g.currency)).getOrElse("— sync —")),
       td(s"${members.size}"),
       td(

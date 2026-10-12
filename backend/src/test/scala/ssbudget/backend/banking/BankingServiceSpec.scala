@@ -5,7 +5,7 @@ import cats.syntax.all.*
 import ssbudget.backend.banking.EnableBankingClient.{EbAccountDetails, EbAccountRef, EbBalance, EbSession, EbTransactionsPage}
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.db.repository.RepositorySpec
-import ssbudget.shared.api.{BankCallbackRequest, CreateCardGroup, LinkAccountRequest, LinkCardGroupRequest}
+import ssbudget.shared.api.{BankCallbackRequest, CreateCardGroup, LinkAccountRequest, LinkCardGroupRequest, UpdateCardGroupLimit}
 import ssbudget.shared.model.*
 
 import java.time.{Instant, LocalDate}
@@ -45,6 +45,22 @@ class BankingServiceSpec extends RepositorySpec {
 
   private def link(id: String, connId: String, uid: String, currency: Option[Currency] = None, iban: Option[String] = None): BankAccountLink =
     BankAccountLink(BankAccountLinkId(id), BankConnectionId(connId), uid, BankLinkTarget.Unlinked, iban, None, currency, None, None, None, None)
+
+  /** A PLN card group of the given limit, its member cards (one per available balance, as last synced) and mirror account "acc-1", all linked. */
+  private def linkedCardGroup(svc: BankingService, repos: Repositories, limitCents: Long, availableCents: List[Long]): IO[CardGroupId] = {
+    val members = availableCents.zipWithIndex.map { case (cents, i) =>
+      link(s"l-$i", "c-1", s"uid-$i", Some(Currency.PLN)).copy(lastBalanceCents = Some(cents), lastBalanceCurrency = Some(Currency.PLN))
+    }
+    for {
+      _   <- repos.accounts.create(account("acc-1", Currency.PLN))
+      grp <- svc.createCardGroup(CreateCardGroup("PKO cards", limitCents, Currency.PLN))
+      gid  = grp.toOption.get.id
+      _   <- activeConnection(repos, "c-1")
+      _   <- members.traverse_(repos.bankConnections.createLink)
+      _   <- members.traverse_(m => svc.linkAccount(m.id, LinkAccountRequest(BankLinkTarget.CardGroupMember(gid))))
+      _   <- svc.linkCardGroup(gid, LinkCardGroupRequest(Some(AccountId("acc-1"))))
+    } yield gid
+  }
 
   private def pendingConnection(repos: Repositories, id: String, state: String): IO[Unit] =
     repos.bankConnections.create(
@@ -137,26 +153,44 @@ class BankingServiceSpec extends RepositorySpec {
   "linkCardGroup marks the account CardGroup-driven and recompute mirrors the remaining shared limit" in {
     val (svc, repos) = service()
     // Two cards, availables 6983.73 + 4470.60, shared limit 10000.00 -> remaining 1454.33 (145433 cents).
-    val members      = List(
-      link("l-1", "c-1", "uid-1", Some(Currency.PLN))
-        .copy(target = BankLinkTarget.Unlinked, lastBalanceCents = Some(698373), lastBalanceCurrency = Some(Currency.PLN)),
-      link("l-2", "c-1", "uid-2", Some(Currency.PLN))
-        .copy(target = BankLinkTarget.Unlinked, lastBalanceCents = Some(447060), lastBalanceCurrency = Some(Currency.PLN)),
-    )
     for {
-      _   <- repos.accounts.create(account("acc-1", Currency.PLN))
-      grp <- svc.createCardGroup(CreateCardGroup("PKO cards", 1000000, Currency.PLN))
-      gid  = grp.toOption.get.id
-      _   <- activeConnection(repos, "c-1")
-      _   <- members.traverse_(repos.bankConnections.createLink)
-      // Assign both cards to the group.
-      _   <- svc.linkAccount(BankAccountLinkId("l-1"), LinkAccountRequest(BankLinkTarget.CardGroupMember(gid)))
-      _   <- svc.linkAccount(BankAccountLinkId("l-2"), LinkAccountRequest(BankLinkTarget.CardGroupMember(gid)))
-      _   <- svc.linkCardGroup(gid, LinkCardGroupRequest(Some(AccountId("acc-1"))))
+      _   <- linkedCardGroup(svc, repos, 1000000, List(698373, 447060))
       acc <- repos.accounts.findById(AccountId("acc-1"))
     } yield {
       acc.map(_.balanceSource) shouldBe Some(BalanceSource.CardGroup)
       acc.map(_.balanceCents) shouldBe Some(145433)
+    }
+  }
+
+  "updateCardGroupLimit stores the new limit and recomputes the mirror from cached member balances, without a sync" in {
+    val (svc, repos) = service()
+    // The bank lowered the shared limit 10000 -> 9000. Availables 4251.22 + 4356.13: with 10000 the mirror reads -1392.65, with 9000 -392.65.
+    for {
+      gid    <- linkedCardGroup(svc, repos, 1000000, List(425122, 435613))
+      before <- repos.accounts.findById(AccountId("acc-1"))
+      res    <- svc.updateCardGroupLimit(gid, UpdateCardGroupLimit(900000))
+      after  <- repos.accounts.findById(AccountId("acc-1"))
+    } yield {
+      before.map(_.balanceCents) shouldBe Some(-139265)
+      res.map(_.map(_.limitCents)) shouldBe Right(List(900000L))
+      after.map(_.balanceCents) shouldBe Some(-39265)
+    }
+  }
+
+  "updateCardGroupLimit and createCardGroup reject a non-positive limit; update rejects an unknown group" in {
+    val (svc, _) = service()
+    for {
+      bad     <- svc.createCardGroup(CreateCardGroup("Bad", 0, Currency.PLN))
+      grp     <- svc.createCardGroup(CreateCardGroup("G", 100000, Currency.PLN))
+      gid      = grp.toOption.get.id
+      zero    <- svc.updateCardGroupLimit(gid, UpdateCardGroupLimit(0))
+      unknown <- svc.updateCardGroupLimit(CardGroupId("nope"), UpdateCardGroupLimit(100))
+      groups  <- svc.listCardGroups
+    } yield {
+      bad.isLeft shouldBe true
+      zero.isLeft shouldBe true
+      unknown.isLeft shouldBe true
+      groups.map(_.limitCents) shouldBe List(100000L)
     }
   }
 

@@ -12,6 +12,7 @@ trait CardGroupRepository {
   def findById(id: CardGroupId): IO[Option[CardGroup]]
   def findByAccount(accountId: AccountId): IO[Option[CardGroup]]
   def setAccount(id: CardGroupId, accountId: Option[AccountId]): IO[Unit]
+  def setLimit(id: CardGroupId, limitCents: Long): IO[Unit]
   def delete(id: CardGroupId): IO[Unit]
 }
 
@@ -37,6 +38,9 @@ class CardGroupRepositoryImpl(xa: Transactor[IO]) extends CardGroupRepository {
 
   override def setAccount(id: CardGroupId, accountId: Option[AccountId]): IO[Unit] =
     sql"UPDATE card_groups SET account_id = $accountId WHERE id = $id".update.run.transact(xa).void
+
+  override def setLimit(id: CardGroupId, limitCents: Long): IO[Unit] =
+    sql"UPDATE card_groups SET limit_cents = $limitCents WHERE id = $id".update.run.transact(xa).void
 
   override def delete(id: CardGroupId): IO[Unit] =
     sql"DELETE FROM card_groups WHERE id = $id".update.run.transact(xa).void

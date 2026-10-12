@@ -73,6 +73,7 @@ object TapirSchemas {
   given Schema[LinkAccountRequest]         = Schema.derived[LinkAccountRequest]
   given Schema[LinkCardGroupRequest]       = Schema.derived[LinkCardGroupRequest]
   given Schema[CreateCardGroup]            = Schema.derived[CreateCardGroup]
+  given Schema[UpdateCardGroupLimit]       = Schema.derived[UpdateCardGroupLimit]
   given Schema[ImportTransactionsRequest]  = Schema.derived[ImportTransactionsRequest]
   given Schema[AccountImportResult]        = Schema.derived[AccountImportResult]
   given Schema[ImportResult]               = Schema.derived[ImportResult]

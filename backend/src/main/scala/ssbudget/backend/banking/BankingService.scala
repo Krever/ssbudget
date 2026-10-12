@@ -207,10 +207,13 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
   def listCardGroups: IO[List[CardGroup]] = repos.cardGroups.findAll
 
   /** Creates an (initially unlinked) card group. Link it to an app account afterwards via [[linkCardGroup]] to feed the budget. */
-  def createCardGroup(req: CreateCardGroup): IO[Either[String, CardGroup]] = {
-    val group = CardGroup(CardGroupId(UUID.randomUUID().toString), req.name, req.limitCents, req.currency, None)
-    repos.cardGroups.create(group).as(Right(group))
-  }
+  def createCardGroup(req: CreateCardGroup): IO[Either[String, CardGroup]] =
+    CardGroup.validLimit(req.limitCents) match {
+      case Left(err)    => IO.pure(Left(err))
+      case Right(limit) =>
+        val group = CardGroup(CardGroupId(UUID.randomUUID().toString), req.name, limit, req.currency, None)
+        repos.cardGroups.create(group).as(Right(group))
+    }
 
   /** Links (or unlinks, when accountId is None) a card group to a user-chosen app account whose balance mirrors the remaining limit. Linking makes
     * that account CardGroup-driven; unlinking (or re-linking elsewhere) reverts the previous account to Manual so the user can edit it again.
@@ -226,6 +229,24 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
             for {
               _  <- repos.cardGroups.setAccount(id, req.accountId)
               _  <- affected.traverse_(reconcileAccountSource)
+              _  <- recomputeCardGroups
+              gs <- listCardGroups
+            } yield Right(gs)
+        }
+    }
+
+  /** Sets a card group's shared limit and recomputes the mirror account from the cached member balances, so the fix shows without a new sync. The
+    * bank does not give the limit to us, so the user must change it here each time the bank changes it.
+    */
+  def updateCardGroupLimit(id: CardGroupId, req: UpdateCardGroupLimit): IO[Either[String, List[CardGroup]]] =
+    CardGroup.validLimit(req.limitCents) match {
+      case Left(err)    => IO.pure(Left(err))
+      case Right(limit) =>
+        repos.cardGroups.findById(id).flatMap {
+          case None    => IO.pure(Left("Card group not found"))
+          case Some(_) =>
+            for {
+              _  <- repos.cardGroups.setLimit(id, limit)
               _  <- recomputeCardGroups
               gs <- listCardGroups
             } yield Right(gs)
