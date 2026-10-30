@@ -788,10 +788,14 @@ object BankingPage {
       link: (BankAccountLinkId, BankLinkTarget) => Unit,
       createAndLink: (BankAccountLinkId, String, Currency) => Unit,
   ): HtmlElement = {
-    val title      = l.name.orElse(l.product).getOrElse(l.ebAccountUid)
-    val currentVal = targetToValue(l.target)
+    val title                                 = l.name.orElse(l.product).getOrElse(l.ebAccountUid)
+    val currentVal                            = targetToValue(l.target)
+    // Offer only targets in the bank account's currency (all of them when the bank does not report one).
+    // The current target stays in the list, so an existing link with a different currency still shows.
+    def fits(c: Currency, isCurrent: Boolean) = isCurrent || l.currency.forall(_ == c)
     // A bank account cannot link to a card-group's own mirror account.
-    val linkable   = accounts.filter(_.balanceSource != BalanceSource.CardGroup)
+    val linkable                              = accounts.filter(a => a.balanceSource != BalanceSource.CardGroup && fits(a.currency, l.target == BankLinkTarget.Account(a.id)))
+    val groups                                = cardGroups.filter(g => fits(g.currency, l.target == BankLinkTarget.CardGroupMember(g.id)))
 
     val balanceCell = (l.lastBalanceCents, l.lastBalanceCurrency) match {
       case (Some(cents), Some(cur)) => span(cls := "font-monospace", MoneyFormatter.formatSimple(cents, cur))
@@ -819,7 +823,7 @@ object BankingPage {
               val label = if a.role == AccountRole.Savings then s"Savings: ${a.name} (${a.currency.code})" else s"${a.name} (${a.currency.code})"
               option(value := v, selected := (v == currentVal), label)
             },
-            cardGroups.map { g =>
+            groups.map { g =>
               val v = targetToValue(BankLinkTarget.CardGroupMember(g.id))
               option(value := v, selected := (v == currentVal), s"Card group: ${g.name}")
             },
