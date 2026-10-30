@@ -149,7 +149,9 @@ object Routes {
     val accountId = AccountId(UUID.randomUUID().toString)
     val now       = Instant.now()
     val account   = Account(accountId, dto.name, dto.currency, dto.role, 0L, BalanceSource.Manual, Some(now))
-    repos.accounts.create(account).as(Right(account))
+    // Record the opening zero balance. Without it, the first balance set later becomes the account's period-start baseline, and money
+    // put into a new account never shows as a change in the period it was added.
+    (repos.accounts.create(account) *> repos.accounts.setBalance(accountId, 0L, BalanceSource.Manual, now)).as(Right(account))
   }
 
   private def updateAccount(repos: Repositories)(id: AccountId, dto: UpdateAccount): Result[Account] = {
@@ -384,7 +386,10 @@ object Routes {
     val savingsDelta = savings.map { acc =>
       (balanceAt(acc, Some(p.startDate)), balanceAt(acc, p.endDate)) match {
         case (Some(start), Some(end)) => toPrimary(end - start, acc.currency)
-        // Nothing recorded before the period began, so what moved during it is unknowable — count zero rather than invent a baseline.
+        // First recorded during the period: the earliest snapshot is the baseline, as on the dashboard (see `savingsPeriodBaselines`). For an
+        // account made in the app, that is its opening zero, so the full balance counts as added in this period.
+        case (None, Some(end))        => snapshots.getOrElse(acc.id, Nil).lastOption.fold(0L)(first => toPrimary(end - first.amount, acc.currency))
+        // Nothing recorded by the period's end: the account did not exist yet.
         case _                        => 0L
       }
     }.sum
