@@ -231,7 +231,8 @@ object PeriodsPage {
     val projection = Option.when(s.ongoing)(FreeMoneyTrend.project(s.period, points)).flatten
     div(
       cls := "p-3 bg-light",
-      FreeMoneyChart(points, projection, s.currency).map { chart =>
+      // The second line is shown for a closed period too: it shows on which days the period went worse than its usual day.
+      FreeMoneyChart(points, projection, FreeMoneyTrend.projectionHistory(s.period, points), s.currency).map { chart =>
         div(
           cls       := "mb-3",
           // A width limit, because the plot stretches: at the full width of the table the line becomes too flat to read.

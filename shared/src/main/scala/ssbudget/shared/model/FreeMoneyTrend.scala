@@ -109,4 +109,34 @@ object FreeMoneyTrend {
       median  <- medianDailyChange(points)
       perDay   = math.min(0L, math.round(median))
     } yield FreeMoneyProjection(period.expectedEnd, perDay, last.cents + perDay * daysLeft)
+
+  /** The projected end of the period from each day, oldest first, with the usual daily change of the FULL record applied to each remaining day.
+    *
+    * The line moves only by the difference between a day and the usual day: it rises across days that were better than usual, falls across worse
+    * days, and is flat when the period goes as projected. Its last entry is equal to the current projection.
+    *
+    * It is not the projection that each day in fact gave. That one used only the days before it, and a test on the recorded periods showed that its
+    * day-to-day movement was as large as its error: it shows how the estimate settles, not how the period goes.
+    *
+    * Each day starts from its [[anchored]] value, thus money that came from outside the plan later in the period does not show as a step. Empty with
+    * fewer than [[MinDays]] points.
+    */
+  def projectionHistory(period: Period, points: List[FreeMoneyPoint]): List[(LocalDate, Long)] =
+    medianDailyChange(points).filter(_ => points.sizeIs >= MinDays).fold(Nil) { median =>
+      val perDay = math.min(0L, math.round(median))
+      anchored(points).map { case (day, cents) => day -> (cents + perDay * math.max(0, period.daysRemaining(day))) }
+    }
+
+  /** How much [[projectionHistory]] moved in the last `days` days: the day it is compared with, and the change. Positive says that these days were
+    * better than the usual day of the period.
+    *
+    * When the history is shorter than `days`, its first entry is the comparison. `None` with fewer than two entries.
+    */
+  def projectionChange(history: List[(LocalDate, Long)], days: Int = 7): Option[(LocalDate, Long)] =
+    history.lastOption.flatMap { case (lastDay, lastCents) =>
+      val earlier = history.init
+      earlier.filter { case (day, _) => !day.isAfter(lastDay.minusDays(days)) }.lastOption.orElse(earlier.headOption).map { case (day, cents) =>
+        day -> (lastCents - cents)
+      }
+    }
 }

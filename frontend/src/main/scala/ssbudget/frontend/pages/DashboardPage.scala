@@ -9,7 +9,7 @@ import ssbudget.frontend.{Page, Router}
 import ssbudget.shared.model.*
 
 import java.time.format.DateTimeFormatter
-import java.time.{Instant, ZoneOffset}
+import java.time.{Instant, LocalDate, ZoneOffset}
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Failure, Success}
@@ -35,13 +35,13 @@ object DashboardPage {
   private def loadFreeMoneyHistory(): Unit =
     api.periods.freeMoneyHistory().foreach(snapshots => freeMoneyHistory.set(FreeMoneyTrend.byPeriod(snapshots)))
 
-  /** The current period's points and their projection.
+  /** The current period's points, their projection, and the projected end from each day at the usual pace.
     *
     * Today's point is the live figure, not the stored row. The stored row is as old as the last fetch, and the live figure moves with each edit on
     * this page, so the line always ends on the headline's FREE value. The ledger terms of today are taken from the latest stored row: it changes only
     * when the bank is synced, and then the history is loaded again.
     */
-  private val freeMoneyTrend: Signal[Option[(List[FreeMoneyPoint], Option[FreeMoneyProjection], Currency)]] =
+  private val freeMoneyTrend: Signal[Option[(List[FreeMoneyPoint], Option[FreeMoneyProjection], List[(LocalDate, Long)], Currency)]] =
     freeMoneyHistory.signal.combineWith(dataService.currentPeriod).combineWith(dataService.freeMoney).map { case (history, periodOpt, free) =>
       periodOpt.map { period =>
         val today  = DataService.today
@@ -55,7 +55,7 @@ object DashboardPage {
           measured = true,
         )
         val points = stored.filter(_.day.isBefore(today)) :+ now
-        (points, FreeMoneyTrend.project(period, points), free.currency)
+        (points, FreeMoneyTrend.project(period, points), FreeMoneyTrend.projectionHistory(period, points), free.currency)
       }
     }
 
@@ -209,8 +209,8 @@ object DashboardPage {
         accountingRow("= Free money", dataService.freeMoney, positive = true, bold = true),
         // Below the arithmetic, not in it: the rows above are the plan, and this is where the plan goes if it continues to lose at its usual
         // daily rate. Absent until there are two days to draw.
-        child.maybe <-- freeMoneyTrend.map(_.flatMap { case (points, projection, currency) =>
-          FreeMoneyChart(points, projection, currency).map { chart =>
+        child.maybe <-- freeMoneyTrend.map(_.flatMap { case (points, projection, forecasts, currency) =>
+          FreeMoneyChart(points, projection, forecasts, currency).map { chart =>
             div(
               projection.map { p =>
                 div(
@@ -218,7 +218,19 @@ object DashboardPage {
                   dataAttr("projected-end") := p.endCents.toString,
                   title                     := "Free money now, plus the median daily change of this period for each remaining day. " +
                     "Savings transfers and unplanned income are not part of that change.",
-                  span("→ Projected at period end"),
+                  span(
+                    "→ Projected at period end",
+                    // Do the last days go better or worse than the projection expects? Green when the expected end moved up.
+                    FreeMoneyTrend.projectionChange(forecasts).map { case (since, change) =>
+                      span(
+                        cls                          := s"ms-2 small ${MoneyFormatter.amountCls(change)}",
+                        dataAttr("projected-change") := change.toString,
+                        title                        := "Change of the projected end across the last days, at the usual daily change. " +
+                          "Positive: these days were better than the usual day of this period.",
+                        s"${MoneyFormatter.formatSigned(change)} since ${Formatting.formatDay(since)}",
+                      )
+                    },
+                  ),
                   span(cls := MoneyFormatter.amountCls(p.endCents), MoneyFormatter.formatSimple(p.endCents, currency)),
                 )
               },

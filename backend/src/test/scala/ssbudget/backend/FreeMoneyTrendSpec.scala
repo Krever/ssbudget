@@ -89,6 +89,51 @@ class FreeMoneyTrendSpec extends AnyFreeSpec with Matchers {
     }
   }
 
+  "The history of the projection" - {
+    // June 1 to 8. The leak is 100 a day for five days, then 300 a day.
+    val points = daily(9000, 8900, 8800, 8700, 8600, 8300, 8000, 7700)
+
+    "has one entry for each day" in {
+      FreeMoneyTrend.projectionHistory(period, points).map(_._1) shouldBe points.map(_.day)
+    }
+
+    "is flat across usual days and falls across days that are worse" in {
+      // The usual day is -100. June 1 has 30 days left: 9000 - 3000. June 8 has 23 days left: 7700 - 2300.
+      FreeMoneyTrend.projectionHistory(period, points).map(_._2) shouldBe List(6000, 6000, 6000, 6000, 6000, 5800, 5600, 5400)
+    }
+
+    "ends on the current projection" in {
+      FreeMoneyTrend.projectionHistory(period, points).lastOption.map(_._2) shouldBe FreeMoneyTrend.project(period, points).map(_.endCents)
+    }
+
+    "does not step when money comes from outside the plan" in {
+      // On June 8, 5,000 comes from savings. The plan's own line does not see it, so the earlier entries move up with the last one.
+      val helped = points.init :+ FreeMoneyPoint(day("2026-06-08"), 12700, 7700, 5000, 0, measured = true)
+      FreeMoneyTrend.projectionHistory(period, helped).map(_._2) shouldBe
+        FreeMoneyTrend.projectionHistory(period, points).map(_._2 + 5000)
+    }
+
+    "is empty with too few days" in {
+      FreeMoneyTrend.projectionHistory(period, daily(9000, 8900, 8800, 8700)) shouldBe Nil
+    }
+  }
+
+  "The change of the projection" - {
+    def history(values: Long*): List[(LocalDate, Long)] = values.toList.zipWithIndex.map { case (cents, i) => day("2026-06-05").plusDays(i) -> cents }
+
+    "compares the last entry with the entry seven days before it" in {
+      FreeMoneyTrend.projectionChange(history(100, 200, 300, 400, 500, 600, 700, 800, 650)) shouldBe Some(day("2026-06-06") -> 450L)
+    }
+
+    "uses the first entry when the history is shorter" in {
+      FreeMoneyTrend.projectionChange(history(1000, 900, 700)) shouldBe Some(day("2026-06-05") -> -300L)
+    }
+
+    "is unknown with one entry" in {
+      FreeMoneyTrend.projectionChange(history(1000)) shouldBe None
+    }
+  }
+
   "Daily snapshots" - {
     "are grouped by period, oldest first, and days with no period are dropped" in {
       def snap(d: String, p: Option[String], spendable: Long, fromSavings: Long, source: SnapshotSource) =

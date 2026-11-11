@@ -91,6 +91,10 @@ projection) and on the Periods page (a row sparkline, and a chart in the expande
   with 5+ days. Chosen by backtest on the recorded periods: about half the error of "no change"; straight-line fits were too steep
   (large bills come early), and the median ignores them
 - The chart anchors the line so that it ends on the real free money of the last day
+- A second, thinner line (`FreeMoneyTrend.projectionHistory`) is the projected end from each day at the usual daily change of the full
+  record. It moves only by the difference between a day and the usual day, so it rises when the period goes better than projected. The
+  Dashboard also shows its change across the last 7 days. It is deliberately NOT the projection each day in fact gave: in a backtest
+  that one moved from day to day as much as its own error, mostly while the median settled
 
 ## Tech Stack
 
