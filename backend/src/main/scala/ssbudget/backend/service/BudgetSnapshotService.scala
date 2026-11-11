@@ -32,8 +32,18 @@ class BudgetSnapshotService(repos: Repositories) {
       now  <- IO.realTimeInstant
       today = LocalDate.ofInstant(now, ZoneOffset.UTC)
       due  <- daysDue(today)
-      _    <- IO.whenA(due.nonEmpty) {
-                load(due, today, now).flatMap(_.traverse_(w => repos.dailyBudgetSnapshots.recordAll(due.map(snapshot(w, _)))))
+      // Rows from before the outside-money terms existed. Those two terms come from the transactions alone, so they can be given to an old row
+      // without touching what was measured on its day.
+      bare <- repos.dailyBudgetSnapshots.datesWithoutOutsideTerms.map(_.toList.filterNot(due.contains))
+      days  = due ++ bare
+      _    <- IO.whenA(days.nonEmpty) {
+                load(days, today, now).flatMap(_.traverse_ { w =>
+                  repos.dailyBudgetSnapshots.recordAll(due.map(snapshot(w, _))) >>
+                    repos.dailyBudgetSnapshots.fillOutsideTerms(bare.map { day =>
+                      val (ledger, fromSavings, income) = outsideMoney(w, w.periodOn(day), day)
+                      (day, ledger, fromSavings, income)
+                    })
+                })
               }
     } yield ()
 
@@ -94,7 +104,10 @@ class BudgetSnapshotService(repos: Repositories) {
             // from the days being written.
             dailyAcc   <- if needsLedger then repos.bankTransactions.dailyNetByAccount(Instant.EPOCH, endOfDay(today)) else IO.pure(Nil)
             uidIndex   <- accountUidIndex
+            // From the start of the earliest period in play: the outside-money terms are cumulative within a period.
+            movements  <- repos.bankTransactions.dailyNetByAccountAndCategory(startOf(spendFrom), endOfDay(today))
           } yield {
+            val spending  = accounts.filter(_.role == AccountRole.Spending).map(_.id).toSet
             val rateTable = RateTable(primaryOpt.map(_.code).getOrElse(Currency.PLN), rates)
             Some(
               World(
@@ -119,7 +132,18 @@ class BudgetSnapshotService(repos: Repositories) {
                   }
                   .toMap,
                 // A card group's cards are several bank accounts feeding one app account, so re-key before grouping and they simply add up.
-                dailyByAccount = byDay(dailyAcc.flatMap { case (uid, cur, d, c) => uidIndex.get(uid).map((_, cur, d, c)) }, rateTable),
+                // In the ACCOUNT's currency, unconverted: these movements are added to a balance that is itself in that currency, and the total is
+                // converted once, afterwards. Converting here too would count a foreign movement at the square of its rate.
+                dailyByAccount = dailyAcc
+                  .flatMap { case (uid, _, d, c) => uidIndex.get(uid).map((_, LocalDate.parse(d), c)) }
+                  .groupBy(_._1)
+                  .view
+                  .mapValues(_.groupMapReduce(_._2)(_._3)(_ + _))
+                  .toMap,
+                movements = movements.map { case (uid, cur, d, category, internal, cents) =>
+                  val day = LocalDate.parse(d)
+                  Movement(day, onSpendingAccount = uidIndex.get(uid).exists(spending), category, internal, rateTable.convert(cents, cur, day))
+                },
               ),
             )
           }
@@ -152,8 +176,9 @@ class BudgetSnapshotService(repos: Repositories) {
     def total(role: AccountRole): Long =
       balances.collect { case (a, Some(cents)) if a.role == role => w.rates.convert(cents, a.currency, day) }.sum
 
-    val (toPay, toReceive) = plannedRemaining(w, period, day)
-    val budgets            = period.toList.flatMap(p => budgetRemainings(w, p, day))
+    val (toPay, toReceive)                     = plannedRemaining(w, period, day)
+    val budgets                                = period.toList.flatMap(p => budgetRemainings(w, p, day))
+    val (ledger, fromSavings, unplannedIncome) = outsideMoney(w, period, day)
 
     DailyBudgetSnapshot(
       onDate = day,
@@ -166,10 +191,42 @@ class BudgetSnapshotService(repos: Repositories) {
       budgetsToSpendCents = budgets.filter(_ > 0).sum,
       budgetsToReceiveCents = -budgets.filter(_ < 0).sum,
       savingsCents = total(AccountRole.Savings),
+      ledgerCents = ledger,
+      fromSavingsCents = fromSavings,
+      unplannedIncomeCents = unplannedIncome,
       daysRemaining = period.map(_.daysRemaining(day)),
       source = if day == w.today then SnapshotSource.Live else SnapshotSource.Reconstructed,
     )
   }
+
+  /** (ledger, from savings, unplanned income) accumulated in the period `day` falls in, up to `day`, in the primary currency.
+    *
+    * Both count from the day AFTER the period opened. The first day's row is the baseline that every later day is compared with, and the paycheck
+    * that opened the period arrives on that day — it is the reason the period exists, not a surprise.
+    *
+    * Ledger: every movement on a spending account, of any kind.
+    *
+    * From savings:
+    *   - an internal transfer seen on a spending account. Transfers between two spending accounts show both legs there and cancel; what is left came
+    *     from, or went to, an account that is not a spending account.
+    *   - a movement in a BUDGETED category on an account that is not a spending account. A bill paid directly from savings releases its budget while
+    *     the spendable balance does not fall, so free money rises by the bill — with savings money.
+    *
+    * Unplanned income: for each category that is not a budget (no category counts as one such group), the net of its movements on the spending
+    * accounts, where that net is positive. The net, not each inflow: a currency exchange filed under one category has an outflow and an inflow that
+    * cancel, and a refund only makes its category's spend smaller. Which categories are budgets is today's configuration, as everywhere in this
+    * service.
+    */
+  private def outsideMoney(w: World, period: Option[Period], day: LocalDate): (Long, Long, Long) =
+    period.fold((0L, 0L, 0L)) { p =>
+      val budgeted   = w.categories.filter(_.budgetType.isDefined).map(_.id).toSet
+      val inPeriod   = w.movements.filter(m => m.day.isAfter(p.startDay) && !m.day.isAfter(day))
+      val transfers  = inPeriod.filter(m => m.onSpendingAccount && m.internal).map(_.cents).sum
+      val paidFor    = inPeriod.filter(m => !m.onSpendingAccount && !m.internal && m.category.exists(budgeted)).map(_.cents).sum
+      val unbudgeted = inPeriod.filter(m => m.onSpendingAccount && !m.internal && !m.category.exists(budgeted))
+      val income     = unbudgeted.groupMapReduce(_.category)(_.cents)(_ + _).values.filter(_ > 0).sum
+      (inPeriod.filter(_.onSpendingAccount).map(_.cents).sum, transfers - paidFor, income)
+    }
 
   /** An account's balance at the end of `day`, in its own currency.
     *
@@ -293,6 +350,9 @@ object BudgetSnapshotService {
       new RateTable(primary, rates.filter(_.toCurrency == primary).groupBy(_.fromCurrency).view.mapValues(_.sortBy(_.fetchedAt.toEpochMilli)).toMap)
   }
 
+  /** One day's net movement on one bank account, in one category, in the primary currency. */
+  final private case class Movement(day: LocalDate, onSpendingAccount: Boolean, category: Option[CategoryId], internal: Boolean, cents: Long)
+
   /** Everything the per-day computation reads, loaded once per pass. */
   final private case class World(
       today: LocalDate,
@@ -308,7 +368,8 @@ object BudgetSnapshotService {
       monthlyByCat: Map[CategoryId, Map[String, Long]],              // "YYYY-MM" -> net spend
       dailyByCat: Map[CategoryId, Map[LocalDate, Long]],             // day -> net spend
       dailyCountsByCat: Map[CategoryId, Map[LocalDate, (Int, Int)]], // day -> (outflows, inflows)
-      dailyByAccount: Map[AccountId, Map[LocalDate, Long]],          // day -> signed movement
+      dailyByAccount: Map[AccountId, Map[LocalDate, Long]],          // day -> signed movement, in the account's currency
+      movements: List[Movement],                                     // since the start of the earliest period in play
   ) {
 
     /** The period `day` falls in: the last one that had started by then. Periods are contiguous, so that is also the one that had not yet ended. */

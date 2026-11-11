@@ -33,6 +33,15 @@ object SnapshotSource {
   *
   * @param savingsCents
   *   informational only. Moving money into a savings bucket already lowers `spendableCents`, so subtracting it again would double-count.
+  * @param ledgerCents
+  *   net of all movements on the spending accounts since the period's first day, by the bank ledger. It says what [[spendableCents]] did, but dated
+  *   as the two terms below are dated: a balance is read at a sync, a transaction has the bank's booking date, and they are often a day apart.
+  * @param fromSavingsCents
+  *   money that reached the plan from outside the spending accounts since the period's first day: a transfer in from savings, or a budgeted bill paid
+  *   directly from a savings account. Negative when money went to savings. Cumulative within the period.
+  * @param unplannedIncomeCents
+  *   income since the period's first day that no plan expected: the net inflow of each category that is not a budget, where that net is positive.
+  *   Cumulative within the period.
   * @param daysRemaining
   *   to the period's expected end; `None` when no period was open that day.
   */
@@ -47,6 +56,9 @@ final case class DailyBudgetSnapshot(
     budgetsToSpendCents: Long,
     budgetsToReceiveCents: Long,
     savingsCents: Long,
+    ledgerCents: Long,
+    fromSavingsCents: Long,
+    unplannedIncomeCents: Long,
     daysRemaining: Option[Int],
     source: SnapshotSource,
 ) derives Codec.AsObject {
@@ -61,4 +73,12 @@ final case class DailyBudgetSnapshot(
     * the two to each other.
     */
   def freeMoneyCents: Long = spendableCents + stillToReceiveCents - stillToPayCents
+
+  /** The level of the plan's own line: what the ledger moved, without the money from outside, set against what the plan still expects.
+    *
+    * Only its CHANGE from one day to the next has a meaning. It moves when the plan was wrong — spend that no budget covers, a budget that was too
+    * low — and it does not move when money comes from savings or an unplanned income arrives. It is built from the ledger and not from
+    * [[freeMoneyCents]], so that all its parts are dated the same way.
+    */
+  def planLineCents: Long = ledgerCents - fromSavingsCents - unplannedIncomeCents + stillToReceiveCents - stillToPayCents
 }

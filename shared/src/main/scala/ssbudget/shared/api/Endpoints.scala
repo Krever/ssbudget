@@ -135,6 +135,13 @@ object Endpoints {
         .in(query[Option[Int]]("limit"))
         .out(jsonBody[List[PeriodSummary]])
         .errorOut(stringBody)
+
+    /** The daily free-money terms of every recorded day, oldest first. The client groups them by period and draws the trend. */
+    val freeMoneyHistory: Secured[Unit, List[DailyBudgetSnapshot]] =
+      secureEndpoint.get
+        .in("periods" / "free-money-history")
+        .out(jsonBody[List[DailyBudgetSnapshot]])
+        .errorOut(stringBody)
   }
 
   object banking {
@@ -557,6 +564,9 @@ object Endpoints {
           .in(query[Option[Int]]("limit"))
           .out(jsonBody[List[PeriodSummary]])
           .errorOut(stringBody)
+
+      val freeMoneyHistory: Client[Unit, List[DailyBudgetSnapshot]] =
+        baseEndpoint.get.in("periods" / "free-money-history").out(jsonBody[List[DailyBudgetSnapshot]]).errorOut(stringBody)
     }
 
     object banking {

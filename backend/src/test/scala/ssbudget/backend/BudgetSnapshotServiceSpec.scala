@@ -87,6 +87,21 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
     insert.transact(xa).void
   }
 
+  private def tx(
+      id: String,
+      uid: String,
+      cents: Long,
+      currency: String,
+      day: LocalDate,
+      internal: Boolean,
+      category: Option[String],
+  ): ConnectionIO[Int] =
+    sql"""INSERT INTO bank_transactions
+            (id, connection_id, eb_account_uid, dedup_key, amount_cents, currency, status, booked_at, raw_json, imported_at, is_internal, category_id)
+          VALUES ($id, 'conn1', $uid, $id, $cents, $currency, 'booked', ${at(day, 0)}, '{}', ${at(
+        today,
+      )}, ${if internal then 1 else 0}, $category)""".update.run
+
   private def freeOn(service: BudgetSnapshotService, day: LocalDate): IO[DailyBudgetSnapshot] =
     service.componentsAsOf(day).map(_.getOrElse(fail(s"no components for $day")))
 
@@ -166,6 +181,98 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
           s.source shouldBe SnapshotSource.Live
           s.daysRemaining shouldBe Some(20) // the period opened 10 days ago and runs 30 days
         }
+      }
+    }
+  }
+
+  "A balance in a foreign currency" - {
+    "is carried through its transactions and converted once" in {
+      withFixture { (service, _, xa) =>
+        val setup = for {
+          _ <- sql"""INSERT INTO accounts (id, name, currency, role, balance_cents, balance_source, balance_updated_at)
+                     VALUES ('eur', 'Euro', 'EUR', 'spending', 30000, 'bank', ${at(today)})""".update.run
+          _ <- sql"""INSERT INTO bank_account_links (id, connection_id, eb_account_uid, link_target_kind, link_target_id)
+                     VALUES ('link-eur', 'conn1', 'uid-eur', 'account', 'eur')""".update.run
+          _ <- sql"""INSERT INTO balance_snapshots (id, account_id, amount, currency, recorded_at)
+                     VALUES ('snap-eur', 'eur', 10000, 'EUR', ${at(periodStart, 9)})""".update.run
+          _ <- tx("eur-in", "uid-eur", 20000, "EUR", periodStart.plusDays(3), internal = true, None)
+        } yield ()
+        for {
+          _      <- setup.transact(xa)
+          before <- freeOn(service, periodStart.plusDays(2))
+          after  <- freeOn(service, periodStart.plusDays(3))
+        } yield {
+          before.spendableCents shouldBe 100000L + 40000L // 100 EUR at 4.0
+          // 300 EUR at 4.0. Converting the 200 EUR movement before it is added to the EUR balance would count it at 16 PLN/EUR.
+          after.spendableCents shouldBe 100000L + 120000L
+        }
+      }
+    }
+  }
+
+  "Money from outside the plan" - {
+    // 'cat1' is a budget; 'pay' is a category with no budget.
+    def seedOutside(xa: Transactor[IO]): IO[Unit] =
+      (for {
+        _ <- sql"INSERT INTO categories (id, name, color) VALUES ('pay', 'Pay', '#888')".update.run
+        // The first day of the period is the baseline: the paycheck that opened it is not a surprise.
+        _ <- tx("o0", "uid1", 500000, "PLN", periodStart, internal = false, Some("pay"))
+        // Day 3: 200 PLN arrives from an account that is not a spending account.
+        _ <- tx("o1", "uid1", 20000, "PLN", periodStart.plusDays(3), internal = true, None)
+        // Day 4: an unplanned 700 PLN income, and a 50 PLN refund in a category that otherwise only spends.
+        _ <- tx("o2", "uid1", 70000, "PLN", periodStart.plusDays(4), internal = false, Some("pay"))
+        _ <- tx("o3", "uid1", -9000, "PLN", periodStart.plusDays(4), internal = false, None)
+        _ <- tx("o4", "uid1", 5000, "PLN", periodStart.plusDays(4), internal = false, None)
+        // Day 6: 300 PLN goes to savings.
+        _ <- tx("o5", "uid1", -30000, "PLN", periodStart.plusDays(6), internal = true, None)
+      } yield ()).transact(xa)
+
+    "counts transfers in and out of the spending accounts, from the day after the period opened" in {
+      withFixture { (service, _, xa) =>
+        for {
+          _    <- seedOutside(xa)
+          day1 <- freeOn(service, periodStart.plusDays(1))
+          day3 <- freeOn(service, periodStart.plusDays(3))
+          day6 <- freeOn(service, periodStart.plusDays(6))
+        } yield {
+          day1.fromSavingsCents shouldBe 0L
+          // The 200 PLN transfer, plus the 100 EUR budgeted spend of day 2 that was paid from an account outside the spending accounts.
+          day3.fromSavingsCents shouldBe 20000L + 40000L
+          day6.fromSavingsCents shouldBe 20000L + 40000L - 30000L
+        }
+      }
+    }
+
+    "counts as unplanned income only a category without a budget that brought in more than it took out" in {
+      withFixture { (service, _, xa) =>
+        for {
+          _    <- seedOutside(xa)
+          day3 <- freeOn(service, periodStart.plusDays(3))
+          day4 <- freeOn(service, periodStart.plusDays(4))
+        } yield {
+          day3.unplannedIncomeCents shouldBe 0L     // the paycheck of the first day is not counted
+          day4.unplannedIncomeCents shouldBe 70000L // the refund only makes the uncategorised spend smaller
+          // By day 4 the ledger moved +200 +700 -90 +50 = 860 PLN. Without the 200 PLN transfer, the 400 PLN bill that savings paid and the 700 PLN
+          // income, the plan's own money moved -440 PLN: that bill, and the net 40 PLN of spend that no budget covers.
+          day4.ledgerCents shouldBe 86000L
+          day4.planLineCents shouldBe -44000L + day4.stillToReceiveCents - day4.stillToPayCents
+        }
+      }
+    }
+
+    "is given to a row that was stored without it, and the row's measurement is kept" in {
+      withFixture { (service, repos, xa) =>
+        val day = periodStart.plusDays(4)
+        for {
+          _        <- seedOutside(xa)
+          measured <- freeOn(service, day).map(_.copy(source = SnapshotSource.Live, spendableCents = 123456L))
+          _        <- repos.dailyBudgetSnapshots.record(measured)
+          _        <- sql"UPDATE daily_budget_snapshots SET ledger_cents = NULL, from_savings_cents = NULL, unplanned_income_cents = NULL".update.run
+                        .transact(xa)
+          _        <- service.ensureUpToDate
+          stored   <- repos.dailyBudgetSnapshots.findByDate(day)
+        } yield stored.map(s => (s.spendableCents, s.ledgerCents, s.fromSavingsCents, s.unplannedIncomeCents, s.source)) shouldBe
+          Some((123456L, 86000L, 60000L, 70000L, SnapshotSource.Live))
       }
     }
   }

@@ -113,6 +113,12 @@ trait BankTransactionRepository {
     */
   def dailyNetByAccount(from: Instant, to: Instant): IO[List[(String, Currency, String, Long)]]
 
+  /** [[dailyNetByAccount]] split further by category and by whether the movement is an internal transfer:
+    * `(bank account uid, currency, day, category, internal, signed net)`. This is what tells money that the plan moved from money that reached it
+    * from outside — see [[ssbudget.shared.model.DailyBudgetSnapshot.fromSavingsCents]].
+    */
+  def dailyNetByAccountAndCategory(from: Instant, to: Instant): IO[List[(String, Currency, String, Option[CategoryId], Boolean, Long)]]
+
   /** Most recent booked_at for an account, for incremental imports (None when the account has no transactions yet). */
   def latestBookedAt(ebAccountUid: String): IO[Option[Instant]]
 
@@ -289,6 +295,16 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
           WHERE booked_at >= $from AND booked_at <= $to
           GROUP BY eb_account_uid, currency, d"""
       .query[(String, Currency, String, Long)]
+      .to[List]
+      .transact(xa)
+
+  override def dailyNetByAccountAndCategory(from: Instant, to: Instant): IO[List[(String, Currency, String, Option[CategoryId], Boolean, Long)]] =
+    sql"""SELECT eb_account_uid, currency, substr(booked_at, 1, 10) AS d, category_id, is_internal, SUM(amount_cents)
+          FROM bank_transactions
+          WHERE booked_at >= $from AND booked_at <= $to
+          GROUP BY eb_account_uid, currency, d, category_id, is_internal"""
+      .query[(String, Currency, String, Option[CategoryId], Int, Long)]
+      .map { case (uid, currency, day, category, internal, cents) => (uid, currency, day, category, internal != 0, cents) }
       .to[List]
       .transact(xa)
 

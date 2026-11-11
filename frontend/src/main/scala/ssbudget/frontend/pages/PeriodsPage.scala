@@ -1,12 +1,12 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
-import ssbudget.frontend.components.{Loading, LoadingState}
+import ssbudget.frontend.components.{FreeMoneyChart, Loading, LoadingState}
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
 import ssbudget.shared.api.{CategoryFilter, MonthFilter, PeriodCategorySpend, PeriodSummary}
-import ssbudget.shared.model.{Period, PeriodId}
+import ssbudget.shared.model.{FreeMoneyPoint, FreeMoneyTrend, Period, PeriodId}
 
 import java.time.LocalDate
 import scala.concurrent.Future
@@ -24,12 +24,16 @@ object PeriodsPage {
   def apply(apiClient: ApiClient): HtmlElement = {
     val summaries = Var[LoadingState[List[PeriodSummary]]](LoadingState.Loading)
     val expanded  = Var(Set.empty[PeriodId])
+    // Empty until it loads, and empty if it cannot load: the table is complete without the trend.
+    val freeMoney = Var(Map.empty[PeriodId, List[FreeMoneyPoint]])
 
-    def load(): Unit =
+    def load(): Unit = {
       apiClient.periods.summaries().onComplete {
         case Success(list) => summaries.set(LoadingState.Loaded(list))
         case Failure(ex)   => summaries.set(LoadingState.Error(ex.getMessage))
       }
+      apiClient.periods.freeMoneyHistory().foreach(snapshots => freeMoney.set(FreeMoneyTrend.byPeriod(snapshots)))
+    }
 
     div(
       cls := "container-fluid mt-3",
@@ -47,7 +51,7 @@ object PeriodsPage {
       ),
       // Closing a period rewrites the history below it, so the same action reloads the retrospective.
       currentPeriodCard(() => dataService.startNewPeriod().map(_ => load())),
-      periodHistoryCard(summaries.signal, expanded),
+      periodHistoryCard(summaries.signal, freeMoney.signal, expanded),
     )
   }
 
@@ -115,10 +119,14 @@ object PeriodsPage {
       div(cls := "fw-semibold", value),
     )
 
-  /** Columns: the disclosure caret + Start, Days, In, Out, Net, Planned, Savings, End balance. */
-  private val historyColumns = 9
+  /** Columns: the disclosure caret + Start, Days, In, Out, Net, Planned, Savings, End balance, Free money. */
+  private val historyColumns = 10
 
-  private def periodHistoryCard(summaries: Signal[LoadingState[List[PeriodSummary]]], expanded: Var[Set[PeriodId]]): HtmlElement =
+  private def periodHistoryCard(
+      summaries: Signal[LoadingState[List[PeriodSummary]]],
+      freeMoney: Signal[Map[PeriodId, List[FreeMoneyPoint]]],
+      expanded: Var[Set[PeriodId]],
+  ): HtmlElement =
     div(
       cls := "card",
       div(cls := "card-header py-2", div("Period History")),
@@ -136,21 +144,22 @@ object PeriodsPage {
               th(cls := "text-end", "Planned paid"),
               th(cls := "text-end", "Savings"),
               th(cls := "text-end", "End balance"),
+              th(cls := "text-end", title := "Free money on each day of the period, and its last value", "Free money"),
               th(cls := "pe-3", ""),
             ),
           ),
-          children <-- summaries.combineWith(expanded.signal).map {
-            case (LoadingState.Loading, _)         => List(messageBody("Loading period history…", "text-muted"))
-            case (LoadingState.Error(msg), _)      => List(messageBody(s"Couldn't load period history: $msg", "text-danger"))
-            case (LoadingState.Loaded(Nil), _)     => List(messageBody("No periods yet — start one above.", "text-muted"))
-            case (LoadingState.Loaded(list), open) =>
+          children <-- summaries.combineWith(expanded.signal).combineWith(freeMoney).map {
+            case (LoadingState.Loading, _, _)             => List(messageBody("Loading period history…", "text-muted"))
+            case (LoadingState.Error(msg), _, _)          => List(messageBody(s"Couldn't load period history: $msg", "text-danger"))
+            case (LoadingState.Loaded(Nil), _, _)         => List(messageBody("No periods yet — start one above.", "text-muted"))
+            case (LoadingState.Loaded(list), open, trend) =>
               // The Transactions page can only reproduce two windows — the current period and the one before it — so only those rows get a link out.
               val previousId = list.find(_.period.endDate.isDefined).map(_.period.id)
               list.map { s =>
                 val window =
                   if s.ongoing then Some(MonthFilter.CurrentPeriod)
                   else Option.when(previousId.contains(s.period.id))(MonthFilter.PreviousPeriod)
-                periodBody(s, open.contains(s.period.id), window, expanded)
+                periodBody(s, open.contains(s.period.id), window, expanded, trend)
               }
           },
         ),
@@ -166,7 +175,14 @@ object PeriodsPage {
     tbody(tr(td(colSpan := historyColumns, cls := s"p-3 small $textCls", text)))
 
   /** One period as its own `<tbody>`: the summary row, plus a detail row while it's expanded. */
-  private def periodBody(s: PeriodSummary, isExpanded: Boolean, linkWindow: Option[String], expanded: Var[Set[PeriodId]]): HtmlElement = {
+  private def periodBody(
+      s: PeriodSummary,
+      isExpanded: Boolean,
+      linkWindow: Option[String],
+      expanded: Var[Set[PeriodId]],
+      trend: Map[PeriodId, List[FreeMoneyPoint]],
+  ): HtmlElement = {
+    val points       = trend.getOrElse(s.period.id, Nil)
     val plannedLabel =
       if s.plannedTotal == 0 then "—"
       else s"${money(s.plannedPaidCents)} / ${money(s.plannedEstimateCents)}"
@@ -190,20 +206,51 @@ object PeriodsPage {
         td(cls := s"text-end font-monospace ${amountCls(s.savingsChangeCents)}", signed(s.savingsChangeCents)),
         td(cls := "text-end font-monospace", s.endBalanceCents.fold("—")(money)),
         td(
+          cls  := "text-end font-monospace text-nowrap",
+          FreeMoneyChart.mini(points),
+          points.lastOption.fold(span("—"))(p => span(cls := s"ms-2 ${amountCls(p.cents)}", money(p.cents))),
+        ),
+        td(
           cls  := "pe-3 text-end",
           if s.ongoing then span(cls := "badge text-bg-success", "Active") else span(cls := "badge text-bg-secondary", "Closed"),
         ),
       ),
-      if isExpanded then tr(td(colSpan := historyColumns, cls := "p-0", detailPanel(s, linkWindow))) else emptyNode,
+      if isExpanded then tr(td(colSpan := historyColumns, cls := "p-0", detailPanel(s, linkWindow, points))) else emptyNode,
     )
   }
 
   /** Expanded detail: how the plan was executed, and the categories the period's spend actually went to. `linkWindow` is the Transactions-page month
     * filter that reproduces this period's spend, when one exists.
     */
-  private def detailPanel(s: PeriodSummary, linkWindow: Option[String]): HtmlElement =
+  private def detailPanel(
+      s: PeriodSummary,
+      linkWindow: Option[String],
+      points: List[FreeMoneyPoint],
+  ): HtmlElement = {
+    // Only the running period has days left to project across. A closed period shows the record and nothing more.
+    val projection = Option.when(s.ongoing)(FreeMoneyTrend.project(s.period, points)).flatten
     div(
       cls := "p-3 bg-light",
+      FreeMoneyChart(points, projection, s.currency).map { chart =>
+        div(
+          cls       := "mb-3",
+          // A width limit, because the plot stretches: at the full width of the table the line becomes too flat to read.
+          styleAttr := "max-width: 40rem",
+          div(
+            cls   := "text-muted small text-uppercase mb-1",
+            title := "Free money without savings transfers and unplanned income, so the line shows only what the plan lost",
+            "Free money against the plan",
+          ),
+          chart,
+          // The two amounts the line leaves out. Money from savings is the sign that the plan did not hold.
+          points.lastOption.map { last =>
+            div(
+              cls := "small text-muted",
+              s"Left out of the line: ${signed(last.fromSavingsCents)} from savings · ${signed(last.unplannedIncomeCents)} unplanned income",
+            )
+          },
+        )
+      },
       div(
         cls := "row g-3",
         div(
@@ -235,6 +282,7 @@ object PeriodsPage {
         ),
       ),
     )
+  }
 
   private def categoryBar(c: PeriodCategorySpend, maxCents: Long): HtmlElement = {
     val pct   = if maxCents <= 0 then 0.0 else c.spentCents.toDouble / maxCents * 100.0

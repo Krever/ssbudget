@@ -1,6 +1,6 @@
 package ssbudget.frontend.util
 
-import java.time.{Instant, ZoneId}
+import java.time.{Instant, LocalDate, ZoneId}
 import java.time.format.DateTimeFormatter
 
 object Formatting {
@@ -28,6 +28,9 @@ object Formatting {
     val localDate = instant.atZone(zone).toLocalDate
     dateFormatter.format(localDate)
   }
+
+  /** A calendar day without the year (e.g. "Nov 10"). */
+  def formatDay(day: LocalDate): String = shortDateFormatter.format(day)
 
   def formatDateShort(instant: Instant): String = {
     val localDate = instant.atZone(zone).toLocalDate

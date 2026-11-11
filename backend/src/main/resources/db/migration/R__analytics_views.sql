@@ -84,6 +84,11 @@ FROM (
        + s.planned_to_receive_cents + s.budgets_to_receive_cents
        - s.planned_to_pay_cents     - s.budgets_to_spend_cents) * 1.0 / 100 AS free_money,
     s.savings_cents * 1.0 / 100                  AS savings,
+    -- Since the period's first day, by the bank ledger (see V26): what the spending accounts moved in all, and the part of it that came from
+    -- outside the plan. NULL-safe, because rows from before V26 have these empty until the app fills them.
+    COALESCE(s.ledger_cents, 0)           * 1.0 / 100 AS ledger,
+    COALESCE(s.from_savings_cents, 0)     * 1.0 / 100 AS from_savings,
+    COALESCE(s.unplanned_income_cents, 0) * 1.0 / 100 AS unplanned_income,
     -- Derived, not read from the stored `days_remaining` column: a period's expected end is editable, and a chart that kept the figure captured on
     -- the day would disagree with the Dashboard the moment a date was corrected. NULL with no period, exactly as the stored column was.
     CAST(julianday(p.expected_end) - julianday(s.on_date) AS INTEGER) AS days_remaining,

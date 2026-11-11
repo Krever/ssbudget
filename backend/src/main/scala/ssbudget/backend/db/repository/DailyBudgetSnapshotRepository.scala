@@ -34,6 +34,14 @@ trait DailyBudgetSnapshotRepository {
 
   /** Every row, oldest first. */
   def findAll: IO[List[DailyBudgetSnapshot]]
+
+  /** The days whose row was written before the outside-money terms existed, and so has none. */
+  def datesWithoutOutsideTerms: IO[Set[LocalDate]]
+
+  /** Give such rows their terms: `(day, ledger, from savings, unplanned income)`. A row that already has them is left as it is, and so is everything
+    * else in the row — a measured row stays measured.
+    */
+  def fillOutsideTerms(terms: List[(LocalDate, Long, Long, Long)]): IO[Unit]
 }
 
 class DailyBudgetSnapshotRepositoryImpl(xa: Transactor[IO]) extends DailyBudgetSnapshotRepository {
@@ -67,13 +75,22 @@ class DailyBudgetSnapshotRepositoryImpl(xa: Transactor[IO]) extends DailyBudgetS
   override def findAll: IO[List[DailyBudgetSnapshot]] =
     (columns ++ fr"ORDER BY on_date").query[DailyBudgetSnapshot].to[List].transact(xa)
 
-  private val columns = Fragment.const(s"SELECT $ColumnList FROM daily_budget_snapshots")
+  override def datesWithoutOutsideTerms: IO[Set[LocalDate]] =
+    sql"SELECT on_date FROM daily_budget_snapshots WHERE from_savings_cents IS NULL".query[LocalDate].to[List].transact(xa).map(_.toSet)
+
+  override def fillOutsideTerms(terms: List[(LocalDate, Long, Long, Long)]): IO[Unit] =
+    Update[(Long, Long, Long, LocalDate)](
+      "UPDATE daily_budget_snapshots SET ledger_cents = ?, from_savings_cents = ?, unplanned_income_cents = ? " +
+        "WHERE on_date = ? AND from_savings_cents IS NULL",
+    ).updateMany(terms.map { case (day, ledger, fromSavings, income) => (ledger, fromSavings, income, day) }).transact(xa).void
+
+  private val columns = Fragment.const(s"SELECT $SelectList FROM daily_budget_snapshots")
 }
 
 object DailyBudgetSnapshotRepositoryImpl {
 
   /** Column order, stated once: it is both what a row is read back as and what [[DailyBudgetSnapshot]]'s fields are written in. */
-  private val ColumnList =
+  private val Columns =
     List(
       "on_date",
       "captured_at",
@@ -85,9 +102,22 @@ object DailyBudgetSnapshotRepositoryImpl {
       "budgets_to_spend_cents",
       "budgets_to_receive_cents",
       "savings_cents",
+      "ledger_cents",
+      "from_savings_cents",
+      "unplanned_income_cents",
       "days_remaining",
       "source",
-    ).mkString(", ")
+    )
 
-  private val Placeholders = ColumnList.split(", ").map(_ => "?").mkString(", ")
+  private val ColumnList = Columns.mkString(", ")
+
+  /** A row from before the outside-money terms has NULL there until the service fills it; it reads as zero in the meantime. */
+  private val SelectList = Columns
+    .map {
+      case c @ ("ledger_cents" | "from_savings_cents" | "unplanned_income_cents") => s"COALESCE($c, 0)"
+      case c                                                                      => c
+    }
+    .mkString(", ")
+
+  private val Placeholders = Columns.map(_ => "?").mkString(", ")
 }

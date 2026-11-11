@@ -174,6 +174,11 @@ class ApiClient(implicit ec: ExecutionContext) {
       val request = interpreter.toRequest(Endpoints.client.periods.summaries, Some(baseUri))
       backend.send(request(limit)).map(handleResponse)
     }
+
+    def freeMoneyHistory(): Future[List[DailyBudgetSnapshot]] = {
+      val request = interpreter.toRequest(Endpoints.client.periods.freeMoneyHistory, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
   }
 
   object banking {

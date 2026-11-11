@@ -74,6 +74,24 @@ Where:
 - Savings is NOT subtracted: moving money to a savings bucket already lowers the spending balance, so reserving it again
   would double-count
 
+### Free Money Trend
+
+Free money is already a forecast of what is left at period end, so its line over a period shows how the plan was wrong, day by day.
+`FreeMoneyTrend` (shared) reads it from `daily_budget_snapshots`; `FreeMoneyChart` draws it on the Dashboard (current period, with a
+projection) and on the Periods page (a row sparkline, and a chart in the expanded row).
+
+- The line that is drawn and projected is the **plan's own line** (`DailyBudgetSnapshot.planLineCents`), not raw free money. Raw
+  free money also steps when money moves to or from savings and when unplanned income arrives; those steps say nothing about the plan
+  and no slope survives them. The plan's own line falls steadily in every recorded period
+- It is built from three ledger terms, cumulative from the day AFTER the period opened: `ledger` (all movement on spending accounts),
+  `fromSavings` (internal transfers seen on spending accounts, plus budgeted bills paid from a non-spending account) and
+  `unplannedIncome` (per category without a budget: its net, where positive). The line is `ledger − fromSavings − unplannedIncome +
+  stillToReceive − stillToPay`. It uses `ledger`, not `spendable`, because a balance and a booking date are often a day apart
+- Projection: current free money + the **median daily change** of the line × days left, never above the current value, and only
+  with 5+ days. Chosen by backtest on the recorded periods: about half the error of "no change"; straight-line fits were too steep
+  (large bills come early), and the median ignores them
+- The chart anchors the line so that it ends on the real free money of the last day
+
 ## Tech Stack
 
 | Layer       | Technology                               |
@@ -123,6 +141,7 @@ BalanceSnapshot:
 DailyBudgetSnapshot (table: daily_budget_snapshots):
   - one row per day: the TERMS of the free-money calculation, never the answer
   - spendable / plannedToPay / plannedToReceive / budgetsToSpend / budgetsToReceive / savings, daysRemaining
+  - ledger / fromSavings / unplannedIncome   -- cumulative since the period's first day, from the bank ledger (see Free Money Trend)
   - source (live|reconstructed)              -- measured that day, or rebuilt from the record later
   - free money is derived in `v_daily_budget`, so a dip can always be traced to the term that caused it
 

@@ -16,7 +16,7 @@ import ssbudget.backend.db.Repositories
 import ssbudget.backend.db.repository.{TransactionFilter, TransactionSearchRow}
 import ssbudget.backend.search.TransactionSearch
 import ssbudget.backend.service.BudgetQueries.*
-import ssbudget.backend.service.{CategorySummaryService, CurrencyService}
+import ssbudget.backend.service.{BudgetSnapshotService, CategorySummaryService, CurrencyService}
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 import ssbudget.shared.rules.RuleMatcher
@@ -47,6 +47,7 @@ object Routes {
   ): HttpRoutes[IO] = {
     val interpreter       = Http4sServerInterpreter[IO]()
     val categorySummaries = new CategorySummaryService(repos)
+    val budgetSnapshots   = new BudgetSnapshotService(repos)
 
     def validateSession(tokenOpt: Option[String]): IO[Either[String, Unit]] =
       AuthRoutes.validateSession(sessionService, tokenOpt, testMode)
@@ -75,6 +76,7 @@ object Routes {
       route(Endpoints.periods.startNew)(_ => startNewPeriod(repos)),
       route(Endpoints.periods.setExpectedEnd)((id, req) => setPeriodExpectedEnd(repos, id, req)),
       route(Endpoints.periods.summaries)(periodSummaries(repos)),
+      route(Endpoints.periods.freeMoneyHistory)(_ => freeMoneyHistory(repos, budgetSnapshots)),
       // Savings
       route(Endpoints.savings.periodBaselines)(_ => savingsPeriodBaselines(repos)),
       // Exchange rates (all rates to primary currency)
@@ -343,6 +345,16 @@ object Routes {
   /** How many periods the retrospective summarizes when the client doesn't ask for a number. Each period costs a handful of aggregate queries, so
     * this is capped rather than unbounded.
     */
+  /** The recorded days, brought up to date first.
+    *
+    * The usual writer is [[ssbudget.backend.service.BudgetSnapshotTrigger]], which runs AFTER a response and is throttled. Without the pass here, the
+    * first chart of the day would show the days before the quiet time and stop there. A pass that fails must not fail the chart: the rows already
+    * stored are still correct.
+    */
+  private def freeMoneyHistory(repos: Repositories, snapshots: BudgetSnapshotService): Result[List[DailyBudgetSnapshot]] =
+    snapshots.ensureUpToDate.handleErrorWith(e => IO.println(s"Daily budget snapshot failed: ${e.getMessage}")) >>
+      repos.dailyBudgetSnapshots.findAll.map(Right(_))
+
   private val periodSummaryDefaultCount = 12
 
   /** How many categories each period's spend breakdown lists. */

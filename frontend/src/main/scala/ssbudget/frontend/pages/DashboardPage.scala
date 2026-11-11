@@ -2,7 +2,7 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
-import ssbudget.frontend.components.{Badges, InlineEdit, Loading, PlanCard, TriageCard}
+import ssbudget.frontend.components.{Badges, FreeMoneyChart, InlineEdit, Loading, PlanCard, TriageCard}
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -29,6 +29,36 @@ object DashboardPage {
   private val syncingBanks      = Var(false)
   private val syncMessage       = Var(Option.empty[(Boolean, String)]) // result of the last sync: (ok, message)
 
+  /** The recorded free-money points of each period. Empty until the history loads, and empty if it cannot load: the page works without the chart. */
+  private val freeMoneyHistory = Var(Map.empty[PeriodId, List[FreeMoneyPoint]])
+
+  private def loadFreeMoneyHistory(): Unit =
+    api.periods.freeMoneyHistory().foreach(snapshots => freeMoneyHistory.set(FreeMoneyTrend.byPeriod(snapshots)))
+
+  /** The current period's points and their projection.
+    *
+    * Today's point is the live figure, not the stored row. The stored row is as old as the last fetch, and the live figure moves with each edit on
+    * this page, so the line always ends on the headline's FREE value. The ledger terms of today are taken from the latest stored row: it changes only
+    * when the bank is synced, and then the history is loaded again.
+    */
+  private val freeMoneyTrend: Signal[Option[(List[FreeMoneyPoint], Option[FreeMoneyProjection], Currency)]] =
+    freeMoneyHistory.signal.combineWith(dataService.currentPeriod).combineWith(dataService.freeMoney).map { case (history, periodOpt, free) =>
+      periodOpt.map { period =>
+        val today  = DataService.today
+        val stored = history.getOrElse(period.id, Nil)
+        val now    = FreeMoneyPoint(
+          today,
+          free.amountCents,
+          stored.lastOption.fold(0L)(_.planLineCents),
+          stored.lastOption.fold(0L)(_.fromSavingsCents),
+          stored.lastOption.fold(0L)(_.unplannedIncomeCents),
+          measured = true,
+        )
+        val points = stored.filter(_.day.isBefore(today)) :+ now
+        (points, FreeMoneyTrend.project(period, points), free.currency)
+      }
+    }
+
   /** When the balance was last driven by a bank sync (max over externally-sourced accounts). */
   private val lastSyncedAt: Signal[Option[Instant]] =
     dataService.accounts.map(_.filterNot(_.isManual).flatMap(_.balanceUpdatedAt).maxOption)
@@ -52,6 +82,7 @@ object DashboardPage {
         ()
       case Success(job)                                          =>
         dataService.initialize()
+        loadFreeMoneyHistory()
         syncingBanks.set(false)
         val base = s"Imported ${job.imported} new transaction(s)"
         syncMessage.set(job.message match {
@@ -67,7 +98,7 @@ object DashboardPage {
     div(
       cls := "container-fluid mt-3",
       // Refresh on each visit so changes made elsewhere (e.g. linking a bank account) are reflected without a manual page reload.
-      onMountCallback(_ => { dataService.initialize(); () }),
+      onMountCallback(_ => { dataService.initialize(); loadFreeMoneyHistory() }),
       div(
         cls := "d-flex justify-content-between align-items-center mb-3",
         h4(cls := "mb-0", "Dashboard"),
@@ -176,6 +207,25 @@ object DashboardPage {
         accountingRow("- Still to pay", dataService.stillToPay, positive = false),
         hr(cls := "my-1"),
         accountingRow("= Free money", dataService.freeMoney, positive = true, bold = true),
+        // Below the arithmetic, not in it: the rows above are the plan, and this is where the plan goes if it continues to lose at its usual
+        // daily rate. Absent until there are two days to draw.
+        child.maybe <-- freeMoneyTrend.map(_.flatMap { case (points, projection, currency) =>
+          FreeMoneyChart(points, projection, currency).map { chart =>
+            div(
+              projection.map { p =>
+                div(
+                  cls                       := "d-flex justify-content-between text-muted",
+                  dataAttr("projected-end") := p.endCents.toString,
+                  title                     := "Free money now, plus the median daily change of this period for each remaining day. " +
+                    "Savings transfers and unplanned income are not part of that change.",
+                  span("→ Projected at period end"),
+                  span(cls := MoneyFormatter.amountCls(p.endCents), MoneyFormatter.formatSimple(p.endCents, currency)),
+                )
+              },
+              div(cls := "mt-2", chart),
+            )
+          }
+        }),
       ),
     )
 
