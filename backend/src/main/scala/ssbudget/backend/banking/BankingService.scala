@@ -342,7 +342,6 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
       _         <- balanceE.left.toOption.traverse_(BankingService.expireIfSessionEnded(repos, link.connectionId, _))
       details    = detailsE.toOption
       balance    = balanceE.toOption
-      label      = link.name.orElse(details.flatMap(_.name)).orElse(link.product).getOrElse(link.ebAccountUid.take(8))
       // Merge fetched values over stored ones (never regress good data to None on a failed fetch).
       updated    = link.copy(
                      name = details.flatMap(_.name).orElse(link.name),
@@ -353,6 +352,7 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
                      lastBalanceCurrency = balance.map(b => Currency(b.currency)).orElse(link.lastBalanceCurrency),
                      lastSyncedAt = balance.map(_ => now).orElse(link.lastSyncedAt),
                    )
+      label      = updated.label
       _         <- repos.bankConnections.updateLinkSynced(updated)
       applyWarn <- (link.target, balanceE) match {
                      case (BankLinkTarget.Account(accountId), Right(bal)) =>

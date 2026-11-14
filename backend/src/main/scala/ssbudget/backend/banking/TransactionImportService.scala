@@ -29,14 +29,14 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
   private val defaultInitialDays = 30L // first-ever import window when we have no transactions for an account
   private val maxPages           = 50  // safety cap on continuation-key pagination
 
-  /** `onAccountStart(accountLabel)` fires before each account is imported and `onAccountDone(accountLabel, result)` after — so a caller (the job
-    * runner) can surface per-account progress, running counts and an incomplete fetch. Both default to no-ops.
+  /** `onAccountStart(link)` fires before each account is imported and `onAccountDone(link, result)` after — so a caller (the job runner) can surface
+    * per-account progress, running counts and an incomplete fetch. Both default to no-ops.
     */
   def importTransactions(
       connectionId: BankConnectionId,
       req: ImportTransactionsRequest,
-      onAccountStart: String => IO[Unit] = _ => IO.unit,
-      onAccountDone: (String, AccountImportResult) => IO[Unit] = (_, _) => IO.unit,
+      onAccountStart: BankAccountLink => IO[Unit] = _ => IO.unit,
+      onAccountDone: (BankAccountLink, AccountImportResult) => IO[Unit] = (_, _) => IO.unit,
   ): IO[Either[String, ImportResult]] =
     clientOpt match {
       case None         => IO.pure(Left(notConfigured))
@@ -52,10 +52,9 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
               scope    = req.monthsBack.fold("incremental (new only)")(n => s"backfill last $n month(s)")
               _       <- IO(log.info(s"[import] connection ${connectionId.value}: $scope over ${links.size} account(s)"))
               results <- links.traverse { link =>
-                           val lbl = accountLabel(link)
-                           onAccountStart(lbl) *>
+                           onAccountStart(link) *>
                              importAccount(client, connectionId, link, req.monthsBack, today, now)
-                               .flatTap(r => onAccountDone(lbl, r))
+                               .flatTap(r => onAccountDone(link, r))
                          }
               _       <- repos.bankTransactions.markInternalTransfers() // built-in rule: flag own-account transfers
               _       <- ruleEngine.applyRules()                        // then auto-categorize via user-defined rules
@@ -68,17 +67,6 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
             } yield Right(ImportResult(results))
         }
     }
-
-  /** Friendly account label for progress display. The job keys its items on this label, so it must be different for each account: banks send card
-    * accounts with an empty name, and those accounts would then share one item.
-    */
-  private def accountLabel(link: BankAccountLink): String = {
-    def filled(text: Option[String]): Option[String] = text.filter(_.trim.nonEmpty)
-    filled(link.name)
-      .orElse(filled(link.product))
-      .orElse(filled(link.iban).map(i => s"…${i.takeRight(4)}"))
-      .getOrElse(link.ebAccountUid.take(8))
-  }
 
   private def importAccount(
       client: EnableBankingApi,

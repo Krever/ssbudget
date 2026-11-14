@@ -144,4 +144,15 @@ final case class BankAccountLink(
     lastBalanceCents: Option[Long],
     lastBalanceCurrency: Option[Currency],
     lastSyncedAt: Option[Instant],
-) derives Codec.AsObject
+) derives Codec.AsObject {
+
+  /** The name to show for this bank account: its name, else its product, else the end of its IBAN, else the start of its uid.
+    *
+    * Blank values are skipped, because banks send card accounts with an empty name. The label is for display only and two accounts can have the same
+    * one; identity is [[ebAccountUid]].
+    */
+  def label: String = {
+    def filled(text: Option[String]): Option[String] = text.filter(_.trim.nonEmpty)
+    filled(name).orElse(filled(product)).orElse(filled(iban).map(i => s"…${i.takeRight(4)}")).getOrElse(ebAccountUid.take(8))
+  }
+}

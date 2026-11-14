@@ -13,6 +13,10 @@ object InMemoryDataService extends DataService {
 
   override def initialize(): Future[Unit] = Future.successful(())
 
+  // The mock keeps no daily record, so there is no trend to show.
+  override def freeMoneyHistory: Signal[Map[PeriodId, List[FreeMoneyPoint]]] = Val(Map.empty)
+  override def refreshFreeMoneyHistory(): Future[Unit]                       = Future.successful(())
+
   private val now           = Instant.now()
   private val tenDaysAgo    = now.minus(10, ChronoUnit.DAYS)
   private val thirtyDaysAgo = now.minus(30, ChronoUnit.DAYS)

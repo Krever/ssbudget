@@ -29,12 +29,6 @@ object DashboardPage {
   private val syncingBanks      = Var(false)
   private val syncMessage       = Var(Option.empty[(Boolean, String)]) // result of the last sync: (ok, message)
 
-  /** The recorded free-money points of each period. Empty until the history loads, and empty if it cannot load: the page works without the chart. */
-  private val freeMoneyHistory = Var(Map.empty[PeriodId, List[FreeMoneyPoint]])
-
-  private def loadFreeMoneyHistory(): Unit =
-    api.periods.freeMoneyHistory().foreach(snapshots => freeMoneyHistory.set(FreeMoneyTrend.byPeriod(snapshots)))
-
   /** The current period's points, their projection, and the projected end from each day at the usual pace.
     *
     * Today's point is the live figure, not the stored row. The stored row is as old as the last fetch, and the live figure moves with each edit on
@@ -42,7 +36,7 @@ object DashboardPage {
     * when the bank is synced, and then the history is loaded again.
     */
   private val freeMoneyTrend: Signal[Option[(List[FreeMoneyPoint], Option[FreeMoneyProjection], List[(LocalDate, Long)], Currency)]] =
-    freeMoneyHistory.signal.combineWith(dataService.currentPeriod).combineWith(dataService.freeMoney).map { case (history, periodOpt, free) =>
+    dataService.freeMoneyHistory.combineWith(dataService.currentPeriod).combineWith(dataService.freeMoney).map { case (history, periodOpt, free) =>
       periodOpt.map { period =>
         val today  = DataService.today
         val stored = history.getOrElse(period.id, Nil)
@@ -82,7 +76,7 @@ object DashboardPage {
         ()
       case Success(job)                                          =>
         dataService.initialize()
-        loadFreeMoneyHistory()
+        dataService.refreshFreeMoneyHistory()
         syncingBanks.set(false)
         val base = s"Imported ${job.imported} new transaction(s)"
         syncMessage.set(job.message match {
@@ -98,11 +92,7 @@ object DashboardPage {
     div(
       cls := "container-fluid mt-3",
       // Refresh on each visit so changes made elsewhere (e.g. linking a bank account) are reflected without a manual page reload.
-      onMountCallback(_ => { dataService.initialize(); loadFreeMoneyHistory() }),
-      // An edit on this page that changes the plan also changes the earlier days of the period on the server, so the history is loaded again.
-      // The two plan totals, not free money: a balance edit moves only today, and today is taken from the live figure. `distinct`, so that a
-      // visit that brings the same data does not load the history a second time. The short delay makes one load of a burst of changes.
-      dataService.stillToPay.combineWith(dataService.stillToReceive).distinct.changes.debounce(200) --> (_ => loadFreeMoneyHistory()),
+      onMountCallback(_ => { dataService.initialize(); dataService.refreshFreeMoneyHistory() }),
       div(
         cls := "d-flex justify-content-between align-items-center mb-3",
         h4(cls := "mb-0", "Dashboard"),

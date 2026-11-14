@@ -24,15 +24,13 @@ object PeriodsPage {
   def apply(apiClient: ApiClient): HtmlElement = {
     val summaries = Var[LoadingState[List[PeriodSummary]]](LoadingState.Loading)
     val expanded  = Var(Set.empty[PeriodId])
-    // Empty until it loads, and empty if it cannot load: the table is complete without the trend.
-    val freeMoney = Var(Map.empty[PeriodId, List[FreeMoneyPoint]])
 
     def load(): Unit = {
       apiClient.periods.summaries().onComplete {
         case Success(list) => summaries.set(LoadingState.Loaded(list))
         case Failure(ex)   => summaries.set(LoadingState.Error(ex.getMessage))
       }
-      apiClient.periods.freeMoneyHistory().foreach(snapshots => freeMoney.set(FreeMoneyTrend.byPeriod(snapshots)))
+      dataService.refreshFreeMoneyHistory()
     }
 
     div(
@@ -51,7 +49,7 @@ object PeriodsPage {
       ),
       // Closing a period rewrites the history below it, so the same action reloads the retrospective.
       currentPeriodCard(() => dataService.startNewPeriod().map(_ => load())),
-      periodHistoryCard(summaries.signal, freeMoney.signal, expanded),
+      periodHistoryCard(summaries.signal, dataService.freeMoneyHistory, expanded),
     )
   }
 

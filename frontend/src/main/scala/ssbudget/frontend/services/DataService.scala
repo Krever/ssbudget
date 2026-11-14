@@ -41,6 +41,16 @@ trait DataService {
     */
   def setPeriodExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Unit]
 
+  /** The recorded free-money points of each period (see [[FreeMoneyTrend]]). Empty until the first load, and empty when it cannot be loaded: the
+    * pages work without the chart.
+    */
+  def freeMoneyHistory: Signal[Map[PeriodId, List[FreeMoneyPoint]]]
+
+  /** Load [[freeMoneyHistory]] again. The pages that show it call this when they open and after a bank sync. The edits in this service that change
+    * the plan call it themselves, because the server then derives the earlier days of the open period again.
+    */
+  def refreshFreeMoneyHistory(): Future[Unit]
+
   // Exchange rates (currency code -> rate to primary currency)
   def exchangeRates: Signal[Map[Currency, Double]]
 

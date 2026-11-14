@@ -40,23 +40,24 @@ class ImportJobService(
         _    <- repos.importJobs.saveState(jobId, prog, its.map(_.imported).sum, its.map(_.skipped).sum, its, errs)
       } yield ()
 
-    private def upsert(connection: String, account: String)(f: ImportJobItem => ImportJobItem): IO[Unit] =
+    /** The item of one bank account, found by the account's uid. The label is only what the item shows: two accounts can have the same one. */
+    private def upsert(connection: String, link: BankAccountLink)(f: ImportJobItem => ImportJobItem): IO[Unit] = {
+      def same(i: ImportJobItem) = i.connection == connection && i.accountUid.contains(link.ebAccountUid)
       items.update { list =>
-        if list.exists(i => i.connection == connection && i.account == account) then list.map(i =>
-          if i.connection == connection && i.account == account then f(i) else i,
-        )
-        else list :+ f(ImportJobItem(connection, account, ImportItemStatus.Running, 0, 0, None))
+        if list.exists(same) then list.map(i => if same(i) then f(i) else i)
+        else list :+ f(ImportJobItem(connection, link.label, ImportItemStatus.Running, 0, 0, None, Some(link.ebAccountUid)))
       }
+    }
 
-    def itemRunning(connection: String, account: String): IO[Unit] =
-      progress.set(Some(s"$connection — $account")) *> upsert(connection, account)(_.copy(status = ImportItemStatus.Running)) *> persist
+    def itemRunning(connection: String, link: BankAccountLink): IO[Unit] =
+      progress.set(Some(s"$connection — ${link.label}")) *> upsert(connection, link)(_.copy(status = ImportItemStatus.Running)) *> persist
 
     /** An account whose fetch stopped early settles as Failed, with the counts of the pages that did arrive, and adds a warning to the job. */
-    def itemDone(connection: String, account: String, result: AccountImportResult): IO[Unit] = {
+    def itemDone(connection: String, link: BankAccountLink, result: AccountImportResult): IO[Unit] = {
       val status = if result.error.isDefined then ImportItemStatus.Failed else ImportItemStatus.Done
-      progress.set(Some(s"$connection — $account")) *>
-        upsert(connection, account)(_.copy(status = status, imported = result.imported, skipped = result.skipped, error = result.error)) *>
-        result.error.fold(persist)(e => warn(connection, s"$account — $e"))
+      progress.set(Some(s"$connection — ${link.label}")) *>
+        upsert(connection, link)(_.copy(status = status, imported = result.imported, skipped = result.skipped, error = result.error)) *>
+        result.error.fold(persist)(e => warn(connection, s"${link.label} — $e"))
     }
 
     /** A connection-level problem (balance sync, or an import that failed before/after per-account work): record a warning and mark any of that
@@ -139,8 +140,8 @@ class ImportJobService(
       .importTransactions(
         connectionId,
         req,
-        onAccountStart = acct => reporter.itemRunning(bank, acct),
-        onAccountDone = (acct, result) => reporter.itemDone(bank, acct, result),
+        onAccountStart = link => reporter.itemRunning(bank, link),
+        onAccountDone = (link, result) => reporter.itemDone(bank, link, result),
       )
       .flatMap {
         case Right(_)  => IO.unit
@@ -167,8 +168,8 @@ class ImportJobService(
                                         .importTransactions(
                                           conn.id,
                                           ImportTransactionsRequest(None),
-                                          onAccountStart = acct => reporter.itemRunning(bank, acct),
-                                          onAccountDone = (acct, result) => reporter.itemDone(bank, acct, result),
+                                          onAccountStart = link => reporter.itemRunning(bank, link),
+                                          onAccountDone = (link, result) => reporter.itemDone(bank, link, result),
                                         )
                                         .handleError(t => Left(t.getMessage))
                              _     <- impE.left.toOption.traverse_(e => reporter.failConnection(bank, s"import — $e"))

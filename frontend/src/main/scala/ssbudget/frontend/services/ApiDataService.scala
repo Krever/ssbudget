@@ -21,6 +21,24 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   private val categorySummariesVar: Var[List[CategorySummary]]    = Var(List.empty)
   private val savingsBaselinesVar: Var[Map[AccountId, Money]]     = Var(Map.empty) // per savings-account balance at period start, in account currency
 
+  private val freeMoneyHistoryVar: Var[Map[PeriodId, List[FreeMoneyPoint]]] = Var(Map.empty)
+
+  override def freeMoneyHistory: Signal[Map[PeriodId, List[FreeMoneyPoint]]] = freeMoneyHistoryVar.signal
+
+  override def refreshFreeMoneyHistory(): Future[Unit] =
+    client.periods
+      .freeMoneyHistory()
+      .map(snapshots => freeMoneyHistoryVar.set(FreeMoneyTrend.byPeriod(snapshots)))
+      // The chart is an addition to the page. When the history cannot be loaded, the last one stays.
+      .recover { case _ => () }
+
+  /** For an edit that changes the plan: when it is done, load the history again, and do not make the caller wait for that. */
+  private def replanned(edit: Future[Unit]): Future[Unit] =
+    edit.map { _ =>
+      refreshFreeMoneyHistory()
+      ()
+    }
+
   // Initialize by fetching all data from individual endpoints
   override def initialize(): Future[Unit] = {
     val accountsFut         = client.accounts.list()
@@ -108,10 +126,10 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     categorySummariesVar.signal.map(_.filter(_.category.budgetType.isDefined).sortBy(_.category.name))
 
   override def setCategoryBudgetOverride(categoryId: CategoryId, remainingCents: Long): Future[Unit] =
-    client.categories.setOverride(categoryId, SetCategoryOverrideRequest(remainingCents)).map(categorySummariesVar.set)
+    replanned(client.categories.setOverride(categoryId, SetCategoryOverrideRequest(remainingCents)).map(categorySummariesVar.set))
 
   override def clearCategoryBudgetOverride(categoryId: CategoryId): Future[Unit] =
-    client.categories.clearOverride(categoryId).map(categorySummariesVar.set)
+    replanned(client.categories.clearOverride(categoryId).map(categorySummariesVar.set))
 
   override def categoryPeriodTransactions(categoryId: CategoryId, limit: Int): Future[TransactionListResponse] =
     client.transactions.query(
@@ -138,10 +156,12 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     )
 
   override def setTransactionCategory(txId: BankTransactionId, categoryId: Option[CategoryId]): Future[Unit] =
-    client.transactions
-      .setCategory(txId, SetCategoryRequest(categoryId))
-      // The category budgets are derived from categorized spend, so the figures on screen are stale until they're re-read.
-      .flatMap(_ => client.categories.summaries().map(categorySummariesVar.set))
+    replanned(
+      client.transactions
+        .setCategory(txId, SetCategoryRequest(categoryId))
+        // The category budgets are derived from categorized spend, so the figures on screen are stale until they're re-read.
+        .flatMap(_ => client.categories.summaries().map(categorySummariesVar.set)),
+    )
 
   override def savingsBaselines: Signal[Map[AccountId, Money]] = savingsBaselinesVar.signal
 
@@ -159,7 +179,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     client.accounts.updateBalance(accountId, UpdateAccountBalance(amountCents)).map(upsertAccount)
 
   override def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long, currency: Currency): Future[Unit] = {
-    client.budgetItems.create(CreateBudgetItem(name, itemType, estimateCents, currency)).map { item =>
+    replanned(client.budgetItems.create(CreateBudgetItem(name, itemType, estimateCents, currency)).map { item =>
       budgetItemsVar.update(_ :+ item)
       getCurrentPeriod.foreach { period =>
         budgetRecordsVar.update { records =>
@@ -173,50 +193,50 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
           )
         }
       }
-    }
+    })
   }
 
   override def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long, currency: Currency): Future[Unit] = {
     val current = budgetItemsVar.now().find(_.id == itemId)
     current match {
       case Some(item) =>
-        client.budgetItems.update(itemId, UpdateBudgetItem(item.name, item.itemType, newEstimateCents, currency)).map { updated =>
+        replanned(client.budgetItems.update(itemId, UpdateBudgetItem(item.name, item.itemType, newEstimateCents, currency)).map { updated =>
           budgetItemsVar.update(items => items.map(i => if i.id == itemId then updated else i))
-        }
+        })
       case None       => Future.failed(new Exception(s"Budget item not found: $itemId"))
     }
   }
 
   override def deleteBudgetItem(itemId: ExpenseDefId): Future[Unit] = {
-    client.budgetItems.delete(itemId).map { _ =>
+    replanned(client.budgetItems.delete(itemId).map { _ =>
       budgetItemsVar.update(_.filterNot(_.id == itemId))
       budgetRecordsVar.update(_.filterNot(_.expenseDefId == itemId))
-    }
+    })
   }
 
   override def payBudgetItem(itemId: ExpenseDefId, amountCents: Long, settle: Boolean): Future[Unit] = {
-    client.expenseRecords.pay(itemId, PayBudgetItem(amountCents, settle)).map { record =>
+    replanned(client.expenseRecords.pay(itemId, PayBudgetItem(amountCents, settle)).map { record =>
       budgetRecordsVar.update { records =>
         records.map(r => if r.expenseDefId == itemId && r.periodId == record.periodId then record else r)
       }
-    }
+    })
   }
 
   override def resetBudgetItemPayment(itemId: ExpenseDefId): Future[Unit] = {
-    client.expenseRecords.unpay(itemId).map { record =>
+    replanned(client.expenseRecords.unpay(itemId).map { record =>
       budgetRecordsVar.update { records =>
         records.map(r => if r.expenseDefId == itemId && r.periodId == record.periodId then record else r)
       }
-    }
+    })
   }
 
   override def setPeriodExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Unit] =
-    client.periods.setExpectedEnd(id, expectedEnd).map { updated =>
+    replanned(client.periods.setExpectedEnd(id, expectedEnd).map { updated =>
       periodsVar.update(DataService.upsertById(_, updated)(_.id))
-    }
+    })
 
   override def startNewPeriod(): Future[Unit] = {
-    client.periods.startNew().map { newPeriod =>
+    replanned(client.periods.startNew().map { newPeriod =>
       periodsVar.update { ps =>
         ps.map { p =>
           if p.endDate.isEmpty then p.copy(endDate = Some(Instant.now()))
@@ -236,7 +256,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
           )
         },
       )
-    }
+    })
   }
 
   override def addSavingsAccount(name: String, currency: Currency): Future[Unit] =

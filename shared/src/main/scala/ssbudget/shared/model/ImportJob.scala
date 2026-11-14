@@ -78,7 +78,10 @@ object ImportItemStatus {
   given Codec[ImportItemStatus] = EnumCodec(values, asString, "import item status")
 }
 
-/** One account's slice of an import run — the drill-down unit. `imported`/`skipped` are this account's own transaction counts. */
+/** One account's slice of an import run — the drill-down unit. `imported`/`skipped` are this account's own transaction counts.
+  *
+  * `account` is the label to show. `accountUid` is the identity of the item; it is absent on jobs stored before it existed.
+  */
 final case class ImportJobItem(
     connection: String,
     account: String,
@@ -86,6 +89,7 @@ final case class ImportJobItem(
     imported: Int,
     skipped: Int,
     error: Option[String],
+    accountUid: Option[String] = None,
 ) derives Codec.AsObject
 
 /** A tracked background import/sync run. Persisted so the history + stats survive restarts.

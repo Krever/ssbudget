@@ -291,7 +291,7 @@ object TransactionsPage {
   }
 
   private def accountLabel(conns: List[BankConnectionView], uid: String): String =
-    conns.flatMap(_.accounts).find(_.ebAccountUid == uid).flatMap(l => l.name.orElse(l.product)).getOrElse(uid.take(8) + "…")
+    conns.flatMap(_.accounts).find(_.ebAccountUid == uid).fold(uid.take(8) + "…")(_.label)
 
   /** Trigger a browser download of `content` as `filename` (used to save the rules export as a JSON file). */
   private def downloadJson(filename: String, content: String): Unit = {

@@ -788,7 +788,7 @@ object BankingPage {
       link: (BankAccountLinkId, BankLinkTarget) => Unit,
       createAndLink: (BankAccountLinkId, String, Currency) => Unit,
   ): HtmlElement = {
-    val title                                 = l.name.orElse(l.product).getOrElse(l.ebAccountUid)
+    val title                                 = l.label
     val currentVal                            = targetToValue(l.target)
     // Offer only targets in the bank account's currency (all of them when the bank does not report one).
     // The current target stays in the list, so an existing link with a different currency still shows.
