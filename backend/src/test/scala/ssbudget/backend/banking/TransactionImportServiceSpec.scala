@@ -87,6 +87,33 @@ class TransactionImportServiceSpec extends RepositorySpec {
     }
   }
 
+  "a page that fails keeps the earlier pages and reports the account as incomplete" in {
+    val pages = paged(List(List(ebTx(Some("r1"), -1000, now), ebTx(Some("r2"), -2000, now)), List(ebTx(Some("r3"), 3000, now))))
+    val fake  = new PagingFakeEb(Map("uid-1" -> pages)) {
+      override def getTransactions(accountUid: String, dateFrom: LocalDate, dateTo: LocalDate, continuationKey: Option[String]) =
+        if continuationKey.isDefined then IO.pure(Left("EB GET accounts/uid-1/transactions failed: 429"))
+        else super.getTransactions(accountUid, dateFrom, dateTo, continuationKey)
+    }
+    for {
+      (svc, repos) <- setup(fake)
+      reported     <- IO.ref(List.empty[ssbudget.shared.api.AccountImportResult])
+      res          <- svc.importTransactions(
+                        BankConnectionId("c-1"),
+                        ImportTransactionsRequest(None),
+                        onAccountDone = (_, r) => reported.update(_ :+ r),
+                      )
+      stored       <- repos.bankTransactions.list(Some("uid-1"), None, None)
+      seen         <- reported.get
+    } yield {
+      stored.size shouldBe 2
+      val account = res.toOption.get.accounts.head
+      account.imported shouldBe 2
+      account.error.get should include("stopped after 1 page(s)")
+      account.error.get should include("429")
+      seen shouldBe List(account)
+    }
+  }
+
   "re-importing the same transactions is a no-op (idempotent)" in {
     val fake = new PagingFakeEb(Map("uid-1" -> paged(List(List(ebTx(Some("r1"), -1000, now), ebTx(Some("r2"), -2000, now))))))
     for {

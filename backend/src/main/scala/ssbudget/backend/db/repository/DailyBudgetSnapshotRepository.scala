@@ -13,6 +13,9 @@ import java.time.LocalDate
   *
   * Writes go through [[recordAll]], which encodes the one precedence rule: a measurement is never replaced by an inference. Today's row is rewritten
   * as the day moves; an earlier day, once filled in, stays as it is.
+  *
+  * The one exception is [[rederive]]: the terms in [[DerivedTerms]] are not measurements, and the days of the open period follow the record and the
+  * configuration as they are now.
   */
 trait DailyBudgetSnapshotRepository {
 
@@ -42,6 +45,11 @@ trait DailyBudgetSnapshotRepository {
     * else in the row — a measured row stays measured.
     */
   def fillOutsideTerms(terms: List[(LocalDate, Long, Long, Long)]): IO[Unit]
+
+  /** Replace the derived terms of existing rows. The balances and the source of a row are not touched, so a measured row keeps what was measured. A
+    * row whose terms are already equal is not written.
+    */
+  def rederive(terms: List[DerivedTerms]): IO[Unit]
 }
 
 class DailyBudgetSnapshotRepositoryImpl(xa: Transactor[IO]) extends DailyBudgetSnapshotRepository {
@@ -84,8 +92,40 @@ class DailyBudgetSnapshotRepositoryImpl(xa: Transactor[IO]) extends DailyBudgetS
         "WHERE on_date = ? AND from_savings_cents IS NULL",
     ).updateMany(terms.map { case (day, ledger, fromSavings, income) => (ledger, fromSavings, income, day) }).transact(xa).void
 
+  override def rederive(terms: List[DerivedTerms]): IO[Unit] =
+    // `IS NOT`, because the three ledger columns of an old row can be NULL. The comparison keeps the steady state, where nothing changed, free of
+    // writes.
+    terms
+      .traverse_ { t =>
+        sql"""UPDATE daily_budget_snapshots
+            SET planned_to_pay_cents = ${t.plannedToPayCents}, planned_to_receive_cents = ${t.plannedToReceiveCents},
+                budgets_to_spend_cents = ${t.budgetsToSpendCents}, budgets_to_receive_cents = ${t.budgetsToReceiveCents},
+                ledger_cents = ${t.ledgerCents}, from_savings_cents = ${t.fromSavingsCents}, unplanned_income_cents = ${t.unplannedIncomeCents}
+            WHERE on_date = ${t.day}
+              AND (planned_to_pay_cents IS NOT ${t.plannedToPayCents} OR planned_to_receive_cents IS NOT ${t.plannedToReceiveCents}
+                OR budgets_to_spend_cents IS NOT ${t.budgetsToSpendCents} OR budgets_to_receive_cents IS NOT ${t.budgetsToReceiveCents}
+                OR ledger_cents IS NOT ${t.ledgerCents} OR from_savings_cents IS NOT ${t.fromSavingsCents}
+                OR unplanned_income_cents IS NOT ${t.unplannedIncomeCents})""".update.run
+      }
+      .transact(xa)
+      .unlessA(terms.isEmpty)
+
   private val columns = Fragment.const(s"SELECT $SelectList FROM daily_budget_snapshots")
 }
+
+/** The terms of one day that are computed from the record (the plan, the budgets, the bank ledger) and today's configuration, as opposed to the
+  * balances, which are read on the day.
+  */
+final case class DerivedTerms(
+    day: LocalDate,
+    plannedToPayCents: Long,
+    plannedToReceiveCents: Long,
+    budgetsToSpendCents: Long,
+    budgetsToReceiveCents: Long,
+    ledgerCents: Long,
+    fromSavingsCents: Long,
+    unplannedIncomeCents: Long,
+)
 
 object DailyBudgetSnapshotRepositoryImpl {
 

@@ -99,6 +99,10 @@ object DashboardPage {
       cls := "container-fluid mt-3",
       // Refresh on each visit so changes made elsewhere (e.g. linking a bank account) are reflected without a manual page reload.
       onMountCallback(_ => { dataService.initialize(); loadFreeMoneyHistory() }),
+      // An edit on this page that changes the plan also changes the earlier days of the period on the server, so the history is loaded again.
+      // The two plan totals, not free money: a balance edit moves only today, and today is taken from the live figure. `distinct`, so that a
+      // visit that brings the same data does not load the history a second time. The short delay makes one load of a burst of changes.
+      dataService.stillToPay.combineWith(dataService.stillToReceive).distinct.changes.debounce(200) --> (_ => loadFreeMoneyHistory()),
       div(
         cls := "d-flex justify-content-between align-items-center mb-3",
         h4(cls := "mb-0", "Dashboard"),

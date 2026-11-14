@@ -3,6 +3,7 @@ package ssbudget.backend.service
 import cats.effect.IO
 import cats.syntax.all.*
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.db.repository.DerivedTerms
 import ssbudget.shared.api.CategorySummary
 import ssbudget.shared.model.*
 
@@ -19,32 +20,42 @@ import java.time.{Instant, LocalDate, ZoneOffset}
   * Reconstruction is exact in level and approximate in timing: balances are carried between bank syncs by the transaction ledger and category budgets
   * are recomputed from the transactions themselves, but a planned item records only the date of its LAST payment, so instalments step down once
   * rather than in stages. Rows say which they are via [[SnapshotSource]].
+  *
+  * The days of the OPEN period follow the record and the configuration as they are now. On each pass, all terms of those days that are not balances
+  * ([[DerivedTerms]]) are computed again, by the same rules as a reconstruction. Thus a changed budget, a changed estimate, a transaction that got
+  * another category, or a transaction that the bank sent late moves the line on the days it belongs to, and does not show as one bad day on the day
+  * it was typed or imported. The balances of those days stay as they were measured. A closed period keeps what it was recorded with.
   */
 class BudgetSnapshotService(repos: Repositories) {
 
   import BudgetSnapshotService.*
 
-  /** Write today's row, then fill any day still missing between the first period and today. Safe to call as often as traffic arrives: today is
-    * rewritten (the day is still moving), earlier days are written once and then left alone.
+  /** Write today's row, fill any day still missing between the first period and today, and derive the earlier days of the open period again. Safe to
+    * call as often as traffic arrives: today is rewritten (the day is still moving), and an earlier day keeps its measurements.
     */
   def ensureUpToDate: IO[Unit] =
     for {
-      now  <- IO.realTimeInstant
-      today = LocalDate.ofInstant(now, ZoneOffset.UTC)
-      due  <- daysDue(today)
-      // Rows from before the outside-money terms existed. Those two terms come from the transactions alone, so they can be given to an old row
-      // without touching what was measured on its day.
-      bare <- repos.dailyBudgetSnapshots.datesWithoutOutsideTerms.map(_.toList.filterNot(due.contains))
-      days  = due ++ bare
-      _    <- IO.whenA(days.nonEmpty) {
-                load(days, today, now).flatMap(_.traverse_ { w =>
-                  repos.dailyBudgetSnapshots.recordAll(due.map(snapshot(w, _))) >>
-                    repos.dailyBudgetSnapshots.fillOutsideTerms(bare.map { day =>
-                      val (ledger, fromSavings, income) = outsideMoney(w, w.periodOn(day), day)
-                      (day, ledger, fromSavings, income)
-                    })
-                })
-              }
+      now     <- IO.realTimeInstant
+      today    = LocalDate.ofInstant(now, ZoneOffset.UTC)
+      periods <- repos.periods.findAll
+      due     <- daysDue(periods, today)
+      // The earlier days of the open period that already have a row. A day in `due` is written in full now, and needs no more.
+      rederive = periods.find(_.endDate.isEmpty).toList.flatMap(open => allDays(open.startDay, today.minusDays(1))).filterNot(due.contains)
+      // Rows of closed periods from before the outside-money terms existed. Those terms come from the transactions alone, so they can be given to an
+      // old row without touching what was measured on its day.
+      bare    <- repos.dailyBudgetSnapshots.datesWithoutOutsideTerms.map(_.toList.filterNot(d => due.contains(d) || rederive.contains(d)))
+      days     = due ++ bare ++ rederive
+      _       <- IO.whenA(days.nonEmpty) {
+                   // Only the days that are written in full need balances. The other two groups read the plan and the period's transactions.
+                   load(periods, days, balancesFor = due, today, now).flatMap(_.traverse_ { w =>
+                     repos.dailyBudgetSnapshots.recordAll(due.map(snapshot(w, _))) >>
+                       repos.dailyBudgetSnapshots.fillOutsideTerms(bare.map { day =>
+                         val (ledger, fromSavings, income) = outsideMoney(w, w.periodOn(day), day)
+                         (day, ledger, fromSavings, income)
+                       }) >>
+                       repos.dailyBudgetSnapshots.rederive(rederive.map(day => derivedTerms(w, w.periodOn(day), day)))
+                   })
+                 }
     } yield ()
 
   /** One day's terms, computed but not stored — what the tests and any ad-hoc check go through. `None` outside the recorded span. */
@@ -52,14 +63,15 @@ class BudgetSnapshotService(repos: Repositories) {
     for {
       now   <- IO.realTimeInstant
       today  = LocalDate.ofInstant(now, ZoneOffset.UTC)
-      world <- if date.isAfter(today) then IO.pure(None) else load(List(date), today, now)
+      world <- if date.isAfter(today) then IO.pure(None)
+               else repos.periods.findAll.flatMap(load(_, List(date), balancesFor = List(date), today, now))
       // Before the first period there is nothing to measure, so say so rather than returning a row of zeros.
       inSpan = world.filter(w => w.periods.headOption.exists(p => !p.startDay.isAfter(date)))
     } yield inSpan.map(snapshot(_, date))
 
   /** Today, plus every earlier day back to the first period that has no row yet. Today is always included: the day is still moving. */
-  private def daysDue(today: LocalDate): IO[List[LocalDate]] =
-    repos.periods.findAll.map(earliestDay).flatMap {
+  private def daysDue(periods: List[Period], today: LocalDate): IO[List[LocalDate]] =
+    earliestDay(periods) match {
       // Nothing has started yet, so there is no budget to measure.
       case None           => IO.pure(Nil)
       case Some(firstDay) =>
@@ -75,80 +87,79 @@ class BudgetSnapshotService(repos: Repositories) {
     * The transaction reads are scoped to what those days actually consult, because the steady state — one pass every few minutes to rewrite today —
     * would otherwise keep paying the whole backfill's read cost, on a pool that is deliberately one connection wide.
     */
-  private def load(days: List[LocalDate], today: LocalDate, now: Instant): IO[Option[World]] =
-    repos.periods.findAll.flatMap { periods =>
-      earliestDay(periods) match {
-        case None    => IO.pure(Option.empty[World])
-        case Some(_) =>
-          val sorted      = periods.sortBy(_.startDate.toEpochMilli)
-          val from        = days.min
-          // Category spend is counted from the start of the period a day falls in, so the earliest day dictates how far back to read.
-          val spendFrom   = sorted.findLast(p => !p.startDay.isAfter(from)).fold(from)(_.startDay)
-          // Balances are carried through the ledger only for days in the PAST; today reads the account's live balance, so a pass that writes nothing
-          // else has no use for it. This is the difference between the steady state scanning the whole transaction table and not touching it.
-          val needsLedger = days.exists(_ != today)
-          for {
-            accounts   <- repos.accounts.findAll
-            defs       <- repos.expenseDefinitions.findAll
-            cats       <- repos.categories.findAll
-            rates      <- repos.exchangeRates.findAll
-            primaryOpt <- repos.currencySettings.findPrimary
-            snaps      <- accounts.traverse(a => repos.balanceSnapshots.findByAccount(a.id).map(a.id -> _)).map(_.toMap)
-            records    <- periods.traverse(p => repos.expenseRecords.findByPeriod(p.id).map(p.id -> _)).map(_.toMap)
-            overrides  <- repos.categoryBudgetOverrides.findAllStamped
-            // Category history reaches as far back as the bank data goes, not just to the first period: the monthly statistic behind every budget is
-            // drawn from all of it.
-            monthly    <- repos.bankTransactions.monthlySpendByCategory(Instant.EPOCH, endOfDay(today), includeInflows = true)
-            dailyCat   <- repos.bankTransactions.dailyNetSpendByCategory(startOf(spendFrom), endOfDay(today))
-            // Unbounded below on purpose: a day is carried from the nearest snapshot at or before it, and that snapshot can predate any bound derived
-            // from the days being written.
-            dailyAcc   <- if needsLedger then repos.bankTransactions.dailyNetByAccount(Instant.EPOCH, endOfDay(today)) else IO.pure(Nil)
-            uidIndex   <- accountUidIndex
-            // From the start of the earliest period in play: the outside-money terms are cumulative within a period.
-            movements  <- repos.bankTransactions.dailyNetByAccountAndCategory(startOf(spendFrom), endOfDay(today))
-          } yield {
-            val spending  = accounts.filter(_.role == AccountRole.Spending).map(_.id).toSet
-            val rateTable = RateTable(primaryOpt.map(_.code).getOrElse(Currency.PLN), rates)
-            Some(
-              World(
-                today = today,
-                capturedAt = now,
-                periods = sorted,
-                accounts = accounts,
-                defs = defs,
-                categories = cats,
-                rates = rateTable,
-                snapshots = snaps.view.mapValues(_.sortBy(_.recordedAt.toEpochMilli)).toMap,
-                records = records.view.mapValues(_.map(r => r.expenseDefId -> r).toMap).toMap,
-                overrides = overrides.map { case (p, c, cents, at) => (p, c) -> (cents, at) }.toMap,
-                monthlyByCat = byBucket(monthly, rateTable)(ym => LocalDate.parse(ym + "-01")),
-                dailyByCat = byDay(dailyCat.map { case (cat, cur, d, cents, _, _) => (cat, cur, d, cents) }, rateTable),
-                // Counts need no conversion, so the currency rows of a day simply add up.
-                dailyCountsByCat = dailyCat
-                  .groupBy(_._1)
-                  .view
-                  .mapValues {
-                    _.groupMapReduce(r => LocalDate.parse(r._3))(r => (r._5, r._6)) { case ((o1, i1), (o2, i2)) => (o1 + o2, i1 + i2) }
-                  }
-                  .toMap,
-                // A card group's cards are several bank accounts feeding one app account, so re-key before grouping and they simply add up.
-                // In the ACCOUNT's currency, unconverted: these movements are added to a balance that is itself in that currency, and the total is
-                // converted once, afterwards. Converting here too would count a foreign movement at the square of its rate.
-                dailyByAccount = dailyAcc
-                  .flatMap { case (uid, _, d, c) => uidIndex.get(uid).map((_, LocalDate.parse(d), c)) }
-                  .groupBy(_._1)
-                  .view
-                  .mapValues(_.groupMapReduce(_._2)(_._3)(_ + _))
-                  .toMap,
-                movements = movements.map { case (uid, cur, d, category, internal, cents) =>
-                  val day = LocalDate.parse(d)
-                  Movement(day, onSpendingAccount = uidIndex.get(uid).exists(spending), category, internal, rateTable.convert(cents, cur, day))
-                },
-              ),
-            )
-          }
-      }
+  private def load(periods: List[Period], days: List[LocalDate], balancesFor: List[LocalDate], today: LocalDate, now: Instant): IO[Option[World]] = {
+    earliestDay(periods) match {
+      case None    => IO.pure(Option.empty[World])
+      case Some(_) =>
+        val sorted      = periods.sortBy(_.startDate.toEpochMilli)
+        val from        = days.min
+        // Category spend is counted from the start of the period a day falls in, so the earliest day dictates how far back to read.
+        val spendFrom   = sorted.findLast(p => !p.startDay.isAfter(from)).fold(from)(_.startDay)
+        // Balances are carried through the ledger only for days in the PAST; today reads the account's live balance, so a pass that writes nothing
+        // else has no use for it. This is the difference between the steady state scanning the whole transaction table and not touching it.
+        val needsLedger = balancesFor.exists(_ != today)
+        for {
+          accounts   <- repos.accounts.findAll
+          defs       <- repos.expenseDefinitions.findAll
+          cats       <- repos.categories.findAll
+          rates      <- repos.exchangeRates.findAll
+          primaryOpt <- repos.currencySettings.findPrimary
+          snaps      <- accounts.traverse(a => repos.balanceSnapshots.findByAccount(a.id).map(a.id -> _)).map(_.toMap)
+          records    <- periods.traverse(p => repos.expenseRecords.findByPeriod(p.id).map(p.id -> _)).map(_.toMap)
+          overrides  <- repos.categoryBudgetOverrides.findAllStamped
+          // Category history reaches as far back as the bank data goes, not just to the first period: the monthly statistic behind every budget is
+          // drawn from all of it.
+          monthly    <- repos.bankTransactions.monthlySpendByCategory(Instant.EPOCH, endOfDay(today), includeInflows = true)
+          dailyCat   <- repos.bankTransactions.dailyNetSpendByCategory(startOf(spendFrom), endOfDay(today))
+          // Unbounded below on purpose: a day is carried from the nearest snapshot at or before it, and that snapshot can predate any bound derived
+          // from the days being written.
+          dailyAcc   <- if needsLedger then repos.bankTransactions.dailyNetByAccount(Instant.EPOCH, endOfDay(today)) else IO.pure(Nil)
+          uidIndex   <- accountUidIndex
+          // From the start of the earliest period in play: the outside-money terms are cumulative within a period.
+          movements  <- repos.bankTransactions.dailyNetByAccountAndCategory(startOf(spendFrom), endOfDay(today))
+        } yield {
+          val spending  = accounts.filter(_.role == AccountRole.Spending).map(_.id).toSet
+          val rateTable = RateTable(primaryOpt.map(_.code).getOrElse(Currency.PLN), rates)
+          Some(
+            World(
+              today = today,
+              capturedAt = now,
+              periods = sorted,
+              accounts = accounts,
+              defs = defs,
+              categories = cats,
+              rates = rateTable,
+              snapshots = snaps.view.mapValues(_.sortBy(_.recordedAt.toEpochMilli)).toMap,
+              records = records.view.mapValues(_.map(r => r.expenseDefId -> r).toMap).toMap,
+              overrides = overrides.map { case (p, c, cents, at) => (p, c) -> (cents, at) }.toMap,
+              monthlyByCat = byBucket(monthly, rateTable)(ym => LocalDate.parse(ym + "-01")),
+              dailyByCat = byDay(dailyCat.map { case (cat, cur, d, cents, _, _) => (cat, cur, d, cents) }, rateTable),
+              // Counts need no conversion, so the currency rows of a day simply add up.
+              dailyCountsByCat = dailyCat
+                .groupBy(_._1)
+                .view
+                .mapValues {
+                  _.groupMapReduce(r => LocalDate.parse(r._3))(r => (r._5, r._6)) { case ((o1, i1), (o2, i2)) => (o1 + o2, i1 + i2) }
+                }
+                .toMap,
+              // A card group's cards are several bank accounts feeding one app account, so re-key before grouping and they simply add up.
+              // In the ACCOUNT's currency, unconverted: these movements are added to a balance that is itself in that currency, and the total is
+              // converted once, afterwards. Converting here too would count a foreign movement at the square of its rate.
+              dailyByAccount = dailyAcc
+                .flatMap { case (uid, _, d, c) => uidIndex.get(uid).map((_, LocalDate.parse(d), c)) }
+                .groupBy(_._1)
+                .view
+                .mapValues(_.groupMapReduce(_._2)(_._3)(_ + _))
+                .toMap,
+              movements = movements.map { case (uid, cur, d, category, internal, cents) =>
+                val day = LocalDate.parse(d)
+                Movement(day, onSpendingAccount = uidIndex.get(uid).exists(spending), category, internal, rateTable.convert(cents, cur, day))
+              },
+            ),
+          )
+        }
     }
+  }
 
   /** bank account uid -> the app account whose balance it moves, resolving a card-group member to the group's account. */
   private def accountUidIndex: IO[Map[String, AccountId]] =
@@ -176,9 +187,7 @@ class BudgetSnapshotService(repos: Repositories) {
     def total(role: AccountRole): Long =
       balances.collect { case (a, Some(cents)) if a.role == role => w.rates.convert(cents, a.currency, day) }.sum
 
-    val (toPay, toReceive)                     = plannedRemaining(w, period, day)
-    val budgets                                = period.toList.flatMap(p => budgetRemainings(w, p, day))
-    val (ledger, fromSavings, unplannedIncome) = outsideMoney(w, period, day)
+    val derived = derivedTerms(w, period, day)
 
     DailyBudgetSnapshot(
       onDate = day,
@@ -186,17 +195,25 @@ class BudgetSnapshotService(repos: Repositories) {
       periodId = period.map(_.id),
       currency = w.rates.primary,
       spendableCents = total(AccountRole.Spending),
-      plannedToPayCents = toPay,
-      plannedToReceiveCents = toReceive,
-      budgetsToSpendCents = budgets.filter(_ > 0).sum,
-      budgetsToReceiveCents = -budgets.filter(_ < 0).sum,
+      plannedToPayCents = derived.plannedToPayCents,
+      plannedToReceiveCents = derived.plannedToReceiveCents,
+      budgetsToSpendCents = derived.budgetsToSpendCents,
+      budgetsToReceiveCents = derived.budgetsToReceiveCents,
       savingsCents = total(AccountRole.Savings),
-      ledgerCents = ledger,
-      fromSavingsCents = fromSavings,
-      unplannedIncomeCents = unplannedIncome,
+      ledgerCents = derived.ledgerCents,
+      fromSavingsCents = derived.fromSavingsCents,
+      unplannedIncomeCents = derived.unplannedIncomeCents,
       daysRemaining = period.map(_.daysRemaining(day)),
       source = if day == w.today then SnapshotSource.Live else SnapshotSource.Reconstructed,
     )
+  }
+
+  /** All terms of `day` that are not balances: what a row holds apart from the readings of its day. */
+  private def derivedTerms(w: World, period: Option[Period], day: LocalDate): DerivedTerms = {
+    val (toPay, toReceive)            = plannedRemaining(w, period, day)
+    val budgets                       = period.toList.flatMap(p => budgetRemainings(w, p, day))
+    val (ledger, fromSavings, income) = outsideMoney(w, period, day)
+    DerivedTerms(day, toPay, toReceive, budgets.filter(_ > 0).sum, -budgets.filter(_ < 0).sum, ledger, fromSavings, income)
   }
 
   /** (ledger, from savings, unplanned income) accumulated in the period `day` falls in, up to `day`, in the primary currency.

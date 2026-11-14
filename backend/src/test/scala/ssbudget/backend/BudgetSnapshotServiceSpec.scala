@@ -306,6 +306,65 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
     }
   }
 
+  "A change of the plan in the open period" - {
+    "moves each earlier day of the period, and keeps what was measured on it" in {
+      withFixture { (service, repos, xa) =>
+        val measuredDay = periodStart.plusDays(4)
+        for {
+          _        <- service.ensureUpToDate
+          measured <- freeOn(service, measuredDay).map(_.copy(source = SnapshotSource.Live, spendableCents = 123456L))
+          _        <- repos.dailyBudgetSnapshots.record(measured)
+          before   <- repos.dailyBudgetSnapshots.findAll
+          // The budget goes from 1,000 to 1,500.
+          _        <- sql"UPDATE categories SET budget_fixed_cents = 150000 WHERE id = 'cat1'".update.run.transact(xa)
+          _        <- service.ensureUpToDate
+          after    <- repos.dailyBudgetSnapshots.findAll
+        } yield {
+          after.map(_.budgetsToSpendCents) shouldBe before.map(_.budgetsToSpendCents + 50000)
+          // Only the plan moved: each day's free money is lower by the same amount, so the line keeps its shape.
+          after.map(_.freeMoneyCents) shouldBe before.map(_.freeMoneyCents - 50000)
+          val row = after.find(_.onDate == measuredDay)
+          row.map(_.spendableCents) shouldBe Some(123456L)
+          row.map(_.source) shouldBe Some(SnapshotSource.Live)
+        }
+      }
+    }
+
+    "moves a late transaction to the day it was booked on" in {
+      withFixture { (service, repos, xa) =>
+        val booked = periodStart.plusDays(3)
+        for {
+          _      <- service.ensureUpToDate
+          before <- repos.dailyBudgetSnapshots.findAll
+          // 40 PLN of spend that the bank sends only now, booked on day 3.
+          _      <- tx("late", "uid1", -4000, "PLN", booked, internal = false, category = None).transact(xa)
+          _      <- service.ensureUpToDate
+          after  <- repos.dailyBudgetSnapshots.findAll
+        } yield after.map(_.ledgerCents) shouldBe before.map(r => if r.onDate.isBefore(booked) then r.ledgerCents else r.ledgerCents - 4000)
+      }
+    }
+
+    "does not reach a period that is closed" in {
+      withFixture { (service, repos, xa) =>
+        val closedOn = periodStart.plusDays(6)
+        for {
+          _      <- service.ensureUpToDate
+          before <- repos.dailyBudgetSnapshots.findAll
+          // The period ends on day 6, and a new one opens at that moment.
+          _      <- sql"UPDATE periods SET ended_at = ${at(closedOn, 9)} WHERE id = 'per1'".update.run.transact(xa)
+          _      <- sql"""INSERT INTO periods (id, started_at, expected_end, ended_at)
+                          VALUES ('per2', ${at(closedOn, 9)}, ${closedOn.plusDays(30)}, NULL)""".update.run.transact(xa)
+          _      <- sql"UPDATE categories SET budget_fixed_cents = 150000 WHERE id = 'cat1'".update.run.transact(xa)
+          _      <- service.ensureUpToDate
+          after  <- repos.dailyBudgetSnapshots.findAll
+        } yield {
+          def closed(rows: List[DailyBudgetSnapshot]) = rows.filter(_.onDate.isBefore(closedOn)).map(_.budgetsToSpendCents)
+          closed(after) shouldBe closed(before)
+        }
+      }
+    }
+  }
+
   "The SQL view and the Scala formula" - {
     "agree on free money for every stored row" in {
       withFixture { (service, repos, xa) =>

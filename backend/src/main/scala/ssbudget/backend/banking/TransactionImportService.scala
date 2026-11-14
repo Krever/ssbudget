@@ -29,14 +29,14 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
   private val defaultInitialDays = 30L // first-ever import window when we have no transactions for an account
   private val maxPages           = 50  // safety cap on continuation-key pagination
 
-  /** `onAccountStart(accountLabel)` fires before each account is imported and `onAccountDone(accountLabel, imported, skipped)` after — so a caller
-    * (the job runner) can surface per-account progress and running counts. Both default to no-ops.
+  /** `onAccountStart(accountLabel)` fires before each account is imported and `onAccountDone(accountLabel, result)` after — so a caller (the job
+    * runner) can surface per-account progress, running counts and an incomplete fetch. Both default to no-ops.
     */
   def importTransactions(
       connectionId: BankConnectionId,
       req: ImportTransactionsRequest,
       onAccountStart: String => IO[Unit] = _ => IO.unit,
-      onAccountDone: (String, Int, Int) => IO[Unit] = (_, _, _) => IO.unit,
+      onAccountDone: (String, AccountImportResult) => IO[Unit] = (_, _) => IO.unit,
   ): IO[Either[String, ImportResult]] =
     clientOpt match {
       case None         => IO.pure(Left(notConfigured))
@@ -55,7 +55,7 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
                            val lbl = accountLabel(link)
                            onAccountStart(lbl) *>
                              importAccount(client, connectionId, link, req.monthsBack, today, now)
-                               .flatTap(r => onAccountDone(lbl, r.imported, r.skipped))
+                               .flatTap(r => onAccountDone(lbl, r))
                          }
               _       <- repos.bankTransactions.markInternalTransfers() // built-in rule: flag own-account transfers
               _       <- ruleEngine.applyRules()                        // then auto-categorize via user-defined rules
@@ -69,9 +69,16 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
         }
     }
 
-  /** Friendly account label for progress display. */
-  private def accountLabel(link: BankAccountLink): String =
-    link.name.orElse(link.product).getOrElse(link.ebAccountUid.take(8))
+  /** Friendly account label for progress display. The job keys its items on this label, so it must be different for each account: banks send card
+    * accounts with an empty name, and those accounts would then share one item.
+    */
+  private def accountLabel(link: BankAccountLink): String = {
+    def filled(text: Option[String]): Option[String] = text.filter(_.trim.nonEmpty)
+    filled(link.name)
+      .orElse(filled(link.product))
+      .orElse(filled(link.iban).map(i => s"…${i.takeRight(4)}"))
+      .getOrElse(link.ebAccountUid.take(8))
+  }
 
   private def importAccount(
       client: EnableBankingApi,
@@ -91,9 +98,22 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
                       }
                   }
       _        <- IO(log.info(s"[import] ${link.ebAccountUid}: fetching $dateFrom..$today"))
-      counts   <- importPages(client, connId, link, dateFrom, today, None, now, page = 0, imported = 0, skipped = 0)
-      _        <- IO(log.info(s"[import] ${link.ebAccountUid}: imported ${counts._1}, skipped ${counts._2}"))
-    } yield AccountImportResult(link.ebAccountUid, counts._1, counts._2)
+      result   <- importPages(client, connId, link, dateFrom, today, None, now, page = 0, imported = 0, skipped = 0)
+      _        <- IO(log.info(s"[import] ${link.ebAccountUid}: imported ${result.imported}, skipped ${result.skipped}"))
+    } yield result
+
+  /** Pages arrive newest first, so a fetch that stops early keeps the newest transactions and loses the older ones. The next incremental import
+    * starts from the newest stored transaction and does not fetch them again. Thus an early stop must be reported: only a backfill repairs it.
+    */
+  private def incomplete(link: BankAccountLink, from: LocalDate, pagesDone: Int, imported: Int, skipped: Int, reason: String): AccountImportResult =
+    AccountImportResult(
+      link.ebAccountUid,
+      imported,
+      skipped,
+      Some(
+        s"history incomplete — stopped after $pagesDone page(s) of the window from $from: $reason. Run a backfill to get the missing transactions.",
+      ),
+    )
 
   private def importPages(
       client: EnableBankingApi,
@@ -106,14 +126,16 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
       page: Int,
       imported: Int,
       skipped: Int,
-  ): IO[(Int, Int)] =
-    if page >= maxPages then IO(log.warn(s"[import] ${link.ebAccountUid}: hit $maxPages-page cap, stopping")).as((imported, skipped))
+  ): IO[AccountImportResult] =
+    if page >= maxPages then IO(log.warn(s"[import] ${link.ebAccountUid}: hit $maxPages-page cap, stopping"))
+      .as(incomplete(link, from, page, imported, skipped, s"reached the limit of $maxPages pages"))
     else
       client.getTransactions(link.ebAccountUid, from, to, continuationKey).flatMap {
         case Left(err)    =>
-          // Best-effort: stop this account, keep what we imported, but surface why.
+          // Best-effort: stop this account and keep what we imported, but report the failure to the caller.
           BankingService.expireIfSessionEnded(repos, connId, err) *>
-            IO(log.warn(s"[import] ${link.ebAccountUid}: fetch failed on page ${page + 1}: $err")).as((imported, skipped))
+            IO(log.warn(s"[import] ${link.ebAccountUid}: fetch failed on page ${page + 1}: $err"))
+              .as(incomplete(link, from, page, imported, skipped, err))
         case Right(page0) =>
           for {
             _          <- IO(log.info(s"[import] ${link.ebAccountUid}: page ${page + 1} → ${page0.transactions.size} tx"))
@@ -122,7 +144,7 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
             newSkipped  = skipped + inserted.count(!_)
             result     <- page0.continuationKey match {
                             case Some(key) => importPages(client, connId, link, from, to, Some(key), now, page + 1, newImported, newSkipped)
-                            case None      => IO.pure((newImported, newSkipped))
+                            case None      => IO.pure(AccountImportResult(link.ebAccountUid, newImported, newSkipped))
                           }
           } yield result
       }

@@ -4,7 +4,7 @@ import cats.effect.{IO, Ref}
 import cats.effect.std.Supervisor
 import cats.implicits.*
 import ssbudget.backend.db.Repositories
-import ssbudget.shared.api.ImportTransactionsRequest
+import ssbudget.shared.api.{AccountImportResult, ImportTransactionsRequest}
 import ssbudget.shared.model.*
 
 import java.util.UUID
@@ -13,9 +13,10 @@ import java.util.UUID
   * progress. The work runs on an app-scoped [[Supervisor]] (created at startup), so it outlives the request.
   *
   * A job carries a **per-account breakdown** ([[ImportJob.items]]): each account appears as it starts (Running) and settles to Done with its own
-  * imported/skipped counts (the second UI drill-down level, and the seam for future parallel fetching). Connection-level problems (e.g. a
-  * balance-sync failure, or an import that never got going) become warnings on the job; only an unexpected exception marks the whole job Failed. A
-  * new run is refused while one is still Running (returns the running job) so double-clicks don't double-import.
+  * imported/skipped counts, or to Failed (with a warning on the job) when its fetch stopped early (the second UI drill-down level, and the seam for
+  * future parallel fetching). Connection-level problems (e.g. a balance-sync failure, or an import that never got going) become warnings on the job;
+  * only an unexpected exception marks the whole job Failed. A new run is refused while one is still Running (returns the running job) so
+  * double-clicks don't double-import.
   */
 class ImportJobService(
     repos: Repositories,
@@ -50,9 +51,13 @@ class ImportJobService(
     def itemRunning(connection: String, account: String): IO[Unit] =
       progress.set(Some(s"$connection — $account")) *> upsert(connection, account)(_.copy(status = ImportItemStatus.Running)) *> persist
 
-    def itemDone(connection: String, account: String, imported: Int, skipped: Int): IO[Unit] =
+    /** An account whose fetch stopped early settles as Failed, with the counts of the pages that did arrive, and adds a warning to the job. */
+    def itemDone(connection: String, account: String, result: AccountImportResult): IO[Unit] = {
+      val status = if result.error.isDefined then ImportItemStatus.Failed else ImportItemStatus.Done
       progress.set(Some(s"$connection — $account")) *>
-        upsert(connection, account)(_.copy(status = ImportItemStatus.Done, imported = imported, skipped = skipped, error = None)) *> persist
+        upsert(connection, account)(_.copy(status = status, imported = result.imported, skipped = result.skipped, error = result.error)) *>
+        result.error.fold(persist)(e => warn(connection, s"$account — $e"))
+    }
 
     /** A connection-level problem (balance sync, or an import that failed before/after per-account work): record a warning and mark any of that
       * connection's still-running items as Failed.
@@ -135,7 +140,7 @@ class ImportJobService(
         connectionId,
         req,
         onAccountStart = acct => reporter.itemRunning(bank, acct),
-        onAccountDone = (acct, imp, skp) => reporter.itemDone(bank, acct, imp, skp),
+        onAccountDone = (acct, result) => reporter.itemDone(bank, acct, result),
       )
       .flatMap {
         case Right(_)  => IO.unit
@@ -163,7 +168,7 @@ class ImportJobService(
                                           conn.id,
                                           ImportTransactionsRequest(None),
                                           onAccountStart = acct => reporter.itemRunning(bank, acct),
-                                          onAccountDone = (acct, imp, skp) => reporter.itemDone(bank, acct, imp, skp),
+                                          onAccountDone = (acct, result) => reporter.itemDone(bank, acct, result),
                                         )
                                         .handleError(t => Left(t.getMessage))
                              _     <- impE.left.toOption.traverse_(e => reporter.failConnection(bank, s"import — $e"))

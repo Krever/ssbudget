@@ -91,6 +91,10 @@ projection) and on the Periods page (a row sparkline, and a chart in the expande
   with 5+ days. Chosen by backtest on the recorded periods: about half the error of "no change"; straight-line fits were too steep
   (large bills come early), and the median ignores them
 - The chart anchors the line so that it ends on the real free money of the last day
+- The days of the OPEN period follow the record and the configuration as they are now: each pass of
+  `BudgetSnapshotService.ensureUpToDate` computes again all their terms that are not balances (the plan terms and the three ledger terms).
+  A changed budget or estimate, a recategorised transaction or a late transaction thus moves the days it belongs to, and is not read as
+  one bad day. The measured balances stay. A closed period keeps what it was recorded with
 - A second, thinner line (`FreeMoneyTrend.projectionHistory`) is the projected end from each day at the usual daily change of the full
   record. It moves only by the difference between a day and the usual day, so it rises when the period goes better than projected. The
   Dashboard also shows its change across the last 7 days. It is deliberately NOT the projection each day in fact gave: in a backtest

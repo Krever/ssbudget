@@ -34,8 +34,10 @@ final case class UpdateCardGroupLimit(limitCents: Long) derives Codec.AsObject
 /** Import transactions for a connection. `monthsBack = None` = incremental (only newer than what we have); `Some(n)` = backfill the last n months. */
 final case class ImportTransactionsRequest(monthsBack: Option[Int]) derives Codec.AsObject
 
-/** Per-account outcome of an import run. */
-final case class AccountImportResult(ebAccountUid: String, imported: Int, skipped: Int) derives Codec.AsObject
+/** Per-account outcome of an import run. `error` is set when the fetch stopped before the last page: the counts are then correct for the pages that
+  * arrived, but older transactions in the requested window are missing.
+  */
+final case class AccountImportResult(ebAccountUid: String, imported: Int, skipped: Int, error: Option[String] = None) derives Codec.AsObject
 
 final case class ImportResult(accounts: List[AccountImportResult]) derives Codec.AsObject {
   def totalImported: Int = accounts.map(_.imported).sum
