@@ -73,7 +73,9 @@ statistic ran over — with the lookback window shaded, so the window can be pic
 `savingsPeriodChange` (current balance − balance at period start) is reported on the Dashboard as information only; it is not part
 of the free-money calculation. The Periods page shows the same change for each period. Both read the balance at a period boundary
 from `BalanceHistory`: the recorded balance (snapshot) at or before that instant, and, before an account's first record, that first
-record carried back through the bank ledger. A manual account has no ledger, so its first record stands for all the time before it.
+record carried back through the bank ledger. A bank entry has a date and no time, so the ledger answer is the balance at the end of the
+day BEFORE the boundary: what moves on the day a period opens is of the new period. A manual account has no ledger, so its first
+record stands for all the time before it.
 
 ### Key Calculation
 ```

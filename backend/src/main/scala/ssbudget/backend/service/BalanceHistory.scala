@@ -14,6 +14,11 @@ import java.time.{Instant, LocalDate, ZoneOffset}
   * that the account moved between the instant and that record ([[BalanceHistory.carriedBack]]). On the recorded periods this gave the bank's own
   * running balance to the cent.
   *
+  * A bank entry has a date and no time. The entries of the instant's own day count as AFTER the instant: the answer from the ledger is the balance at
+  * the end of the day before. These instants are period boundaries, and a period opens when the paycheck arrives; what moves on that day (the rest of
+  * the paycheck, a transfer to savings) is thus of the new period. Where a balance was measured at the moment a period opened, the transfers of that
+  * day did come after it.
+  *
   * An account with no transactions (a manual one) has no ledger, so its first recorded balance stands for all the time before it.
   */
 final case class BalanceHistory(
@@ -27,7 +32,7 @@ final case class BalanceHistory(
     history
       .findLast(!_.recordedAt.isAfter(at))
       .map(_.amount)
-      .orElse(BalanceHistory.carriedBack(history, ledger.getOrElse(account, Map.empty), BalanceHistory.dayOf(at)))
+      .orElse(BalanceHistory.carriedBack(history, ledger.getOrElse(account, Map.empty), BalanceHistory.dayOf(at).minusDays(1)))
   }
 }
 
