@@ -11,7 +11,7 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 import ssbudget.backend.analytics.AnalyticsService
 import ssbudget.backend.auth.SessionService
-import ssbudget.backend.banking.{BankingService, ImportJobService, RuleEngineService, TransactionImportService}
+import ssbudget.backend.banking.{BankingService, CategorizationService, ImportJobService, RuleChange, RuleEngineService, TransactionImportService}
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.db.repository.{TransactionFilter, TransactionSearchRow}
 import ssbudget.backend.search.TransactionSearch
@@ -42,6 +42,7 @@ object Routes {
       importService: TransactionImportService,
       importJobService: ImportJobService,
       ruleEngine: RuleEngineService,
+      categorization: CategorizationService,
       analyticsService: AnalyticsService,
       testMode: Boolean = false,
   ): HttpRoutes[IO] = {
@@ -111,7 +112,7 @@ object Routes {
         listTransactions(repos)(acc, month, cat, hide, sort, asc, limit, q)
       },
       route(Endpoints.transactions.months)(_ => repos.bankTransactions.distinctMonths().map(Right(_))),
-      route(Endpoints.transactions.setCategory) { case (id, dto) => setTransactionCategory(repos)(id, dto) },
+      route(Endpoints.transactions.setCategory) { case (id, dto) => categorization.setCategory(id, dto.categoryId) },
       route(Endpoints.transactions.setNote) { case (id, dto) => setTransactionNote(repos)(id, dto) },
       // Categories
       route(Endpoints.categories.list)(_ => repos.categories.findAll.map(Right(_))),
@@ -123,9 +124,11 @@ object Routes {
       route(Endpoints.categories.clearOverride)(id => setCategoryOverride(repos, categorySummaries)(id, None)),
       // Classification rules
       route(Endpoints.rules.list)(_ => repos.classificationRules.findAll.map(Right(_))),
-      route(Endpoints.rules.create)(createRule(repos, ruleEngine)),
-      route(Endpoints.rules.update) { case (id, dto) => updateRule(repos, ruleEngine)(id, dto) },
-      route(Endpoints.rules.delete)(deleteRule(repos, ruleEngine)),
+      route(Endpoints.rules.create)(dto => ruleWrite(categorization, RuleChange.Create(dto.name, dto.categoryId, dto.criteria))),
+      route(Endpoints.rules.update) { case (id, dto) =>
+        ruleWrite(categorization, RuleChange.Update(id, Some(dto.name), Some(dto.categoryId), Some(dto.criteria)))
+      },
+      route(Endpoints.rules.delete)(id => categorization.applyChange(RuleChange.Delete(id)).map(_.void)),
       route(Endpoints.rules.reorder)(reorderRules(repos, ruleEngine)),
       route(Endpoints.rules.apply)(_ => ruleEngine.applyRules().map(n => Right(ApplyRulesResult(n)))),
       route(Endpoints.rules.preview)(previewRule(repos)),
@@ -590,25 +593,6 @@ object Routes {
       Right(RulePreviewResponse(matched.size, all.size, matched.take(200)))
     }
 
-  private def setTransactionCategory(repos: Repositories)(id: BankTransactionId, dto: SetCategoryRequest): Result[BankTransaction] = {
-    for {
-      txOpt    <- repos.bankTransactions.findById(id)
-      catValid <- dto.categoryId match {
-                    case Some(cid) => repos.categories.findById(cid).map(o => Either.cond(o.isDefined, (), "Category not found"))
-                    case None      => IO.pure(Right(()))
-                  }
-      result   <- (txOpt, catValid) match {
-                    case (None, _)            => IO.pure(Left(s"Transaction not found: ${id.value}"))
-                    case (_, Left(err))       => IO.pure(Left(err))
-                    case (Some(tx), Right(_)) =>
-                      val source = dto.categoryId.map(_ => CategorySource.Manual)
-                      repos.bankTransactions
-                        .setCategory(id, dto.categoryId)
-                        .as(Right(tx.copy(categoryId = dto.categoryId, categorySource = source)))
-                  }
-    } yield result
-  }
-
   private def setTransactionNote(repos: Repositories)(id: BankTransactionId, dto: SetNoteRequest): Result[BankTransaction] =
     for {
       txOpt  <- repos.bankTransactions.findById(id)
@@ -671,47 +655,9 @@ object Routes {
       _ <- ruleEngine.applyRules()
     } yield Right(())
 
-  private def createRule(repos: Repositories, ruleEngine: RuleEngineService)(dto: CreateRuleRequest): Result[ClassificationRule] =
-    if dto.criteria.isEmpty then IO.pure(Left("A rule must have at least one criterion"))
-    else
-      repos.categories.findById(dto.categoryId).flatMap {
-        case None    => IO.pure(Left("Category not found"))
-        case Some(_) =>
-          for {
-            priority <- repos.classificationRules.nextPriority
-            now      <- IO.realTimeInstant
-            rule      = ClassificationRule(ClassificationRuleId(UUID.randomUUID().toString), dto.name, dto.categoryId, priority, dto.criteria, now)
-            _        <- repos.classificationRules.create(rule)
-            _        <- ruleEngine.applyRules()
-          } yield Right(rule)
-      }
-
-  private def updateRule(
-      repos: Repositories,
-      ruleEngine: RuleEngineService,
-  )(id: ClassificationRuleId, dto: UpdateRuleRequest): Result[ClassificationRule] =
-    if dto.criteria.isEmpty then IO.pure(Left("A rule must have at least one criterion"))
-    else
-      for {
-        existingOpt <- repos.classificationRules.findById(id)
-        catOpt      <- repos.categories.findById(dto.categoryId)
-        result      <- (existingOpt, catOpt) match {
-                         case (None, _)                 => IO.pure(Left(s"Rule not found: ${id.value}"))
-                         case (_, None)                 => IO.pure(Left("Category not found"))
-                         case (Some(existing), Some(_)) =>
-                           val updated = existing.copy(name = dto.name, categoryId = dto.categoryId, criteria = dto.criteria)
-                           for {
-                             _ <- repos.classificationRules.update(id, dto.name, dto.categoryId, dto.criteria)
-                             _ <- ruleEngine.applyRules()
-                           } yield Right(updated)
-                       }
-      } yield result
-
-  private def deleteRule(repos: Repositories, ruleEngine: RuleEngineService)(id: ClassificationRuleId): Result[Unit] =
-    for {
-      _ <- repos.classificationRules.delete(id)
-      _ <- ruleEngine.applyRules()
-    } yield Right(())
+  /** A rule create or update through the shared service; the REST answer is the rule itself. */
+  private def ruleWrite(categorization: CategorizationService, change: RuleChange): Result[ClassificationRule] =
+    categorization.applyChange(change).map(_.flatMap(_.map(_.rule).toRight("The change gave no rule")))
 
   private def reorderRules(repos: Repositories, ruleEngine: RuleEngineService)(dto: ReorderRulesRequest): Result[List[ClassificationRule]] =
     for {

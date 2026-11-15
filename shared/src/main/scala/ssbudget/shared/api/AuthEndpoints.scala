@@ -121,6 +121,30 @@ object AuthEndpoints {
       .in("passkeys" / path[String]("credentialId"))
       .errorOut(stringBody)
 
+  // MCP access tokens (for the /mcp endpoint; managed on the Settings page)
+
+  val listMcpTokens: Secured[Unit, List[McpTokenInfo]] =
+    baseEndpoint.get
+      .securityIn(sessionCookie)
+      .in("mcp-tokens")
+      .out(jsonBody[List[McpTokenInfo]])
+      .errorOut(stringBody)
+
+  // Authenticated, plus an IdentityProof. The answer is the only place where the token itself appears
+  val createMcpToken: Secured[CreateMcpTokenRequest, CreatedMcpToken] =
+    baseEndpoint.post
+      .securityIn(sessionCookie)
+      .in("mcp-tokens")
+      .in(jsonBody[CreateMcpTokenRequest])
+      .out(jsonBody[CreatedMcpToken])
+      .errorOut(stringBody)
+
+  val revokeMcpToken: Secured[String, Unit] =
+    baseEndpoint.delete
+      .securityIn(sessionCookie)
+      .in("mcp-tokens" / path[String]("id"))
+      .errorOut(stringBody)
+
   val all: List[AnyEndpoint] = List(
     status,
     setup,
@@ -134,6 +158,9 @@ object AuthEndpoints {
     loginPasskeyFinish,
     listPasskeys,
     deletePasskey,
+    listMcpTokens,
+    createMcpToken,
+    revokeMcpToken,
   )
 
   /** Client-side endpoint definitions for browser use.
@@ -172,6 +199,15 @@ object AuthEndpoints {
 
     val deletePasskey: Public[String, Unit] =
       baseEndpoint.delete.in("passkeys" / path[String]("credentialId")).errorOut(stringBody)
+
+    val listMcpTokens: Public[Unit, List[McpTokenInfo]] =
+      baseEndpoint.get.in("mcp-tokens").out(jsonBody[List[McpTokenInfo]]).errorOut(stringBody)
+
+    val createMcpToken: Public[CreateMcpTokenRequest, CreatedMcpToken] =
+      baseEndpoint.post.in("mcp-tokens").in(jsonBody[CreateMcpTokenRequest]).out(jsonBody[CreatedMcpToken]).errorOut(stringBody)
+
+    val revokeMcpToken: Public[String, Unit] =
+      baseEndpoint.delete.in("mcp-tokens" / path[String]("id")).errorOut(stringBody)
 
     val registerPasskeyStart: Public[PasskeyRegisterStartRequest, PasskeyRegistrationOptions] =
       baseEndpoint.post

@@ -5,7 +5,10 @@ import ssbudget.shared.model.*
 /** Pure matching logic shared by the backend (applying rules) and the frontend (live preview in the rule modal) — one source of truth. */
 object RuleMatcher {
 
-  private def normText(s: String): String = s.trim.replaceAll("\\s+", " ").toUpperCase
+  /** The form in which text is compared: no outer whitespace, inner whitespace collapsed, no case. Public, so that code which groups transactions as
+    * rule candidates uses the same form as the match.
+    */
+  def normText(s: String): String         = s.trim.replaceAll("\\s+", " ").toUpperCase
   private def normIban(s: String): String = s.replaceAll("\\s", "").toUpperCase
 
   private def textMatch(op: TextMatchOp, field: Option[String], value: String): Boolean =

@@ -41,7 +41,9 @@ export default defineConfig(({ mode }) => ({
     proxy: {
       '/api': 'http://localhost:8080',
       // Metabase, reached only through the backend's session-gated proxy (see AnalyticsProxyRoutes).
-      '/metabase': 'http://localhost:8080'
+      '/metabase': 'http://localhost:8080',
+      // The MCP endpoint, so that the command the Settings page gives also works against the dev server.
+      '/mcp': 'http://localhost:8080'
     }
   },
   build: {

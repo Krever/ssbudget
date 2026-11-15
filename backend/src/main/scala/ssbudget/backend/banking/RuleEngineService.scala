@@ -24,18 +24,22 @@ class RuleEngineService(repos: Repositories) {
       rules  <- repos.classificationRules.findAll // ascending priority
       txs    <- repos.bankTransactions.list(None, None, None)
       updates = txs.flatMap { tx =>
-                  if tx.categorySource.contains(CategorySource.Manual) then None // manual always wins
-                  else {
-                    val desired: (Option[CategoryId], Option[CategorySource]) =
-                      RuleMatcher.firstMatch(rules, tx) match { // returns None for internal transfers
-                        case Some(rule) => (Some(rule.categoryId), Some(CategorySource.Rule))
-                        case None       => (None, None)
-                      }
-                    if desired == ((tx.categoryId, tx.categorySource)) then None
-                    else Some((tx.id, desired._1, desired._2))
+                  RuleEngineService.winner(rules, tx).flatMap { rule =>
+                    val desired = (rule.map(_.categoryId), rule.map(_ => CategorySource.Rule))
+                    Option.when(desired != ((tx.categoryId, tx.categorySource)))((tx.id, desired._1, desired._2))
                   }
                 }
       _      <- repos.bankTransactions.applyCategoryUpdates(updates)
       _      <- IO(log.info(s"[rules] applied ${rules.size} rule(s): ${updates.size} transaction(s) re-categorized"))
     } yield updates.size
+}
+
+object RuleEngineService {
+
+  /** The one decision of the engine, for one transaction: `None` = leave it (a manual category always wins); `Some(None)` = no rule matches (or the
+    * transaction is internal), so it must have no category; `Some(Some(rule))` = this rule sets the category. [[RuleEngineService.applyRules]] writes
+    * this decision and the rule-change preview in [[CategorizationService]] reads it, so the two cannot disagree.
+    */
+  def winner(rulesByPriority: List[ClassificationRule], tx: BankTransaction): Option[Option[ClassificationRule]] =
+    if tx.categorySource.contains(CategorySource.Manual) then None else Some(RuleMatcher.firstMatch(rulesByPriority, tx))
 }

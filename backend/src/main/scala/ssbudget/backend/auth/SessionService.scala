@@ -3,9 +3,7 @@ package ssbudget.backend.auth
 import cats.effect.IO
 import ssbudget.backend.db.repository.{Session, SessionRepository}
 
-import java.security.SecureRandom
 import java.time.{Duration, Instant}
-import java.util.Base64
 
 trait SessionService {
   def createSession(): IO[Session]
@@ -22,11 +20,9 @@ object SessionService {
     new SessionServiceImpl(sessionRepository)
 
   private class SessionServiceImpl(sessionRepository: SessionRepository) extends SessionService {
-    private val random = new SecureRandom()
-
     override def createSession(): IO[Session] = {
       for {
-        token  <- generateToken()
+        token  <- SecureToken.generate(TokenLength)
         now     = Instant.now()
         expires = now.plus(SessionDuration)
         session = Session(token, now, expires, now)
@@ -51,10 +47,5 @@ object SessionService {
       sessionRepository.deleteExpired(Instant.now())
     }
 
-    private def generateToken(): IO[String] = IO.blocking {
-      val bytes = new Array[Byte](TokenLength)
-      random.nextBytes(bytes)
-      Base64.getUrlEncoder.withoutPadding().encodeToString(bytes)
-    }
   }
 }

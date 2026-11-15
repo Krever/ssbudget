@@ -198,6 +198,9 @@ ExchangeRate:
 
 PasskeyCredential:
   - credentialId, publicKey, signCount, createdAt
+
+McpToken (table: mcp_tokens):
+  - id, name, tokenHash (SHA-256; the token itself is never stored), createdAt, lastUsedAt
 ```
 
 ## Analytics
@@ -218,6 +221,24 @@ without `SSBUDGET_METABASE_URL` the proxy, provisioning and nav entry all disapp
 `./dev.sh` runs it locally and `./build.sh` bundles it into the image — both on by default, both
 take `--no-analytics`. The container generates and persists the Metabase credentials itself, so a
 deploy needs no analytics config. See `docs/metabase-analytics.md`.
+
+## MCP server
+
+`POST /mcp` lets an assistant categorize transactions with the user (`backend/mcp`). See `docs/mcp.md`.
+
+- Its own credentials: access tokens that the server makes (`McpTokenService`). The user makes and revokes them in Settings → MCP access, which
+  also gives the `claude mcp add` command. A token is shown one time; the `mcp_tokens` table holds only its SHA-256 digest. Making a
+  token needs an `IdentityProof` (password or passkey), not only the session, because the token does not expire.
+- The session cookie does not open `/mcp`, a token does not open `/api`, and test mode has no effect on either rule. Requests with an
+  `Origin` header are refused. With no tokens, no request passes.
+- The tool list in `CategorizationTools` is the FULL power of a token: read transactions, categories and rules; write categories and
+  rules. Do not add a tool that reads or writes something else without a decision on the security model.
+- The procedure (batch → proposal → user confirms → apply → repeat) is the MCP prompt in `CategorizationGuide`. Tools and prompt change
+  together.
+- `CategorizationService` holds the manual-category write and the rule create / update / delete, and their preview. One `RuleChange`
+  value describes a rule change for both `previewChange` and `applyChange`, so a preview shows what the write does. The REST routes
+  and the MCP tools both call it. `RuleEngineService.winner` is the one decision "which rule sets the category"; the engine and the
+  preview both read it. (Rule import, rule reorder and category delete are still in `Routes`.)
 
 ## Authentication
 

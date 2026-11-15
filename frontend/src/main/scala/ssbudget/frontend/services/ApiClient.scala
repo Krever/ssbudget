@@ -60,6 +60,21 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request(credentialId)).map(handleResponse)
     }
 
+    def listMcpTokens(): Future[List[McpTokenInfo]] = {
+      val request = interpreter.toRequest(AuthEndpoints.client.listMcpTokens, Some(baseUri))
+      backend.send(request(())).map(handleResponse)
+    }
+
+    def createMcpToken(req: CreateMcpTokenRequest): Future[CreatedMcpToken] = {
+      val request = interpreter.toRequest(AuthEndpoints.client.createMcpToken, Some(baseUri))
+      backend.send(request(req)).map(handleResponse)
+    }
+
+    def revokeMcpToken(id: String): Future[Unit] = {
+      val request = interpreter.toRequest(AuthEndpoints.client.revokeMcpToken, Some(baseUri))
+      backend.send(request(id)).map(handleResponse)
+    }
+
     def registerPasskeyStart(displayName: Option[String]): Future[PasskeyRegistrationOptions] = {
       val request = interpreter.toRequest(AuthEndpoints.client.registerPasskeyStart, Some(baseUri))
       backend.send(request(PasskeyRegisterStartRequest(displayName))).map(handleResponse)

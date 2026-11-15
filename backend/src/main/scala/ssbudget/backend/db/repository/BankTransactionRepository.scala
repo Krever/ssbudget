@@ -67,6 +67,9 @@ trait BankTransactionRepository {
     */
   def searchCandidates(filter: TransactionFilter): IO[List[TransactionSearchRow]]
 
+  /** How many transactions each category has, over all time. Categories with none are not in the result. */
+  def countByCategory: IO[List[(CategoryId, Int)]]
+
   /** Full rows for an explicit id set, for the page the search scan settled on. Order is unspecified — the caller already knows the order it wants.
     */
   def findByIds(ids: List[BankTransactionId]): IO[List[BankTransaction]]
@@ -231,6 +234,12 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
     (fr"SELECT id," ++ text ++ fr""", amount_cents, currency, booked_at FROM bank_transactions""" ++
       filterClause(filter)).query[TransactionSearchRow].to[List].transact(xa)
   }
+
+  override def countByCategory: IO[List[(CategoryId, Int)]] =
+    sql"SELECT category_id, COUNT(*) FROM bank_transactions WHERE category_id IS NOT NULL GROUP BY category_id"
+      .query[(CategoryId, Int)]
+      .to[List]
+      .transact(xa)
 
   override def findByIds(ids: List[BankTransactionId]): IO[List[BankTransaction]] =
     ids.toNel match {

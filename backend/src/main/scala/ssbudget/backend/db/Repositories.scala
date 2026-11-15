@@ -24,6 +24,7 @@ final case class Repositories(
     importJobs: ImportJobRepository,
     analyticsState: AnalyticsStateRepository,
     dailyBudgetSnapshots: DailyBudgetSnapshotRepository,
+    mcpTokens: McpTokenRepository,
 )
 
 object Repositories {
@@ -48,6 +49,7 @@ object Repositories {
       importJobs = new ImportJobRepositoryImpl(xa),
       analyticsState = new AnalyticsStateRepositoryImpl(xa),
       dailyBudgetSnapshots = new DailyBudgetSnapshotRepositoryImpl(xa),
+      mcpTokens = new McpTokenRepositoryImpl(xa),
     )
   }
 }

@@ -29,6 +29,20 @@ enum IdentityProof derives Codec.AsObject {
 // don't know
 final case class ChangePasswordRequest(newPassword: String, proof: IdentityProof) derives Codec.AsObject
 
+// An MCP access token as the Settings page lists it. The token itself is not here: the server keeps only its digest
+final case class McpTokenInfo(
+    id: String,
+    name: String,
+    createdAt: Instant,
+    lastUsedAt: Option[Instant],
+) derives Codec.AsObject
+
+// Making an MCP token gives a credential that does not expire, so it needs an IdentityProof, not only the session
+final case class CreateMcpTokenRequest(name: String, proof: IdentityProof) derives Codec.AsObject
+
+// The one answer that holds the token itself. It cannot be read again later
+final case class CreatedMcpToken(info: McpTokenInfo, token: String) derives Codec.AsObject
+
 // Passkey info for listing
 final case class PasskeyInfo(
     credentialId: String,

@@ -11,9 +11,10 @@ import sttp.client3.httpclient.fs2.HttpClientFs2Backend
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 
 import ssbudget.backend.analytics.Analytics
-import ssbudget.backend.auth.{PasswordService, SessionService, WebAuthnService}
+import ssbudget.backend.auth.{McpTokenService, PasswordService, SessionService, WebAuthnService}
 import ssbudget.backend.banking.{
   BankingService,
+  CategorizationService,
   EnableBankingClient,
   EnableBankingConfig,
   EnableBankingJwt,
@@ -22,6 +23,7 @@ import ssbudget.backend.banking.{
   TransactionImportService,
 }
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.mcp.{CategorizationGuide, CategorizationTools, McpRoutes, McpServer}
 import ssbudget.backend.service.{BudgetSnapshotService, BudgetSnapshotTrigger, CurrencyService}
 import ssbudget.shared.api.HealthEndpoint
 
@@ -91,12 +93,16 @@ object ServerBuilder {
         val importService    = new TransactionImportService(repos, ebClientOpt, ruleEngine)
         val importJobService = new ImportJobService(repos, supervisor, bankingService, importService)
 
+        val mcpTokens      = new McpTokenService(repos.mcpTokens)
+        val categorization = new CategorizationService(repos, ruleEngine)
+
         val authRoutes = AuthRoutes.make(
           repos.authConfig,
           repos.passkeyCredentials,
           passwordService,
           sessionService,
           webAuthnService,
+          mcpTokens,
           testMode,
         )
 
@@ -112,16 +118,24 @@ object ServerBuilder {
             importService,
             importJobService,
             ruleEngine,
+            categorization,
             analytics.service,
             testMode,
           )
 
+        // The MCP endpoint is always there, and closed: a request passes only with a token that was made on the Settings page.
+        // `testMode` has no effect on it.
+        val mcpRoutes = {
+          val tools = new CategorizationTools(repos, categorization)
+          McpRoutes.make(mcpTokens, new McpServer(tools.all, List(CategorizationGuide.prompt), CategorizationGuide.instructions))
+        }
+
         // Static file routes for production (serves frontend build)
         val staticRoutes = StaticRoutes.make(staticDir)
 
-        // Static routes first for non-API paths, then API routes
-        // (staticRoutes only handles non-API paths via the make method)
-        val allRoutes = analytics.routes <+> staticRoutes <+> healthRoute <+> authRoutes <+> snapshotting(dataRoutes)
+        // Static routes answer only GET/HEAD on non-API paths (see StaticRoutes.make), so they can go before the API routes.
+        // MCP goes before the static routes: their SPA fallback would answer `GET /mcp` with index.html.
+        val allRoutes = mcpRoutes <+> analytics.routes <+> staticRoutes <+> healthRoute <+> authRoutes <+> snapshotting(dataRoutes)
 
         EmberServerBuilder
           .default[IO]

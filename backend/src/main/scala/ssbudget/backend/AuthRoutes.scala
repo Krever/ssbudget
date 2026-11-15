@@ -5,7 +5,7 @@ import cats.implicits.*
 import org.http4s.HttpRoutes
 import sttp.model.headers.CookieValueWithMeta
 import sttp.tapir.server.http4s.Http4sServerInterpreter
-import ssbudget.backend.auth.{PasswordService, SessionService, WebAuthnService}
+import ssbudget.backend.auth.{McpTokenService, PasswordService, SessionService, WebAuthnService}
 import ssbudget.backend.db.repository.{AuthConfigRepository, PasskeyCredentialRepository}
 import ssbudget.shared.api.*
 
@@ -49,9 +49,36 @@ object AuthRoutes {
       passwordService: PasswordService,
       sessionService: SessionService,
       webAuthnService: WebAuthnService,
+      mcpTokens: McpTokenService,
       testMode: Boolean = false,
   ): HttpRoutes[IO] = {
     val interpreter = Http4sServerInterpreter[IO]()
+
+    // MCP access tokens. Listing and revoking need the session; making one needs an IdentityProof too, in test mode also,
+    // because the result is a credential that does not expire.
+    val listMcpTokensRoute = interpreter.toRoutes(
+      AuthEndpoints.listMcpTokens
+        .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
+        .serverLogic(_ => _ => mcpTokens.list.map(Right(_))),
+    )
+
+    val createMcpTokenRoute = interpreter.toRoutes(
+      AuthEndpoints.createMcpToken
+        .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
+        .serverLogic(_ =>
+          req =>
+            confirmIdentity(authConfigRepo, passwordService, webAuthnService, req.proof).flatMap {
+              case Left(err) => IO.pure(Left(err))
+              case Right(_)  => mcpTokens.create(req.name)
+            },
+        ),
+    )
+
+    val revokeMcpTokenRoute = interpreter.toRoutes(
+      AuthEndpoints.revokeMcpToken
+        .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
+        .serverLogic(_ => id => mcpTokens.revoke(id).map(Right(_))),
+    )
 
     // Status endpoint - uses optional session cookie to check login state
     val statusRoute = interpreter.toRoutes(
@@ -140,7 +167,10 @@ object AuthRoutes {
       loginPasskeyStartRoute <+>
       loginPasskeyFinishRoute <+>
       listPasskeysRoute <+>
-      deletePasskeyRoute
+      deletePasskeyRoute <+>
+      listMcpTokensRoute <+>
+      createMcpTokenRoute <+>
+      revokeMcpTokenRoute
   }
 
   /** Validates a session token and returns Unit if valid. Used by protected endpoints.

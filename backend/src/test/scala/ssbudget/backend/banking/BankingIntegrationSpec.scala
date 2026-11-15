@@ -117,6 +117,7 @@ class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAft
         importService,
         importJobService,
         ruleEngine,
+        new CategorizationService(repos, ruleEngine),
         new AnalyticsService(None, repos.analyticsState),
         testMode = true,
       )

@@ -6,8 +6,8 @@ import org.scalajs.dom.{File, FileReader, HTMLInputElement, XMLHttpRequest}
 import ssbudget.frontend.auth.AuthState
 import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.{ApiClient, DataService}
-import ssbudget.frontend.util.WebAuthnFacade
-import ssbudget.shared.api.{ChangePasswordRequest, IdentityProof, PasskeyInfo}
+import ssbudget.frontend.util.{Formatting, WebAuthnFacade}
+import ssbudget.shared.api.{ChangePasswordRequest, CreateMcpTokenRequest, CreatedMcpToken, IdentityProof, McpTokenInfo, PasskeyInfo}
 import ssbudget.shared.model.{Currency, CurrencySetting}
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -30,6 +30,10 @@ object SettingsPage {
     val passkeyNameVar     = Var("")
     val addCurrencyCodeVar = Var("")
     val refreshingRatesVar = Var(false)
+    // What can prove the identity of the user for a sensitive action; the Password and MCP cards both read these.
+    // None until loaded; a password field is only offered once a password exists
+    val hasPasswordVar     = Var(Option.empty[Boolean])
+    val canUsePasskey      = passkeysVar.signal.map(_.nonEmpty && WebAuthnFacade.isSupported)
 
     def loadPasskeys(): Unit = {
       loadingVar.set(true)
@@ -205,7 +209,10 @@ object SettingsPage {
       ),
 
       // Password section
-      passwordCard(apiClient, passkeysVar.signal, errorVar, successVar),
+      passwordCard(apiClient, hasPasswordVar, canUsePasskey, errorVar, successVar),
+
+      // MCP access tokens
+      mcpCard(apiClient, hasPasswordVar.signal, canUsePasskey, errorVar),
 
       // Currencies section
       currenciesCard(errorVar, successVar, addCurrencyCodeVar, refreshingRatesVar),
@@ -231,19 +238,35 @@ object SettingsPage {
     )
   }
 
+  /** A typed current password is the proof as it is; left blank, a passkey confirms instead. */
+  private def identityProof(apiClient: ApiClient, password: String): Future[IdentityProof] =
+    if password.nonEmpty then Future.successful(IdentityProof.CurrentPassword(password))
+    else apiClient.auth.verifyPasskeyStart().flatMap(WebAuthnFacade.getCredential).map(IdentityProof.Passkey(_))
+
+  private def passwordInput(placeholderText: String, autocomplete: String, v: Var[String]): HtmlElement = {
+    input(
+      cls          := "form-control",
+      tpe          := "password",
+      placeholder  := placeholderText,
+      autoComplete := autocomplete,
+      controlled(
+        value <-- v.signal,
+        onInput.mapToValue --> v.writer,
+      ),
+    )
+  }
+
   private def passwordCard(
       apiClient: ApiClient,
-      passkeys: Signal[List[PasskeyInfo]],
+      hasPasswordVar: Var[Option[Boolean]],
+      canUsePasskey: Signal[Boolean],
       errorVar: Var[Option[String]],
       successVar: Var[Option[String]],
   ): HtmlElement = {
-    // None until loaded; the current-password field is only offered once one exists
-    val hasPasswordVar = Var(Option.empty[Boolean])
-    val canUsePasskey  = passkeys.map(_.nonEmpty && WebAuthnFacade.isSupported)
-    val currentVar     = Var("")
-    val newVar         = Var("")
-    val confirmVar     = Var("")
-    val savingVar      = Var(false)
+    val currentVar = Var("")
+    val newVar     = Var("")
+    val confirmVar = Var("")
+    val savingVar  = Var(false)
 
     val canSubmitSignal = canUsePasskey
       .combineWith(currentVar.signal)
@@ -254,47 +277,25 @@ object SettingsPage {
         (current.nonEmpty || passkey) && next.nonEmpty && next == confirm && !saving
       }
 
-    // A typed current password is used as-is; left blank, the change is confirmed with a passkey instead
-    def proof(): Future[IdentityProof] = {
-      val current = currentVar.now()
-      if current.nonEmpty then {
-        Future.successful(IdentityProof.CurrentPassword(current))
-      } else {
-        apiClient.auth.verifyPasskeyStart().flatMap(WebAuthnFacade.getCredential).map(IdentityProof.Passkey(_))
-      }
-    }
-
     // Only reachable while canSubmitSignal holds: the disabled button also blocks Enter-to-submit
     def submit(): Unit = {
       savingVar.set(true)
       errorVar.set(None)
       successVar.set(None)
-      proof().map(ChangePasswordRequest(newVar.now(), _)).flatMap(apiClient.auth.changePassword).onComplete { result =>
-        savingVar.set(false)
-        result match {
-          case Success(_)  =>
-            currentVar.set("")
-            newVar.set("")
-            confirmVar.set("")
-            hasPasswordVar.set(Some(true))
-            successVar.set(Some("Password changed"))
-          case Failure(ex) =>
-            errorVar.set(Some(s"Failed to change password: ${ex.getMessage}"))
-        }
+      identityProof(apiClient, currentVar.now()).map(ChangePasswordRequest(newVar.now(), _)).flatMap(apiClient.auth.changePassword).onComplete {
+        result =>
+          savingVar.set(false)
+          result match {
+            case Success(_)  =>
+              currentVar.set("")
+              newVar.set("")
+              confirmVar.set("")
+              hasPasswordVar.set(Some(true))
+              successVar.set(Some("Password changed"))
+            case Failure(ex) =>
+              errorVar.set(Some(s"Failed to change password: ${ex.getMessage}"))
+          }
       }
-    }
-
-    def passwordInput(placeholderText: String, autocomplete: String, v: Var[String]): HtmlElement = {
-      input(
-        cls          := "form-control",
-        tpe          := "password",
-        placeholder  := placeholderText,
-        autoComplete := autocomplete,
-        controlled(
-          value <-- v.signal,
-          onInput.mapToValue --> v.writer,
-        ),
-      )
     }
 
     div(
@@ -331,6 +332,162 @@ object SettingsPage {
               cls := "text-muted d-block mt-2",
               if hasPassword.contains(true) then "Leave the current password blank to confirm with your passkey instead."
               else "You'll be asked to confirm with your passkey.",
+            )
+          }
+        },
+      ),
+    )
+  }
+
+  /** Access tokens for the MCP endpoint (`/mcp`), with which an assistant categorizes transactions. A token is made by the server and shown one time,
+    * as part of the command that adds the server to Claude Code. Later only its name and its dates are visible, and it can be revoked.
+    */
+  private def mcpCard(
+      apiClient: ApiClient,
+      hasPassword: Signal[Option[Boolean]],
+      canUsePasskey: Signal[Boolean],
+      errorVar: Var[Option[String]],
+  ): HtmlElement = {
+    val tokensVar   = Var(List.empty[McpTokenInfo])
+    val nameVar     = Var("")
+    val passwordVar = Var("")
+    val busyVar     = Var(false)
+    val createdVar  = Var(Option.empty[CreatedMcpToken])
+
+    def load(): Unit =
+      apiClient.auth.listMcpTokens().onComplete {
+        case Success(tokens) => tokensVar.set(tokens)
+        case Failure(ex)     => errorVar.set(Some(s"Failed to load MCP tokens: ${ex.getMessage}"))
+      }
+
+    def create(): Unit = {
+      busyVar.set(true)
+      errorVar.set(None)
+      identityProof(apiClient, passwordVar.now()).map(CreateMcpTokenRequest(nameVar.now(), _)).flatMap(apiClient.auth.createMcpToken).onComplete {
+        result =>
+          busyVar.set(false)
+          result match {
+            case Success(created) =>
+              nameVar.set("")
+              passwordVar.set("")
+              createdVar.set(Some(created))
+              load()
+            case Failure(ex)      => errorVar.set(Some(s"Failed to create the token: ${ex.getMessage}"))
+          }
+      }
+    }
+
+    def revoke(token: McpTokenInfo): Unit =
+      if dom.window.confirm(s"Revoke the token \"${token.name}\"? The client that uses it loses access at once.") then {
+        apiClient.auth.revokeMcpToken(token.id).onComplete {
+          case Success(_)  =>
+            createdVar.update(_.filterNot(_.info.id == token.id))
+            load()
+          case Failure(ex) => errorVar.set(Some(s"Failed to revoke the token: ${ex.getMessage}"))
+        }
+      }
+
+    def command(created: CreatedMcpToken): String =
+      s"""claude mcp add --transport http --scope user ssbudget ${dom.window.location.origin}/mcp --header "Authorization: Bearer ${created.token}""""
+
+    val canCreate = canUsePasskey.combineWith(passwordVar.signal).combineWith(busyVar.signal).map { case (passkey, password, busy) =>
+      (password.nonEmpty || passkey) && !busy
+    }
+
+    div(
+      cls := "card mb-4",
+      onMountCallback(_ => load()),
+      div(cls := "card-header", h5(cls := "mb-0", "MCP access")),
+      div(
+        cls   := "card-body",
+        p(
+          cls := "text-muted small",
+          "A token lets an assistant (Claude Code) read your transactions, categories and rules, and change categories and rules. ",
+          "It gives nothing else. Make one token for each client, and revoke it when you do not use it.",
+        ),
+        child.maybe <-- createdVar.signal.map(_.map { created =>
+          val copiedVar = Var(false) // per banner: a new token starts with "Copy command" again
+          div(
+            cls := "alert alert-success",
+            div(
+              cls       := "d-flex justify-content-between align-items-start",
+              div(
+                strong(s"Token \"${created.info.name}\" is ready. "),
+                "Run this command to add the server to Claude Code. The token is not shown again.",
+              ),
+              button(tpe := "button", cls := "btn-close", onClick --> { _ => createdVar.set(None) }),
+            ),
+            pre(
+              cls       := "bg-body border rounded p-2 mt-2 mb-2 small user-select-all",
+              styleAttr := "white-space: pre-wrap; word-break: break-all;",
+              command(created),
+            ),
+            button(
+              tpe       := "button",
+              cls       := "btn btn-sm btn-outline-success",
+              child.text <-- copiedVar.signal.map(if _ then "Copied" else "Copy command"),
+              onClick --> { _ =>
+                dom.window.navigator.clipboard.writeText(command(created)).toFuture.foreach(_ => copiedVar.set(true))
+              },
+            ),
+            small(
+              cls       := "text-muted ms-2",
+              "Then start the work in Claude Code with ",
+              code("/mcp__ssbudget__categorize_transactions"),
+              ".",
+            ),
+          )
+        }),
+        child <-- tokensVar.signal.map { tokens =>
+          if tokens.isEmpty then p(cls := "text-muted", "No tokens. The MCP endpoint refuses all requests.")
+          else
+            table(
+              cls                      := "table table-sm align-middle mb-3",
+              thead(tr(th("Name"), th("Created"), th("Last used"), th())),
+              tbody(
+                tokens.map { token =>
+                  tr(
+                    td(token.name),
+                    td(Formatting.formatIso(token.createdAt)),
+                    td(token.lastUsedAt.map(Formatting.formatDateTime).getOrElse("never")),
+                    td(
+                      cls := "text-end",
+                      button(cls := "btn btn-outline-danger btn-sm", "Revoke", onClick --> { _ => revoke(token) }),
+                    ),
+                  )
+                },
+              ),
+            )
+        },
+        form(
+          cls := "row g-2 align-items-center",
+          onSubmit.preventDefault --> { _ => create() },
+          div(
+            cls := "col-md",
+            input(
+              cls         := "form-control",
+              tpe         := "text",
+              placeholder := "Token name, for example the computer (optional)",
+              maxLength   := 60,
+              controlled(value <-- nameVar.signal, onInput.mapToValue --> nameVar.writer),
+            ),
+          ),
+          child.maybe <-- hasPassword.map { has =>
+            Option.when(has.contains(true))(div(cls := "col-md", passwordInput("Current password", "current-password", passwordVar)))
+          },
+          div(
+            cls := "col-md-auto",
+            button(cls := "btn btn-primary", tpe := "submit", disabled <-- canCreate.map(!_), "Create token"),
+          ),
+        ),
+        child.maybe <-- canUsePasskey.combineWith(hasPassword).map { case (passkey, hasPassword) =>
+          Option.when(hasPassword.isDefined) {
+            small(
+              cls := "text-muted d-block mt-2",
+              if passkey && hasPassword.contains(true) then "A new token needs your password. Leave it blank to confirm with your passkey instead."
+              else if passkey then "You'll be asked to confirm with your passkey."
+              else if hasPassword.contains(true) then "A new token needs your password."
+              else "A new token needs a password or a passkey as confirmation. This session has neither.",
             )
           }
         },
