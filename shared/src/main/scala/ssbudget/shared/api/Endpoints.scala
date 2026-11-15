@@ -128,6 +128,14 @@ object Endpoints {
         .out(jsonBody[Period])
         .errorOut(stringBody)
 
+    /** Set how much a period plans to move to savings. Returns the updated period. */
+    val setPlannedSaving: Secured[(PeriodId, SetPeriodPlannedSavingRequest), Period] =
+      secureEndpoint.put
+        .in("periods" / path[PeriodId]("id") / "planned-saving")
+        .in(jsonBody[SetPeriodPlannedSavingRequest])
+        .out(jsonBody[Period])
+        .errorOut(stringBody)
+
     /** Per-period retrospective, newest first. `limit` caps how many periods are summarized (each costs a few aggregate queries). */
     val summaries: Secured[Option[Int], List[PeriodSummary]] =
       secureEndpoint.get
@@ -137,10 +145,10 @@ object Endpoints {
         .errorOut(stringBody)
 
     /** The daily free-money terms of every recorded day, oldest first. The client groups them by period and draws the trend. */
-    val freeMoneyHistory: Secured[Unit, List[DailyBudgetSnapshot]] =
+    val freeMoneyHistory: Secured[Unit, FreeMoneyHistory] =
       secureEndpoint.get
         .in("periods" / "free-money-history")
-        .out(jsonBody[List[DailyBudgetSnapshot]])
+        .out(jsonBody[FreeMoneyHistory])
         .errorOut(stringBody)
   }
 
@@ -428,6 +436,7 @@ object Endpoints {
     periods.list,
     periods.startNew,
     periods.setExpectedEnd,
+    periods.setPlannedSaving,
     savings.periodBaselines,
     exchangeRates.getAll,
     currencies.getSettings,
@@ -558,6 +567,13 @@ object Endpoints {
           .out(jsonBody[Period])
           .errorOut(stringBody)
 
+      val setPlannedSaving: Client[(PeriodId, SetPeriodPlannedSavingRequest), Period] =
+        baseEndpoint.put
+          .in("periods" / path[PeriodId]("id") / "planned-saving")
+          .in(jsonBody[SetPeriodPlannedSavingRequest])
+          .out(jsonBody[Period])
+          .errorOut(stringBody)
+
       val summaries: Client[Option[Int], List[PeriodSummary]] =
         baseEndpoint.get
           .in("periods" / "summaries")
@@ -565,8 +581,8 @@ object Endpoints {
           .out(jsonBody[List[PeriodSummary]])
           .errorOut(stringBody)
 
-      val freeMoneyHistory: Client[Unit, List[DailyBudgetSnapshot]] =
-        baseEndpoint.get.in("periods" / "free-money-history").out(jsonBody[List[DailyBudgetSnapshot]]).errorOut(stringBody)
+      val freeMoneyHistory: Client[Unit, FreeMoneyHistory] =
+        baseEndpoint.get.in("periods" / "free-money-history").out(jsonBody[FreeMoneyHistory]).errorOut(stringBody)
     }
 
     object banking {

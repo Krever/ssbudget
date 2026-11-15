@@ -1,7 +1,7 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
-import ssbudget.frontend.components.{FreeMoneyChart, Loading, LoadingState}
+import ssbudget.frontend.components.{FreeMoneyChart, InlineEdit, Loading, LoadingState}
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -30,7 +30,6 @@ object PeriodsPage {
         case Success(list) => summaries.set(LoadingState.Loaded(list))
         case Failure(ex)   => summaries.set(LoadingState.Error(ex.getMessage))
       }
-      dataService.refreshFreeMoneyHistory()
     }
 
     div(
@@ -68,6 +67,7 @@ object PeriodsPage {
                   cls := "d-flex flex-wrap gap-4",
                   stat("Started", Formatting.formatDate(period.startDate)),
                   stat("Expected end", expectedEndInput(period)),
+                  stat("Planned saving", plannedSavingInput(period)),
                   stat("Days left", period.daysRemaining(DataService.today).toString),
                   stat("Day", period.dayOfPeriod(DataService.today).toString),
                 ),
@@ -110,6 +110,28 @@ object PeriodsPage {
         Try(LocalDate.parse(value)).foreach(date => dataService.setPeriodExpectedEnd(period.id, date))
       },
     )
+
+  /** How much the period plans to move to savings, typed directly into the row, in the primary currency.
+    *
+    * It can be changed during the period. When less was saved than planned, the plan is made smaller, and the rest is free again at once. The
+    * Dashboard has the same control in its Free money card. For what the field accepts, see [[InlineEdit.parseCentsOrZero]].
+    */
+  private def plannedSavingInput(period: Period): HtmlElement =
+    InlineEdit
+      .moneyInput(Option.when(period.plannedSavingCents > 0)(period.plannedSavingCents), placeholderText = "0")
+      .amend(
+        cls                        := "py-0 fw-semibold",
+        styleAttr                  := "width: 7rem",
+        dataAttr("planned-saving") := period.plannedSavingCents.toString,
+        InlineEdit.commitOnEnter,
+        // `change`, as for the expected end: one request for a finished amount, not one for each key.
+        onChange --> { ev =>
+          InlineEdit
+            .parseCentsOrZero(ev.target.asInstanceOf[org.scalajs.dom.html.Input].value)
+            .filter(_ != period.plannedSavingCents)
+            .foreach(dataService.setPeriodPlannedSaving(period.id, _))
+        },
+      )
 
   private def stat(label: String, value: Modifier[HtmlElement]): HtmlElement =
     div(

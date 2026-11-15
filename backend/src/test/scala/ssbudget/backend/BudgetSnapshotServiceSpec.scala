@@ -1,5 +1,6 @@
 package ssbudget.backend
 
+import cats.syntax.all.*
 import cats.effect.IO
 import cats.effect.testing.scalatest.AsyncIOSpec
 import doobie.*
@@ -360,6 +361,124 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
         } yield {
           def closed(rows: List[DailyBudgetSnapshot]) = rows.filter(_.onDate.isBefore(closedOn)).map(_.budgetsToSpendCents)
           closed(after) shouldBe closed(before)
+        }
+      }
+    }
+  }
+
+  "A planned saving" - {
+    def plan(xa: Transactor[IO], cents: Long): IO[Unit] =
+      sql"UPDATE periods SET planned_saving_cents = $cents WHERE id = 'per1'".update.run.transact(xa).void
+
+    // Day 6: 700 PLN goes to savings. On day 2 savings paid a 400 PLN budgeted bill, so the net amount saved by day 6 is 300 PLN.
+    def moveToSavings(xa: Transactor[IO]): IO[Unit] =
+      tx("sv1", "uid1", -70000, "PLN", periodStart.plusDays(6), internal = true, None).transact(xa).void
+
+    "is reserved until it is moved to savings, and does not move the plan's own line" in {
+      withFixture { (service, _, xa) =>
+        for {
+          _     <- moveToSavings(xa)
+          base5 <- freeOn(service, periodStart.plusDays(5))
+          base6 <- freeOn(service, periodStart.plusDays(6))
+          _     <- plan(xa, 50000)
+          day5  <- freeOn(service, periodStart.plusDays(5))
+          day6  <- freeOn(service, periodStart.plusDays(6))
+        } yield {
+          base5.savingReserveCents shouldBe 0L
+          // Money that savings paid out does not make the plan larger: the full 500 PLN and no more.
+          day5.savingReserveCents shouldBe 50000L
+          day6.savingReserveCents shouldBe 20000L
+          day5.freeMoneyCents shouldBe base5.freeMoneyCents - 50000L
+          day6.freeMoneyCents shouldBe base6.freeMoneyCents - 20000L
+          List(day5, day6).map(_.planLineCents) shouldBe List(base5, base6).map(_.planLineCents)
+        }
+      }
+    }
+
+    "is free again when the plan is made smaller than what was saved" in {
+      withFixture { (service, _, xa) =>
+        for {
+          _    <- moveToSavings(xa)
+          _    <- plan(xa, 30000)
+          day6 <- freeOn(service, periodStart.plusDays(6))
+        } yield day6.savingReserveCents shouldBe 0L
+      }
+    }
+
+    "counts what was moved above the plan as money for the bills still to pay" in {
+      withFixture { (service, _, xa) =>
+        for {
+          _    <- moveToSavings(xa)
+          // The plan is 100 PLN and 300 PLN was saved: 200 PLN waits in savings, and more than that is still to pay.
+          _    <- plan(xa, 10000)
+          day6 <- freeOn(service, periodStart.plusDays(6))
+          none <- plan(xa, 0) *> freeOn(service, periodStart.plusDays(6))
+        } yield {
+          day6.stillToPayCents should be > 20000L
+          day6.savingReserveCents shouldBe -20000L
+          // With no plan, all that is moved to savings is saving.
+          none.savingReserveCents shouldBe 0L
+        }
+      }
+    }
+
+    "reaches the earlier days of the open period when it is changed" in {
+      withFixture { (service, repos, xa) =>
+        for {
+          _      <- service.ensureUpToDate
+          before <- repos.dailyBudgetSnapshots.findAll
+          _      <- plan(xa, 50000)
+          _      <- service.ensureUpToDate
+          after  <- repos.dailyBudgetSnapshots.findAll
+          fromDb <- viewFreeMoney(xa)
+        } yield {
+          after.map(_.savingReserveCents) shouldBe before.map(_ => 50000L)
+          after.map(_.freeMoneyCents) shouldBe before.map(_.freeMoneyCents - 50000L)
+          fromDb.toMap shouldBe after.map(r => r.onDate.toString -> r.freeMoneyCents).toMap
+        }
+      }
+    }
+  }
+
+  "The causes of a day's change" - {
+    // A category with no budget that earns and spends, spend with no category, a transfer to savings, and spend above the budget of 'cat1'.
+    def seedCauses(xa: Transactor[IO]): IO[Unit] =
+      (for {
+        _ <- sql"INSERT INTO categories (id, name, color) VALUES ('pay', 'Pay', '#888')".update.run
+        _ <- tx("c1", "uid1", 70000, "PLN", periodStart.plusDays(3), internal = false, Some("pay"))
+        _ <- tx("c2", "uid1", -9000, "PLN", periodStart.plusDays(4), internal = false, None)
+        _ <- tx("c3", "uid1", -80000, "PLN", periodStart.plusDays(6), internal = false, Some("pay"))
+        _ <- tx("c4", "uid1", -30000, "PLN", periodStart.plusDays(6), internal = true, None)
+        _ <- tx("c5", "uid1", -90000, "PLN", periodStart.plusDays(8), internal = false, Some("cat1"))
+      } yield ()).transact(xa)
+
+    "add up to the change of the plan's own line, on each day of the open period" in {
+      withFixture { (service, _, xa) =>
+        for {
+          _      <- seedCauses(xa)
+          causes <- service.ensureUpToDateWithCauses
+          days   <- (0 to 10).toList.traverse(i => freeOn(service, periodStart.plusDays(i)))
+        } yield {
+          val changes = days.zip(days.drop(1)).map { case (before, after) => after.onDate -> (after.planLineCents - before.planLineCents) }
+          causes.map(c => c.day -> c.causes.map(_.cents).sum) shouldBe changes
+          // The test is empty when nothing moves: at least the day of the spend above the budget must show a loss.
+          changes.toMap.apply(periodStart.plusDays(8)) should be < 0L
+        }
+      }
+    }
+
+    "name the category, largest first, and leave transfers out" in {
+      withFixture { (service, _, xa) =>
+        for {
+          _      <- seedCauses(xa)
+          causes <- service.ensureUpToDateWithCauses
+        } yield {
+          val byDay = causes.map(c => c.day -> c.causes).toMap
+          // Day 4: 90 PLN with no category. Day 6: the group 'Pay' was 700 PLN up and spends 800 PLN, so 100 PLN of it is a loss; the 300 PLN
+          // transfer to savings is not a cause.
+          byDay(periodStart.plusDays(4)) shouldBe List(LineCause("No category", -9000))
+          byDay(periodStart.plusDays(6)) shouldBe List(LineCause("Pay", -10000))
+          byDay(periodStart.plusDays(8)).headOption.map(_.label) shouldBe Some("Travel")
         }
       }
     }

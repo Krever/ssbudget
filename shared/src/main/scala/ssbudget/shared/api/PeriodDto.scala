@@ -50,3 +50,14 @@ final case class PeriodCategorySpend(
   * so this is the only thing that decides its length; nothing re-derives it from a payday.
   */
 final case class SetPeriodExpectedEndRequest(expectedEnd: LocalDate) derives Codec.AsObject
+
+/** The daily record behind the free-money charts.
+  *
+  * @param causes
+  *   for each day of the OPEN period after its first: what moved the plan's own line. A closed period has none: its days keep the plan they were
+  *   recorded with, and a breakdown by today's budgets would not add up to them.
+  */
+final case class FreeMoneyHistory(snapshots: List[DailyBudgetSnapshot], causes: List[DayCauses]) derives Codec.AsObject
+
+/** The amount to move to savings in a period, in the primary currency. Zero removes the plan. */
+final case class SetPeriodPlannedSavingRequest(plannedSavingCents: Long) derives Codec.AsObject

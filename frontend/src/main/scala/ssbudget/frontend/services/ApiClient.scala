@@ -170,12 +170,17 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request((id, SetPeriodExpectedEndRequest(expectedEnd)))).map(handleResponse)
     }
 
+    def setPlannedSaving(id: PeriodId, plannedSavingCents: Long): Future[Period] = {
+      val request = interpreter.toRequest(Endpoints.client.periods.setPlannedSaving, Some(baseUri))
+      backend.send(request((id, SetPeriodPlannedSavingRequest(plannedSavingCents)))).map(handleResponse)
+    }
+
     def summaries(limit: Option[Int] = None): Future[List[PeriodSummary]] = {
       val request = interpreter.toRequest(Endpoints.client.periods.summaries, Some(baseUri))
       backend.send(request(limit)).map(handleResponse)
     }
 
-    def freeMoneyHistory(): Future[List[DailyBudgetSnapshot]] = {
+    def freeMoneyHistory(): Future[FreeMoneyHistory] = {
       val request = interpreter.toRequest(Endpoints.client.periods.freeMoneyHistory, Some(baseUri))
       backend.send(request(())).map(handleResponse)
     }

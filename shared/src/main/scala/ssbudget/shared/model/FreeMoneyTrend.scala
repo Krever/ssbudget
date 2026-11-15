@@ -1,7 +1,19 @@
 package ssbudget.shared.model
 
+import io.circe.Codec
+
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
+
+/** One part of the change of the plan's own line on a day: a category (or the planned items) and how much it moved the line.
+  *
+  * Negative: the plan lost that much there, for example a payment above its budget, or spend in a category with no budget. Positive: the plan got
+  * that much back, for example the part of a steady budget that the day did not use.
+  */
+final case class LineCause(label: String, cents: Long) derives Codec.AsObject
+
+/** All parts of one day's change of the plan's own line, largest first. Their sum is the change of the line from the day before. */
+final case class DayCauses(day: LocalDate, causes: List[LineCause]) derives Codec.AsObject
 
 /** Free money on one day of a period, with the money that reached the plan from outside it.
   *
@@ -13,6 +25,8 @@ import java.time.temporal.ChronoUnit
   *   see [[DailyBudgetSnapshot.fromSavingsCents]]
   * @param unplannedIncomeCents
   *   see [[DailyBudgetSnapshot.unplannedIncomeCents]]
+  * @param causes
+  *   what moved the plan's own line on this day, largest first. Empty for the days of a closed period, and for the first day of a period.
   * @param measured
   *   `true` when the figure was recorded on the day, `false` when it was rebuilt from the record later.
   */
@@ -23,6 +37,7 @@ final case class FreeMoneyPoint(
     fromSavingsCents: Long,
     unplannedIncomeCents: Long,
     measured: Boolean,
+    causes: List[LineCause] = Nil,
 )
 
 /** Where free money is expected to be on the period's expected end.
@@ -50,8 +65,9 @@ object FreeMoneyTrend {
   /** The smallest number of days that gives a projection. With fewer, the median is one or two days' accidents. */
   val MinDays = 5
 
-  /** The daily points of each period, oldest first. Days with no open period are dropped. */
-  def byPeriod(snapshots: List[DailyBudgetSnapshot]): Map[PeriodId, List[FreeMoneyPoint]] =
+  /** The daily points of each period, oldest first, each with the causes of its day. Days with no open period are dropped. */
+  def byPeriod(snapshots: List[DailyBudgetSnapshot], causes: List[DayCauses]): Map[PeriodId, List[FreeMoneyPoint]] = {
+    val causesOf = causes.map(c => c.day -> c.causes).toMap
     snapshots
       .flatMap { s =>
         s.periodId.map { id =>
@@ -62,6 +78,7 @@ object FreeMoneyTrend {
             s.fromSavingsCents,
             s.unplannedIncomeCents,
             s.source == SnapshotSource.Live,
+            causesOf.getOrElse(s.onDate, Nil),
           )
         }
       }
@@ -69,6 +86,7 @@ object FreeMoneyTrend {
       .view
       .mapValues(_.sortBy(_.day.toEpochDay))
       .toMap
+  }
 
   /** The plan's own line, moved up or down so that its last day is at the real free money of that day.
     *

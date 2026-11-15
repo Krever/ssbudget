@@ -47,6 +47,8 @@ object DashboardPage {
           stored.lastOption.fold(0L)(_.fromSavingsCents),
           stored.lastOption.fold(0L)(_.unplannedIncomeCents),
           measured = true,
+          // The causes are those of today's stored row. An older latest row belongs to another day, and its causes are not today's.
+          stored.lastOption.filter(_.day == today).fold(Nil)(_.causes),
         )
         val points = stored.filter(_.day.isBefore(today)) :+ now
         (points, FreeMoneyTrend.project(period, points), FreeMoneyTrend.projectionHistory(period, points), free.currency)
@@ -76,7 +78,6 @@ object DashboardPage {
         ()
       case Success(job)                                          =>
         dataService.initialize()
-        dataService.refreshFreeMoneyHistory()
         syncingBanks.set(false)
         val base = s"Imported ${job.imported} new transaction(s)"
         syncMessage.set(job.message match {
@@ -92,7 +93,7 @@ object DashboardPage {
     div(
       cls := "container-fluid mt-3",
       // Refresh on each visit so changes made elsewhere (e.g. linking a bank account) are reflected without a manual page reload.
-      onMountCallback(_ => { dataService.initialize(); dataService.refreshFreeMoneyHistory() }),
+      onMountCallback(_ => { dataService.initialize(); () }),
       div(
         cls := "d-flex justify-content-between align-items-center mb-3",
         h4(cls := "mb-0", "Dashboard"),
@@ -199,43 +200,121 @@ object DashboardPage {
         // splitting them by provenance here only asked the reader to add up four numbers instead of two.
         accountingRow("+ Still to receive", dataService.stillToReceive, positive = true),
         accountingRow("- Still to pay", dataService.stillToPay, positive = false),
+        // The planned saving of the period. One row at a time, by the sign of what it takes from free money: no plan yet, a part of the plan
+        // not yet moved, or more than the plan moved. The word "plan" in the row is the control: a click on it opens the field.
+        child.maybe <-- dataService.currentPeriod.combineWith(dataService.savingReserve).map { case (periodOpt, reserve) =>
+          periodOpt.map { period =>
+            if period.plannedSavingCents <= 0 then {
+              div(cls := "d-flex justify-content-between text-muted", span("Planned saving: ", plannedSavingControl(period)))
+            } else if reserve.amountCents < 0 then {
+              div(
+                dataAttr("saving-reserve") := reserve.amountCents.toString,
+                title                      := "More than this period's planned saving was moved to a savings account. The part above the plan " +
+                  "is not saving: it is counted as money for what is still to pay, for example bills that are taken from that account.",
+                accountingRow(
+                  span("+ In savings above the ", plannedSavingControl(period)),
+                  Val(Money(-reserve.amountCents, reserve.currency)),
+                  positive = true,
+                ),
+              )
+            } else {
+              div(
+                dataAttr("saving-reserve") := reserve.amountCents.toString,
+                title                      := "The part of this period's planned saving that is not yet moved to a savings account. " +
+                  "It is still in the spending balance, and it is not free.",
+                accountingRow(span("- Still to save (", plannedSavingControl(period), ")"), Val(reserve), positive = false),
+              )
+            }
+          }
+        },
         hr(cls := "my-1"),
         accountingRow("= Free money", dataService.freeMoney, positive = true, bold = true),
         // Below the arithmetic, not in it: the rows above are the plan, and this is where the plan goes if it continues to lose at its usual
         // daily rate. Absent until there are two days to draw.
-        child.maybe <-- freeMoneyTrend.map(_.flatMap { case (points, projection, forecasts, currency) =>
-          FreeMoneyChart(points, projection, forecasts, currency).map { chart =>
-            div(
-              projection.map { p =>
-                div(
-                  cls                       := "d-flex justify-content-between text-muted",
-                  dataAttr("projected-end") := p.endCents.toString,
-                  title                     := "Free money now, plus the median daily change of this period for each remaining day. " +
-                    "Savings transfers and unplanned income are not part of that change.",
-                  span(
-                    "→ Projected at period end",
-                    // Do the last days go better or worse than the projection expects? Green when the expected end moved up.
-                    FreeMoneyTrend.projectionChange(forecasts).map { case (since, change) =>
-                      span(
-                        cls                          := s"ms-2 small ${MoneyFormatter.amountCls(change)}",
-                        dataAttr("projected-change") := change.toString,
-                        title                        := "Change of the projected end across the last days, at the usual daily change. " +
-                          "Positive: these days were better than the usual day of this period.",
-                        s"${MoneyFormatter.formatSigned(change)} since ${Formatting.formatDay(since)}",
-                      )
-                    },
-                  ),
-                  span(cls := MoneyFormatter.amountCls(p.endCents), MoneyFormatter.formatSimple(p.endCents, currency)),
-                )
-              },
-              div(cls := "mt-2", chart),
-            )
+        child.maybe <-- freeMoneyTrend.map {
+          _.flatMap { case (points, projection, forecasts, currency) =>
+            FreeMoneyChart(points, projection, forecasts, currency).map { chart =>
+              div(
+                projection.map { p =>
+                  div(
+                    cls                       := "d-flex justify-content-between text-muted",
+                    dataAttr("projected-end") := p.endCents.toString,
+                    title                     := "Free money now, plus the median daily change of this period for each remaining day. " +
+                      "Savings transfers and unplanned income are not part of that change.",
+                    span(
+                      "→ Projected at period end",
+                      // Do the last days go better or worse than the projection expects? Green when the expected end moved up.
+                      FreeMoneyTrend.projectionChange(forecasts).map { case (since, change) =>
+                        span(
+                          cls                          := s"ms-2 small ${MoneyFormatter.amountCls(change)}",
+                          dataAttr("projected-change") := change.toString,
+                          title                        := "Change of the projected end across the last days, at the usual daily change. " +
+                            "Positive: these days were better than the usual day of this period.",
+                          s"${MoneyFormatter.formatSigned(change)} since ${Formatting.formatDay(since)}",
+                        )
+                      },
+                    ),
+                    span(cls := MoneyFormatter.amountCls(p.endCents), MoneyFormatter.formatSimple(p.endCents, currency)),
+                  )
+                },
+                div(cls := "mt-2", chart),
+              )
+            }
           }
-        }),
+        },
       ),
     )
 
-  private def accountingRow(label: String, amount: Signal[Money], positive: Boolean, bold: Boolean = false): HtmlElement = {
+  /** `true` while the planned saving is open for typing in the Free money card. */
+  private val editingPlannedSaving = Var(false)
+
+  /** The period's planned saving as text that becomes a field on a click, in the primary currency.
+    *
+    * The field is saved when it loses focus, and Enter leaves the field. Escape closes it with no change. An empty field is zero: no plan. Text that
+    * is not an amount is ignored. The same amount can be typed on the Periods page.
+    */
+  private def plannedSavingControl(period: Period): HtmlElement =
+    span(
+      child <-- editingPlannedSaving.signal.map {
+        case false =>
+          span(
+            cls                        := "text-decoration-underline",
+            styleAttr                  := "cursor: pointer; text-decoration-style: dotted",
+            role                       := "button",
+            title                      := (if period.plannedSavingCents <= 0 then "Click to plan a saving for this period"
+                      else s"Planned saving: ${MoneyFormatter.formatBare(period.plannedSavingCents)}. Click to change it."),
+            dataAttr("planned-saving") := period.plannedSavingCents.toString,
+            if period.plannedSavingCents <= 0 then "set" else "plan",
+            onClick --> (_ => editingPlannedSaving.set(true)),
+          )
+        case true  =>
+          // Escape removes the field, and some browsers send `blur` for a field that is removed. The flag stops that blur from saving.
+          var cancelled                              = false
+          InlineEdit
+            .moneyInput(Option.when(period.plannedSavingCents > 0)(period.plannedSavingCents), placeholderText = "0", autoFocus = true)
+            .amend(
+              cls                              := "d-inline-block py-0",
+              styleAttr                        := "width: 7rem",
+              dataAttr("planned-saving-input") := "",
+              InlineEdit.commitOnEnter,
+              onKeyDown.filter(_.key == "Escape") --> { _ =>
+                cancelled = true
+                editingPlannedSaving.set(false)
+              },
+              onBlur --> { ev =>
+                if !cancelled then {
+                  InlineEdit
+                    .parseCentsOrZero(ev.target.asInstanceOf[dom.html.Input].value)
+                    .filter(_ != period.plannedSavingCents)
+                    .foreach(dataService.setPeriodPlannedSaving(period.id, _))
+                  editingPlannedSaving.set(false)
+                }
+              },
+            )
+      },
+    )
+
+  private def accountingRow(label: Modifier[HtmlElement], amount: Signal[Money], positive: Boolean, bold: Boolean = false): HtmlElement = {
     val textCls = if positive then "text-success" else "text-danger"
     val fontCls = if bold then "fw-bold" else ""
     div(

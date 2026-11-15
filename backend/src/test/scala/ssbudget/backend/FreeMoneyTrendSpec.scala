@@ -137,7 +137,24 @@ class FreeMoneyTrendSpec extends AnyFreeSpec with Matchers {
   "Daily snapshots" - {
     "are grouped by period, oldest first, and days with no period are dropped" in {
       def snap(d: String, p: Option[String], spendable: Long, fromSavings: Long, source: SnapshotSource) =
-        DailyBudgetSnapshot(day(d), Instant.EPOCH, p.map(PeriodId(_)), Currency.PLN, spendable, 100, 30, 0, 0, 0, -40, fromSavings, 7, None, source)
+        DailyBudgetSnapshot(
+          day(d),
+          Instant.EPOCH,
+          p.map(PeriodId(_)),
+          Currency.PLN,
+          spendable,
+          100,
+          30,
+          0,
+          0,
+          0,
+          -40,
+          fromSavings,
+          7,
+          0,
+          None,
+          source,
+        )
 
       FreeMoneyTrend.byPeriod(
         List(
@@ -145,10 +162,11 @@ class FreeMoneyTrendSpec extends AnyFreeSpec with Matchers {
           snap("2026-06-01", Some("p"), 1000, 0, SnapshotSource.Reconstructed),
           snap("2026-05-31", None, 5, 0, SnapshotSource.Reconstructed),
         ),
+        List(DayCauses(day("2026-06-02"), List(LineCause("Rent", -50)))),
       ) shouldBe Map(
         PeriodId("p") -> List(
           FreeMoneyPoint(day("2026-06-01"), 930, -117, 0, 7, measured = false),
-          FreeMoneyPoint(day("2026-06-02"), 830, -167, 50, 7, measured = true),
+          FreeMoneyPoint(day("2026-06-02"), 830, -167, 50, 7, measured = true, List(LineCause("Rent", -50))),
         ),
       )
     }

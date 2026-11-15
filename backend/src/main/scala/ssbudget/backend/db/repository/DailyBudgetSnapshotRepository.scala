@@ -93,19 +93,20 @@ class DailyBudgetSnapshotRepositoryImpl(xa: Transactor[IO]) extends DailyBudgetS
     ).updateMany(terms.map { case (day, ledger, fromSavings, income) => (ledger, fromSavings, income, day) }).transact(xa).void
 
   override def rederive(terms: List[DerivedTerms]): IO[Unit] =
-    // `IS NOT`, because the three ledger columns of an old row can be NULL. The comparison keeps the steady state, where nothing changed, free of
+    // `IS NOT`, because the three ledger columns of an old row can be NULL (the saving reserve cannot). The comparison keeps the steady state, where nothing changed, free of
     // writes.
     terms
       .traverse_ { t =>
         sql"""UPDATE daily_budget_snapshots
             SET planned_to_pay_cents = ${t.plannedToPayCents}, planned_to_receive_cents = ${t.plannedToReceiveCents},
                 budgets_to_spend_cents = ${t.budgetsToSpendCents}, budgets_to_receive_cents = ${t.budgetsToReceiveCents},
-                ledger_cents = ${t.ledgerCents}, from_savings_cents = ${t.fromSavingsCents}, unplanned_income_cents = ${t.unplannedIncomeCents}
+                ledger_cents = ${t.ledgerCents}, from_savings_cents = ${t.fromSavingsCents}, unplanned_income_cents = ${t.unplannedIncomeCents},
+                saving_reserve_cents = ${t.savingReserveCents}
             WHERE on_date = ${t.day}
               AND (planned_to_pay_cents IS NOT ${t.plannedToPayCents} OR planned_to_receive_cents IS NOT ${t.plannedToReceiveCents}
                 OR budgets_to_spend_cents IS NOT ${t.budgetsToSpendCents} OR budgets_to_receive_cents IS NOT ${t.budgetsToReceiveCents}
                 OR ledger_cents IS NOT ${t.ledgerCents} OR from_savings_cents IS NOT ${t.fromSavingsCents}
-                OR unplanned_income_cents IS NOT ${t.unplannedIncomeCents})""".update.run
+                OR unplanned_income_cents IS NOT ${t.unplannedIncomeCents} OR saving_reserve_cents IS NOT ${t.savingReserveCents})""".update.run
       }
       .transact(xa)
       .unlessA(terms.isEmpty)
@@ -125,6 +126,7 @@ final case class DerivedTerms(
     ledgerCents: Long,
     fromSavingsCents: Long,
     unplannedIncomeCents: Long,
+    savingReserveCents: Long,
 )
 
 object DailyBudgetSnapshotRepositoryImpl {
@@ -145,6 +147,7 @@ object DailyBudgetSnapshotRepositoryImpl {
       "ledger_cents",
       "from_savings_cents",
       "unplanned_income_cents",
+      "saving_reserve_cents",
       "days_remaining",
       "source",
     )

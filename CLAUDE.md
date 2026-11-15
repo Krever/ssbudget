@@ -56,14 +56,20 @@ statistic ran over — with the lookback window shaded, so the window can be pic
 **Savings Accounts** - buckets for accumulating money (emergency fund, vacation, etc.)
 - Have a currency and a current balance; excluded from spendable balance
 - Balance is editable directly (manual accounts) or driven by a bank sync
-- No targets and no ledger: to plan a contribution, add a **planned expense** named after the bucket
+- No per-account targets and no hand-kept ledger (both were removed in the August 2026 cleanup, with the manual `savings_transactions` table)
+- **Planned saving** is one amount per period (`Period.plannedSavingCents`, primary currency), typed in place on the Periods page or on
+  the Dashboard (click "plan" in the Free money card), and editable at any time in the period. A new period starts with the amount of
+  the period before it. It reaches free money as one signed term, the **saving reserve** (`Period.savingReserveCents`)
+- What was moved is read from the bank ledger, never typed: it is the opposite of the snapshot's `fromSavings` term. It is thus NET of
+  budgeted bills paid from a savings account, and it counts from the day after the period opened. Plan the net amount: money that is
+  moved to a savings account only to pay a budgeted bill from there is not saving
 
 `savingsPeriodChange` (current balance − balance at period start, from balance snapshots) is reported on the Dashboard as
 information only; it is not part of the free-money calculation.
 
 ### Key Calculation
 ```
-Free Money = Spending Balance - Predicted Expenses + Pending Income
+Free Money = Spending Balance - Predicted Expenses + Pending Income - Saving Reserve
 Daily Budget = Free Money / Days Until Period End
 ```
 
@@ -71,8 +77,13 @@ Where:
 - `Predicted Expenses = Sum(remaining per planned expense) + Sum(remaining per category budget)`
 - `Pending Income = Sum(remaining per planned income)`
 - `remaining` for a planned item = `0` if settled, else `max(0, estimate - paid so far)`
-- Savings is NOT subtracted: moving money to a savings bucket already lowers the spending balance, so reserving it again
-  would double-count
+- `Saving Reserve` is positive while a part of the planned saving is not yet moved to savings: `clamp(planned − net moved, 0, planned)`.
+  That money is still in the spending balance, and it is not free
+- It is negative when MORE than the plan was moved: the excess, up to what is still to pay. The plan says what is saving, and the rest
+  waits in the savings account for bills (instalments taken from that account). This keeps free money flat when one transfer holds both
+  the saving and the money for such bills. With no plan the term is zero
+- The savings BALANCE is not subtracted: moving money to a savings bucket already lowers the spending balance, so reserving it
+  again would double-count
 
 ### Free Money Trend
 
@@ -92,9 +103,12 @@ projection) and on the Periods page (a row sparkline, and a chart in the expande
   (large bills come early), and the median ignores them
 - The chart anchors the line so that it ends on the real free money of the last day
 - The days of the OPEN period follow the record and the configuration as they are now: each pass of
-  `BudgetSnapshotService.ensureUpToDate` computes again all their terms that are not balances (the plan terms and the three ledger terms).
+  `BudgetSnapshotService.ensureUpToDate` computes again all their terms that are not balances (the plan terms, the three ledger terms and the saving reserve).
   A changed budget or estimate, a recategorised transaction or a late transaction thus moves the days it belongs to, and is not read as
   one bad day. The measured balances stay. A closed period keeps what it was recorded with
+- Each dot of a chart of the open period names the largest causes of that day's change (`DayCauses`, from
+  `BudgetSnapshotService.ensureUpToDateWithCauses`): per category, its movement less the change of what its budget still expects; for a
+  category with no budget, its spend. The causes add up to the change of the line. They exist for the open period only
 - A second, thinner line (`FreeMoneyTrend.projectionHistory`) is the projected end from each day at the usual daily change of the full
   record. It moves only by the difference between a day and the usual day, so it rises when the period goes better than projected. The
   Dashboard also shows its change across the last 7 days. It is deliberately NOT the projection each day in fact gave: in a backtest
@@ -137,6 +151,7 @@ BudgetItemDefinition (table: expense_definitions):
 
 Period:
   - id, startDate, expectedEnd (stored, editable), endDate (nullable until closed)
+  - plannedSavingCents (stored, editable; 0 = no plan)
 
 ExpenseRecord (one per planned item per period):
   - periodId, expenseDefId
@@ -150,6 +165,8 @@ DailyBudgetSnapshot (table: daily_budget_snapshots):
   - one row per day: the TERMS of the free-money calculation, never the answer
   - spendable / plannedToPay / plannedToReceive / budgetsToSpend / budgetsToReceive / savings, daysRemaining
   - ledger / fromSavings / unplannedIncome   -- cumulative since the period's first day, from the bank ledger (see Free Money Trend)
+  - savingReserve                            -- planned saving not yet moved (+), or the excess above the plan that waits for bills (−);
+                                                in free money, NOT in the plan's own line
   - source (live|reconstructed)              -- measured that day, or rebuilt from the record later
   - free money is derived in `v_daily_budget`, so a dip can always be traced to the term that caused it
 

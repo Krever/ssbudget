@@ -41,15 +41,16 @@ trait DataService {
     */
   def setPeriodExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Unit]
 
-  /** The recorded free-money points of each period (see [[FreeMoneyTrend]]). Empty until the first load, and empty when it cannot be loaded: the
-    * pages work without the chart.
+  /** The recorded free-money points of each period, each with the causes of its day (see [[FreeMoneyTrend]]). Empty until the first load, and empty
+    * when it cannot be loaded: the pages work without the chart. It is loaded by [[initialize]], and again by each edit in this service that changes
+    * the plan, because the server then derives the earlier days of the open period again.
     */
   def freeMoneyHistory: Signal[Map[PeriodId, List[FreeMoneyPoint]]]
 
-  /** Load [[freeMoneyHistory]] again. The pages that show it call this when they open and after a bank sync. The edits in this service that change
-    * the plan call it themselves, because the server then derives the earlier days of the open period again.
+  /** Set how much the period plans to move to savings, in the primary currency. It can be changed at any time in the period: when the plan is made
+    * smaller, the part that is no longer planned is free again at once.
     */
-  def refreshFreeMoneyHistory(): Future[Unit]
+  def setPeriodPlannedSaving(id: PeriodId, plannedSavingCents: Long): Future[Unit]
 
   // Exchange rates (currency code -> rate to primary currency)
   def exchangeRates: Signal[Map[Currency, Double]]
@@ -195,18 +196,35 @@ trait DataService {
   final def stillToReceive: Signal[Money] =
     pendingIncome.combineWith(categoryBudgetsToReceive).map { case (planned, budgets) => planned + budgets }
 
-  /** What's actually free to spend before the next paycheck: the spendable balance, plus what's still expected in, less what's still expected out.
+  /** The net amount that went to savings in the current period so far, by the bank ledger: the opposite of the `fromSavings` term of the period's
+    * latest recorded day. It is read from [[freeMoneyHistory]], so the page and the daily record count the planned saving down by one figure.
+    */
+  private def savedCents: Signal[Long] =
+    freeMoneyHistory.combineWith(currentPeriod).map { case (history, period) =>
+      period.flatMap(p => history.get(p.id)).flatMap(_.lastOption).fold(0L)(-_.fromSavingsCents)
+    }
+
+  /** What the period's planned saving takes from free money (see [[Period.savingReserveCents]]). Positive: the part of the plan that is not yet moved
+    * to savings. Negative: more than the plan was moved, and the excess is counted as money for the bills still to pay. Zero with no plan.
+    */
+  final def savingReserve: Signal[Money] =
+    currentPeriod.combineWith(savedCents).combineWith(stillToPay).map { case (period, saved, toPay) =>
+      Money(period.fold(0L)(_.savingReserveCents(saved, toPay.amountCents)), toPay.currency)
+    }
+
+  /** What's actually free to spend before the next paycheck: the spendable balance, plus what's still expected in, less what's still expected out,
+    * less what the planned saving holds back. The same four terms as [[DailyBudgetSnapshot.freeMoneyCents]].
     *
-    * Savings are deliberately NOT subtracted: moving money to a savings bucket already lowers the (spending-only) [[bankAccountBalance]], so
-    * reserving it again would double-count. Actual savings movement is surfaced separately via [[savingsPeriodChange]] (informational).
+    * The savings BALANCE is deliberately not subtracted: moving money to a savings bucket already lowers the (spending-only) [[bankAccountBalance]].
     *
-    * Concrete here, over the same two totals the Dashboard spells out, so the headline figure and the breakdown explaining it cannot drift apart.
+    * Concrete here, over the same totals the Dashboard spells out, so the headline figure and the breakdown explaining it cannot drift apart.
     */
   final def freeMoney: Signal[Money] =
     bankAccountBalance
       .combineWith(stillToReceive)
       .combineWith(stillToPay)
-      .map { case (balance, toReceive, toPay) => balance + toReceive - toPay }
+      .combineWith(savingReserve)
+      .map { case (balance, toReceive, toPay, reserve) => balance + toReceive - toPay - reserve }
 
   /** A deliberately conservative variant for the shared summary: the balance less only what's planned by hand. */
   final def availableNow: Signal[Money] =

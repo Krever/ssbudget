@@ -32,7 +32,38 @@ final case class Period(
     startDate: Instant,
     expectedEnd: LocalDate,
     endDate: Option[Instant],
+    /** What is to be moved to the savings accounts in this period, in the primary currency. Zero when no saving is planned. */
+    plannedSavingCents: Long = 0L,
 ) derives Codec.AsObject {
+
+  /** The part of [[plannedSavingCents]] that is not yet moved, when `savedCents` is the net amount that went to savings in the period so far.
+    *
+    * Never below zero: to save more than the plan is not a debt. Never above the plan: money that came back from savings (a negative `savedCents`)
+    * does not make the plan larger.
+    */
+  private def stillToSaveCents(savedCents: Long): Long =
+    math.max(0L, math.min(plannedSavingCents, plannedSavingCents - savedCents))
+
+  /** The part of what went to savings ABOVE the plan that is counted as money for the bills still to pay.
+    *
+    * With a plan, the plan says what is saving. More than that in a savings account is not saving: it waits there for something, for example for
+    * instalments that the bank takes from that account. Without this term, such a transfer makes free money fall by the excess, and free money comes
+    * back only when the bills are paid. It is never more than `stillToPayCents`: when nothing is left to pay, the excess is only savings.
+    *
+    * Zero with no plan: then all that is moved to savings is saving, as it always was.
+    */
+  private def parkedCents(savedCents: Long, stillToPayCents: Long): Long =
+    if plannedSavingCents <= 0 then 0L
+    else math.max(0L, math.min(savedCents - plannedSavingCents, stillToPayCents))
+
+  /** What the planned saving takes from free money, when `savedCents` is the net amount that went to savings in the period so far and
+    * `stillToPayCents` is what the plan still has to pay.
+    *
+    * Positive: the part of the plan that is not yet moved. Negative: more than the plan was moved, and the excess is counted as money for the bills
+    * still to pay. Zero with no plan. This is the one rule for the server's daily record and for the page.
+    */
+  def savingReserveCents(savedCents: Long, stillToPayCents: Long): Long =
+    stillToSaveCents(savedCents) - parkedCents(savedCents, stillToPayCents)
 
   /** The period's first calendar day (UTC). Bank data is date-granular, so the day the paycheck landed belongs to the period in full. */
   def startDay: LocalDate = Period.startDay(startDate)

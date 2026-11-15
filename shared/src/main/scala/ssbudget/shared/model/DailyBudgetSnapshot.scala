@@ -28,8 +28,8 @@ object SnapshotSource {
 
 /** One day's free-money TERMS, in the primary currency — the components, never the answer.
   *
-  * Free money is `spendable + stillToReceive − stillToPay`. Persisting that one number would lose which term moved, so the terms are what's stored
-  * and the arithmetic lives in `v_daily_budget` (and in [[freeMoneyCents]], which the tests hold the view to).
+  * Free money is `spendable + stillToReceive − stillToPay − savingReserve`. Persisting that one number would lose which term moved, so the terms are
+  * what's stored and the arithmetic lives in `v_daily_budget` (and in [[freeMoneyCents]], which the tests hold the view to).
   *
   * @param savingsCents
   *   informational only. Moving money into a savings bucket already lowers `spendableCents`, so subtracting it again would double-count.
@@ -44,6 +44,10 @@ object SnapshotSource {
   *   Cumulative within the period.
   * @param daysRemaining
   *   to the period's expected end; `None` when no period was open that day.
+  * @param savingReserveCents
+  *   what the period's planned saving takes from free money on the day (see [[Period.savingReserveCents]]): positive while a part of the plan is not
+  *   yet moved to savings, negative when more than the plan was moved and the excess waits there for bills. It is not part of [[planLineCents]]: to
+  *   move money to savings is neither a loss nor a gain of the plan.
   */
 final case class DailyBudgetSnapshot(
     onDate: LocalDate,
@@ -59,6 +63,7 @@ final case class DailyBudgetSnapshot(
     ledgerCents: Long,
     fromSavingsCents: Long,
     unplannedIncomeCents: Long,
+    savingReserveCents: Long,
     daysRemaining: Option[Int],
     source: SnapshotSource,
 ) derives Codec.AsObject {
@@ -72,7 +77,7 @@ final case class DailyBudgetSnapshot(
   /** What was actually free to spend that day. The Scala statement of the formula `v_daily_budget` repeats in SQL; BudgetSnapshotServiceSpec holds
     * the two to each other.
     */
-  def freeMoneyCents: Long = spendableCents + stillToReceiveCents - stillToPayCents
+  def freeMoneyCents: Long = spendableCents + stillToReceiveCents - stillToPayCents - savingReserveCents
 
   /** The level of the plan's own line: what the ledger moved, without the money from outside, set against what the plan still expects.
     *

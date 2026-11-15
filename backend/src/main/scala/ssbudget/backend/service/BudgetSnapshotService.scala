@@ -33,7 +33,15 @@ class BudgetSnapshotService(repos: Repositories) {
   /** Write today's row, fill any day still missing between the first period and today, and derive the earlier days of the open period again. Safe to
     * call as often as traffic arrives: today is rewritten (the day is still moving), and an earlier day keeps its measurements.
     */
-  def ensureUpToDate: IO[Unit] =
+  def ensureUpToDate: IO[Unit] = pass.void
+
+  /** [[ensureUpToDate]], and then, from the data that pass loaded: what moved the plan's own line on each day of the open period (see [[DayCauses]]).
+    * The pass that runs off ordinary traffic does not pay for this; only the reader of the charts does.
+    */
+  def ensureUpToDateWithCauses: IO[List[DayCauses]] = pass.map(_.toList.flatMap(lineCauses))
+
+  /** One pass over the table. Gives back what it loaded, so that a caller can read more from it with no second load. */
+  private def pass: IO[Option[World]] =
     for {
       now     <- IO.realTimeInstant
       today    = LocalDate.ofInstant(now, ZoneOffset.UTC)
@@ -45,18 +53,17 @@ class BudgetSnapshotService(repos: Repositories) {
       // old row without touching what was measured on its day.
       bare    <- repos.dailyBudgetSnapshots.datesWithoutOutsideTerms.map(_.toList.filterNot(d => due.contains(d) || rederive.contains(d)))
       days     = due ++ bare ++ rederive
-      _       <- IO.whenA(days.nonEmpty) {
-                   // Only the days that are written in full need balances. The other two groups read the plan and the period's transactions.
-                   load(periods, days, balancesFor = due, today, now).flatMap(_.traverse_ { w =>
-                     repos.dailyBudgetSnapshots.recordAll(due.map(snapshot(w, _))) >>
-                       repos.dailyBudgetSnapshots.fillOutsideTerms(bare.map { day =>
-                         val (ledger, fromSavings, income) = outsideMoney(w, w.periodOn(day), day)
-                         (day, ledger, fromSavings, income)
-                       }) >>
-                       repos.dailyBudgetSnapshots.rederive(rederive.map(day => derivedTerms(w, w.periodOn(day), day)))
-                   })
+      // Only the days that are written in full need balances. The other two groups read the plan and the period's transactions.
+      world   <- if days.isEmpty then IO.pure(Option.empty[World]) else load(periods, days, balancesFor = due, today, now)
+      _       <- world.traverse_ { w =>
+                   repos.dailyBudgetSnapshots.recordAll(due.map(snapshot(w, _))) >>
+                     repos.dailyBudgetSnapshots.fillOutsideTerms(bare.map { day =>
+                       val (ledger, fromSavings, income) = outsideMoney(w, w.periodOn(day), day)
+                       (day, ledger, fromSavings, income)
+                     }) >>
+                     repos.dailyBudgetSnapshots.rederive(rederive.map(day => derivedTerms(w, w.periodOn(day), day)))
                  }
-    } yield ()
+    } yield world
 
   /** One day's terms, computed but not stored — what the tests and any ad-hoc check go through. `None` outside the recorded span. */
   def componentsAsOf(date: LocalDate): IO[Option[DailyBudgetSnapshot]] =
@@ -205,16 +212,61 @@ class BudgetSnapshotService(repos: Repositories) {
       unplannedIncomeCents = derived.unplannedIncomeCents,
       daysRemaining = period.map(_.daysRemaining(day)),
       source = if day == w.today then SnapshotSource.Live else SnapshotSource.Reconstructed,
+      savingReserveCents = derived.savingReserveCents,
     )
   }
 
   /** All terms of `day` that are not balances: what a row holds apart from the readings of its day. */
   private def derivedTerms(w: World, period: Option[Period], day: LocalDate): DerivedTerms = {
     val (toPay, toReceive)            = plannedRemaining(w, period, day)
-    val budgets                       = period.toList.flatMap(p => budgetRemainings(w, p, day))
+    val budgets                       = period.toList.flatMap(p => budgetRemainings(w, p, day).map(_._2))
     val (ledger, fromSavings, income) = outsideMoney(w, period, day)
-    DerivedTerms(day, toPay, toReceive, budgets.filter(_ > 0).sum, -budgets.filter(_ < 0).sum, ledger, fromSavings, income)
+    val (toSpend, toArrive)           = (budgets.filter(_ > 0).sum, -budgets.filter(_ < 0).sum)
+    // What went to savings is the opposite of what came from them. It is counted as the line counts it: net of the budgeted bills that were paid
+    // from a savings account, so that money moved there only to pay such a bill is not taken for saving.
+    val savingReserve                 = period.fold(0L)(_.savingReserveCents(savedCents = -fromSavings, stillToPayCents = toPay + toSpend))
+    DerivedTerms(day, toPay, toReceive, toSpend, toArrive, ledger, fromSavings, income, savingReserve)
   }
+
+  /** For each day of the open period after its first: the parts of that day's change of the plan's own line, largest first.
+    *
+    * The parts follow the terms of [[DailyBudgetSnapshot.planLineCents]], so their sum is the change of the line:
+    *   - a category with a budget: its movement of the day, less the change of what its budget still expects. A payment that the budget covers gives
+    *     zero. A payment above the budget gives the excess. A quiet day of a steady budget gives back that day's share.
+    *   - a category with no budget (no category is one such group): its spend on the spending accounts. While the group's net of the period is above
+    *     zero it is unplanned income, which the line leaves out, and it gives nothing.
+    *   - the planned items: the change of what they still expect.
+    *
+    * Transfers between own accounts are not in the list: the line leaves them out.
+    */
+  private def lineCauses(w: World): List[DayCauses] =
+    w.periods.find(_.endDate.isEmpty).toList.flatMap { p =>
+      val days       = allDays(p.startDay, w.today)
+      val names      = w.categories.map(c => c.id -> c.name).toMap
+      val inPeriod   = w.movementsIn(p, w.today).filter(!_.internal)
+      // What each budget still expects, and what the planned items still expect, at the end of each day.
+      val remaining  = days.map(d => d -> budgetRemainings(w, p, d).map { case (cat, cents) => cat.id -> cents }.toMap).toMap
+      val planned    = days.map(d => d -> plannedRemaining(w, Some(p), d)).toMap
+      val budgetMove = inPeriod.filter(_.category.exists(w.budgeted)).groupMapReduce(m => (m.day, m.category))(_.cents)(_ + _)
+      // The movements of each group with no budget, on the spending accounts.
+      val unbudgeted = inPeriod.filter(w.isUnbudgeted).groupBy(_.category)
+
+      days.zip(days.drop(1)).map { case (prev, day) =>
+        val fromBudgets                    = w.budgeted.toList.map { id =>
+          val moved    = budgetMove.getOrElse((day, Some(id)), 0L)
+          val expected = remaining(day).getOrElse(id, 0L) - remaining(prev).getOrElse(id, 0L)
+          LineCause(names.getOrElse(id, id.value), moved - expected)
+        }
+        val fromNoBudget                   = unbudgeted.toList.map { case (category, moves) =>
+          def lossTo(d: LocalDate) = math.min(0L, moves.filter(!_.day.isAfter(d)).map(_.cents).sum)
+          LineCause(category.flatMap(names.get).getOrElse("No category"), lossTo(day) - lossTo(prev))
+        }
+        val (toPay, toReceive)             = planned(day)
+        val (toPayBefore, toReceiveBefore) = planned(prev)
+        val fromPlanned                    = LineCause("Planned items", (toReceive - toReceiveBefore) - (toPay - toPayBefore))
+        DayCauses(day, (fromPlanned :: fromBudgets ++ fromNoBudget).filter(_.cents != 0).sortBy(c => -math.abs(c.cents)))
+      }
+    }
 
   /** (ledger, from savings, unplanned income) accumulated in the period `day` falls in, up to `day`, in the primary currency.
     *
@@ -236,12 +288,10 @@ class BudgetSnapshotService(repos: Repositories) {
     */
   private def outsideMoney(w: World, period: Option[Period], day: LocalDate): (Long, Long, Long) =
     period.fold((0L, 0L, 0L)) { p =>
-      val budgeted   = w.categories.filter(_.budgetType.isDefined).map(_.id).toSet
-      val inPeriod   = w.movements.filter(m => m.day.isAfter(p.startDay) && !m.day.isAfter(day))
-      val transfers  = inPeriod.filter(m => m.onSpendingAccount && m.internal).map(_.cents).sum
-      val paidFor    = inPeriod.filter(m => !m.onSpendingAccount && !m.internal && m.category.exists(budgeted)).map(_.cents).sum
-      val unbudgeted = inPeriod.filter(m => m.onSpendingAccount && !m.internal && !m.category.exists(budgeted))
-      val income     = unbudgeted.groupMapReduce(_.category)(_.cents)(_ + _).values.filter(_ > 0).sum
+      val inPeriod  = w.movementsIn(p, day)
+      val transfers = inPeriod.filter(m => m.onSpendingAccount && m.internal).map(_.cents).sum
+      val paidFor   = inPeriod.filter(m => !m.onSpendingAccount && !m.internal && m.category.exists(w.budgeted)).map(_.cents).sum
+      val income    = inPeriod.filter(w.isUnbudgeted).groupMapReduce(_.category)(_.cents)(_ + _).values.filter(_ > 0).sum
       (inPeriod.filter(_.onSpendingAccount).map(_.cents).sum, transfers - paidFor, income)
     }
 
@@ -291,7 +341,7 @@ class BudgetSnapshotService(repos: Repositories) {
     * The budget CONFIGURATION is whatever the category holds today; `categories` keeps one current method and window, with no history. A category
     * whose rule changed in June is therefore scored by the June rule all the way back.
     */
-  private def budgetRemainings(w: World, period: Period, day: LocalDate): List[Long] = {
+  private def budgetRemainings(w: World, period: Period, day: LocalDate): List[(Category, Long)] = {
     val periodStart                                                                        = period.startDay
     val elapsed                                                                            = period.elapsedFraction(day)
     // The window ends at the last COMPLETED month, which CategoryBudget.inWindow already enforces — the month `day` falls in never counts.
@@ -302,7 +352,7 @@ class BudgetSnapshotService(repos: Repositories) {
     w.categories.filter(_.budgetType.isDefined).map { cat =>
       val spent               = toDate(w.dailyByCat, cat.id).sum
       val (outflows, inflows) = toDate(w.dailyCountsByCat, cat.id).foldLeft((0, 0)) { case ((o, i), (o1, i1)) => (o + o1, i + i1) }
-      CategorySummary(
+      cat -> CategorySummary(
         category = cat,
         expectedMonthlyCents = cat.budget.expectedMonthly(w.monthlyByCat.getOrElse(cat.id, Map.empty), lastCompleteMonth),
         currentPeriodSpentCents = spent,
@@ -388,6 +438,16 @@ object BudgetSnapshotService {
       dailyByAccount: Map[AccountId, Map[LocalDate, Long]],          // day -> signed movement, in the account's currency
       movements: List[Movement],                                     // since the start of the earliest period in play
   ) {
+
+    /** The categories that are budgets, by today's configuration. */
+    lazy val budgeted: Set[CategoryId] = categories.filter(_.budgetType.isDefined).map(_.id).toSet
+
+    /** The movements of period `p` up to `day`, from the day AFTER the period opened: the first day is the baseline, and the paycheck lands on it. */
+    def movementsIn(p: Period, day: LocalDate): List[Movement] =
+      movements.filter(m => m.day.isAfter(p.startDay) && !m.day.isAfter(day))
+
+    /** Is this a movement of a group with no budget, on a spending account? Such a group is unplanned spend, or unplanned income. */
+    def isUnbudgeted(m: Movement): Boolean = m.onSpendingAccount && !m.internal && !m.category.exists(budgeted)
 
     /** The period `day` falls in: the last one that had started by then. Periods are contiguous, so that is also the one that had not yet ended. */
     def periodOn(day: LocalDate): Option[Period] =

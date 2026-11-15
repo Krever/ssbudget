@@ -80,9 +80,13 @@ FROM (
     s.budgets_to_receive_cents * 1.0 / 100       AS budgets_to_receive,
     (s.planned_to_pay_cents     + s.budgets_to_spend_cents)   * 1.0 / 100 AS still_to_pay,
     (s.planned_to_receive_cents + s.budgets_to_receive_cents) * 1.0 / 100 AS still_to_receive,
+    -- What the period's planned saving takes from free money on the day (see V27): the part not yet moved to savings, or, when negative, the
+    -- excess above the plan that waits in savings for bills.
+    s.saving_reserve_cents * 1.0 / 100           AS saving_reserve,
     (s.spendable_cents
        + s.planned_to_receive_cents + s.budgets_to_receive_cents
-       - s.planned_to_pay_cents     - s.budgets_to_spend_cents) * 1.0 / 100 AS free_money,
+       - s.planned_to_pay_cents     - s.budgets_to_spend_cents
+       - s.saving_reserve_cents) * 1.0 / 100 AS free_money,
     s.savings_cents * 1.0 / 100                  AS savings,
     -- Since the period's first day, by the bank ledger (see V26): what the spending accounts moved in all, and the part of it that came from
     -- outside the plan. NULL-safe, because rows from before V26 have these empty until the app fills them.

@@ -21,14 +21,13 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   private val categorySummariesVar: Var[List[CategorySummary]]    = Var(List.empty)
   private val savingsBaselinesVar: Var[Map[AccountId, Money]]     = Var(Map.empty) // per savings-account balance at period start, in account currency
 
-  private val freeMoneyHistoryVar: Var[Map[PeriodId, List[FreeMoneyPoint]]] = Var(Map.empty)
-
+  private val freeMoneyHistoryVar: Var[Map[PeriodId, List[FreeMoneyPoint]]]  = Var(Map.empty)
   override def freeMoneyHistory: Signal[Map[PeriodId, List[FreeMoneyPoint]]] = freeMoneyHistoryVar.signal
 
-  override def refreshFreeMoneyHistory(): Future[Unit] =
+  private def refreshFreeMoneyHistory(): Future[Unit] =
     client.periods
       .freeMoneyHistory()
-      .map(snapshots => freeMoneyHistoryVar.set(FreeMoneyTrend.byPeriod(snapshots)))
+      .map(history => freeMoneyHistoryVar.set(FreeMoneyTrend.byPeriod(history.snapshots, history.causes)))
       // The chart is an addition to the page. When the history cannot be loaded, the last one stays.
       .recover { case _ => () }
 
@@ -49,6 +48,8 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     val currencySettingsFut = client.currencies.getSettings()
     val categorySummsFut    = client.categories.summaries()
     val baselinesFut        = client.savings.periodBaselines()
+    // Part of the first load, not an addition to it: the planned saving is counted down with the latest day of this record.
+    val historyFut          = refreshFreeMoneyHistory()
 
     for {
       accounts         <- accountsFut
@@ -59,6 +60,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       currencySettings <- currencySettingsFut
       categorySumms    <- categorySummsFut
       baselines        <- baselinesFut
+      _                <- historyFut
     } yield {
       accountsVar.set(accounts)
       budgetItemsVar.set(budgetItems)
@@ -232,6 +234,11 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
 
   override def setPeriodExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Unit] =
     replanned(client.periods.setExpectedEnd(id, expectedEnd).map { updated =>
+      periodsVar.update(DataService.upsertById(_, updated)(_.id))
+    })
+
+  override def setPeriodPlannedSaving(id: PeriodId, plannedSavingCents: Long): Future[Unit] =
+    replanned(client.periods.setPlannedSaving(id, plannedSavingCents).map { updated =>
       periodsVar.update(DataService.upsertById(_, updated)(_.id))
     })
 

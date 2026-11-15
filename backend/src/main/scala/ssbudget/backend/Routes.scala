@@ -75,6 +75,7 @@ object Routes {
       route(Endpoints.periods.list)(_ => repos.periods.findAll.map(Right(_))),
       route(Endpoints.periods.startNew)(_ => startNewPeriod(repos)),
       route(Endpoints.periods.setExpectedEnd)((id, req) => setPeriodExpectedEnd(repos, id, req)),
+      route(Endpoints.periods.setPlannedSaving)((id, req) => setPeriodPlannedSaving(repos, id, req)),
       route(Endpoints.periods.summaries)(periodSummaries(repos)),
       route(Endpoints.periods.freeMoneyHistory)(_ => freeMoneyHistory(repos, budgetSnapshots)),
       // Savings
@@ -301,14 +302,26 @@ object Routes {
                      }
     } yield result
 
+  /** Set how much a period plans to move to savings. A negative amount has no meaning and is refused. */
+  private def setPeriodPlannedSaving(repos: Repositories, id: PeriodId, req: SetPeriodPlannedSavingRequest): Result[Period] =
+    if req.plannedSavingCents < 0 then IO.pure(Left("Planned saving cannot be negative"))
+    else {
+      repos.periods.findById(id).flatMap {
+        case None           => IO.pure(Left(s"Period not found: ${id.value}"))
+        case Some(existing) =>
+          repos.periods.updatePlannedSaving(id, req.plannedSavingCents).as(Right(existing.copy(plannedSavingCents = req.plannedSavingCents)))
+      }
+    }
+
   private def startNewPeriod(repos: Repositories): Result[Period] = {
     val now         = Instant.now()
     val newPeriodId = PeriodId(UUID.randomUUID().toString)
-    val newPeriod   = Period(newPeriodId, now, Period.defaultExpectedEnd(now), None)
 
     for {
       // Close current period
       currentPeriod <- repos.periods.findCurrent
+      // The plan to save is carried to the new period; it is a habit, not a decision of one month.
+      newPeriod      = Period(newPeriodId, now, Period.defaultExpectedEnd(now), None, currentPeriod.fold(0L)(_.plannedSavingCents))
       _             <- currentPeriod.fold(IO.unit)(p => repos.periods.close(p.id, now))
       // Create new period
       _             <- repos.periods.create(newPeriod)
@@ -351,9 +364,11 @@ object Routes {
     * first chart of the day would show the days before the quiet time and stop there. A pass that fails must not fail the chart: the rows already
     * stored are still correct.
     */
-  private def freeMoneyHistory(repos: Repositories, snapshots: BudgetSnapshotService): Result[List[DailyBudgetSnapshot]] =
-    snapshots.ensureUpToDate.handleErrorWith(e => IO.println(s"Daily budget snapshot failed: ${e.getMessage}")) >>
-      repos.dailyBudgetSnapshots.findAll.map(Right(_))
+  private def freeMoneyHistory(repos: Repositories, snapshots: BudgetSnapshotService): Result[FreeMoneyHistory] =
+    for {
+      causes <- snapshots.ensureUpToDateWithCauses.handleErrorWith(e => IO.println(s"Daily budget snapshot failed: ${e.getMessage}").as(Nil))
+      rows   <- repos.dailyBudgetSnapshots.findAll
+    } yield Right(FreeMoneyHistory(rows, causes))
 
   private val periodSummaryDefaultCount = 12
 

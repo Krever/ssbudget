@@ -100,9 +100,13 @@ object TapirSchemas {
   given Schema[RulePreviewResponse]        = Schema.derived[RulePreviewResponse]
 
   // Period retrospective DTOs
-  given Schema[PeriodCategorySpend]         = Schema.derived[PeriodCategorySpend]
-  given Schema[PeriodSummary]               = Schema.derived[PeriodSummary]
-  given Schema[SetPeriodExpectedEndRequest] = Schema.derived[SetPeriodExpectedEndRequest]
+  given Schema[PeriodCategorySpend]           = Schema.derived[PeriodCategorySpend]
+  given Schema[PeriodSummary]                 = Schema.derived[PeriodSummary]
+  given Schema[LineCause]                     = Schema.derived[LineCause]
+  given Schema[DayCauses]                     = Schema.derived[DayCauses]
+  given Schema[FreeMoneyHistory]              = Schema.derived[FreeMoneyHistory]
+  given Schema[SetPeriodExpectedEndRequest]   = Schema.derived[SetPeriodExpectedEndRequest]
+  given Schema[SetPeriodPlannedSavingRequest] = Schema.derived[SetPeriodPlannedSavingRequest]
 
   // Analytics DTOs
   given Schema[AnalyticsConfig] = Schema.derived[AnalyticsConfig]

@@ -57,6 +57,12 @@ object InlineEdit {
   def parseCentsOpt(text: String): Option[Long] =
     scala.util.Try((BigDecimal(text.trim.replace(",", ".")) * 100).setScale(0, BigDecimal.RoundingMode.HALF_UP).toLongExact).toOption
 
+  /** Cents from a field where an empty text means zero, for an amount that can be taken away by clearing it (a planned saving). `None` for text that
+    * is not an amount, and for a negative amount.
+    */
+  def parseCentsOrZero(text: String): Option[Long] =
+    (if text.trim.isEmpty then Some(0L) else parseCentsOpt(text)).filter(_ >= 0)
+
   /** A control with its name in front of it. One owner: the settings strip and the rule modal draw the same shape, and an e2e locator depends on it.
     */
   def labelled(name: String, controls: Modifier[HtmlElement]*): HtmlElement =

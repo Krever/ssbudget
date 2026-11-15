@@ -13,9 +13,8 @@ object InMemoryDataService extends DataService {
 
   override def initialize(): Future[Unit] = Future.successful(())
 
-  // The mock keeps no daily record, so there is no trend to show.
+  // The mock keeps no daily record, so there is no trend to show, and nothing is ever counted as saved: a planned saving stays reserved in full.
   override def freeMoneyHistory: Signal[Map[PeriodId, List[FreeMoneyPoint]]] = Val(Map.empty)
-  override def refreshFreeMoneyHistory(): Future[Unit]                       = Future.successful(())
 
   private val now           = Instant.now()
   private val tenDaysAgo    = now.minus(10, ChronoUnit.DAYS)
@@ -221,13 +220,20 @@ object InMemoryDataService extends DataService {
     Future.successful(())
   }
 
+  override def setPeriodPlannedSaving(id: PeriodId, plannedSavingCents: Long): Future[Unit] = {
+    periodsVar.update(_.map(p => if p.id == id then p.copy(plannedSavingCents = plannedSavingCents) else p))
+    Future.successful(())
+  }
+
   override def setPeriodExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Unit] = {
     periodsVar.update(_.map(p => if p.id == id then p.copy(expectedEnd = expectedEnd) else p))
     Future.successful(())
   }
 
   override def startNewPeriod(): Future[Unit] = {
-    val now = Instant.now()
+    val now           = Instant.now()
+    // As on the server: the plan to save is carried to the new period.
+    val plannedSaving = periodsVar.now().find(_.endDate.isEmpty).fold(0L)(_.plannedSavingCents)
 
     periodsVar.update { ps =>
       ps.map { p =>
@@ -237,7 +243,7 @@ object InMemoryDataService extends DataService {
     }
 
     val newPeriodId = PeriodId(s"period-${System.currentTimeMillis()}")
-    periodsVar.update(_ :+ Period(newPeriodId, now, Period.defaultExpectedEnd(now), None))
+    periodsVar.update(_ :+ Period(newPeriodId, now, Period.defaultExpectedEnd(now), None, plannedSaving))
 
     budgetRecordsVar.update { records =>
       records ++ budgetItemsVar.now().map { item =>

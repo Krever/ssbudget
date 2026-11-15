@@ -2,7 +2,7 @@ package ssbudget.frontend.components
 
 import com.raquo.laminar.api.L.*
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
-import ssbudget.shared.model.{Currency, FreeMoneyPoint, FreeMoneyProjection, FreeMoneyTrend}
+import ssbudget.shared.model.{Currency, FreeMoneyPoint, FreeMoneyProjection, FreeMoneyTrend, LineCause}
 
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -45,7 +45,7 @@ object FreeMoneyChart {
       }
       div(
         dataAttr("chart") := "free-money",
-        plot(FreeMoneyTrend.anchored(points).toVector, projection, forecasts.toVector, plotHeight = 96.0, dots = true),
+        plot(FreeMoneyTrend.anchored(points).toVector, projection, forecasts.toVector, causesOf(points), plotHeight = 96.0, dots = true),
         // The labels are HTML, outside the plot: the plot stretches to the width of its container, and text inside it would stretch too.
         div(
           cls := "d-flex justify-content-between small text-muted font-sans-serif",
@@ -63,13 +63,17 @@ object FreeMoneyChart {
       )
     }
 
+  /** The causes of each day that has some. A closed period has none, and its readouts then give the day and the value only. */
+  private def causesOf(points: List[FreeMoneyPoint]): Map[LocalDate, List[LineCause]] =
+    points.collect { case p if p.causes.nonEmpty => p.day -> p.causes }.toMap
+
   /** The line only, at the height of a table row. It shows the shape of a period; the figures are in the cells next to it. */
   def mini(points: List[FreeMoneyPoint]): Option[HtmlElement] =
     Option.when(points.sizeIs >= 2) {
       span(
         cls       := "d-inline-block align-middle",
         styleAttr := "width: 96px",
-        plot(FreeMoneyTrend.anchored(points).toVector, None, Vector.empty, plotHeight = 18.0, dots = false),
+        plot(FreeMoneyTrend.anchored(points).toVector, None, Vector.empty, Map.empty, plotHeight = 18.0, dots = false),
       )
     }
 
@@ -78,6 +82,7 @@ object FreeMoneyChart {
       days: Vector[(LocalDate, Long)],
       projection: Option[FreeMoneyProjection],
       forecasts: Vector[(LocalDate, Long)],
+      causes: Map[LocalDate, List[LineCause]],
       plotHeight: Double,
       dots: Boolean,
   ): SvgElement = {
@@ -169,16 +174,34 @@ object FreeMoneyChart {
       },
       // One dot for each day, each with its own readout. This is the hover layer, and it needs no JavaScript.
       Option.when(dots) {
-        days.map { case (day, cents) =>
+        days.indices.map { i =>
+          val (day, cents)   = days(i)
+          // The change from the day before, when there is a point for that day.
+          val change         = Option.when(i > 0 && days(i - 1)._1 == day.minusDays(1))(cents - days(i - 1)._2)
           circle(
             cx   := px(day).toString,
             cy   := py(cents).toString,
             r    := "2.5",
             fill := seriesColour,
-            titleTag(s"${Formatting.formatDay(day)}: ${MoneyFormatter.formatBare(cents)}"),
+            titleTag(readout(day, cents, change, causes.getOrElse(day, Nil))),
           )
         }
       },
     )
+  }
+
+  /** How many causes a readout names. More than these, and the readout is a table, not a hint. */
+  private val causesShown = 4
+
+  /** The text of one dot: the day and its value, the change from the day before, and the largest causes of that change, one on each line.
+    *
+    * The causes are read from the bank ledger as it is now. The last point of the current period is the live figure, so the change shown for it can
+    * be different from the sum of its causes for some minutes after an edit.
+    */
+  private def readout(day: LocalDate, cents: Long, change: Option[Long], causes: List[LineCause]): String = {
+    val head  = s"${Formatting.formatDay(day)}: ${MoneyFormatter.formatBare(cents)}" + change.fold("")(c => s" (${MoneyFormatter.formatSigned(c)})")
+    val shown = causes.take(causesShown).map(c => s"${c.label} ${MoneyFormatter.formatSigned(c.cents)}")
+    val rest  = causes.drop(causesShown).map(_.cents).sum
+    (head :: shown ++ Option.when(causes.sizeIs > causesShown)(s"others ${MoneyFormatter.formatSigned(rest)}")).mkString("\n")
   }
 }
