@@ -8,7 +8,8 @@ echo "=== Building frontend (Scala.js) ==="
 sbt frontend/fullLinkJS
 
 echo "=== Building frontend (Vite) ==="
-cd frontend && npm install --no-audit --no-fund && npm run build
+# SCALAJS_STAGE=full: bundle the fullLinkJS output from the step above (see frontend/vite.config.mjs).
+cd frontend && npm install --no-audit --no-fund && SCALAJS_STAGE=full npm run build
 cd ..
 
 echo "=== Building Docker image ==="
