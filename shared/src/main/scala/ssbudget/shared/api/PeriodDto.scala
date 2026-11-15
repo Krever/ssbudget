@@ -30,6 +30,7 @@ final case class PeriodSummary(
     plannedSettled: Int,           // planned expenses closed this period
     plannedTotal: Int,             // planned expenses tracked this period
     savingsChangeCents: Long,      // savings balances at period end − at period start (+ saved / − withdrawn)
+    savingsEndCents: Option[Long], // savings balance at period end, at today's exchange rates; None when no savings account has a record
     endBalanceCents: Option[Long], // spending balance at period end, from snapshots; None when nothing was recorded that early
     topCategories: List[PeriodCategorySpend],
 ) derives Codec.AsObject {

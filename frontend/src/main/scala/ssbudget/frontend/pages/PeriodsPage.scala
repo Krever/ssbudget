@@ -162,7 +162,7 @@ object PeriodsPage {
               th(cls := "text-end", "Out"),
               th(cls := "text-end", "Net"),
               th(cls := "text-end", "Planned paid"),
-              th(cls := "text-end", "Savings"),
+              th(cls := "text-end", title := "The change of the savings balance in the period, and the balance at its end", "Savings"),
               th(cls := "text-end", "End balance"),
               th(cls := "text-end", title := "Free money on each day of the period, and its last value", "Free money"),
               th(cls := "pe-3", ""),
@@ -223,7 +223,11 @@ object PeriodsPage {
         td(cls := "text-end font-monospace text-danger", signed(-s.outflowCents)),
         td(cls := s"text-end font-monospace fw-bold ${amountCls(s.netCents)}", signed(s.netCents)),
         td(cls := "text-end font-monospace", plannedLabel),
-        td(cls := s"text-end font-monospace ${amountCls(s.savingsChangeCents)}", signed(s.savingsChangeCents)),
+        td(
+          cls  := "text-end font-monospace text-nowrap",
+          span(cls := s"small ${amountCls(s.savingsChangeCents)}", signed(s.savingsChangeCents)),
+          s.savingsEndCents.fold(emptyNode)(cents => span(cls := "ms-2", money(cents))),
+        ),
         td(cls := "text-end font-monospace", s.endBalanceCents.fold("—")(money)),
         td(
           cls  := "text-end font-monospace text-nowrap",

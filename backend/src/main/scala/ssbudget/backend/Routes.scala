@@ -418,6 +418,8 @@ object Routes {
       // None only for an account with no recorded balance at all.
       (savingsAt(acc, Some(p.startDate)), savingsAt(acc, p.endDate)).mapN((start, end) => toPrimary(end - start, acc.currency)).getOrElse(0L)
     }.sum
+    // At today's rates, as every other figure of the summary. Thus the change of a foreign account is only what moved, not what the rate did.
+    val savingsEnds                                                = savings.flatMap(acc => savingsAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
     val endBalances                                                = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
 
     for {
@@ -454,6 +456,7 @@ object Routes {
         plannedSettled = expenses.count(_._1.settled),
         plannedTotal = expenses.size,
         savingsChangeCents = savingsDelta,
+        savingsEndCents = Option.when(savingsEnds.nonEmpty)(savingsEnds.sum),
         // Partial by design: accounts without a snapshot that early are left out rather than sinking the whole figure to None.
         endBalanceCents = Option.when(endBalances.exists(_.isDefined))(endBalances.flatten.sum),
         topCategories = topCategories,
