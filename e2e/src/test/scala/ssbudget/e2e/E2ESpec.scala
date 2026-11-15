@@ -24,7 +24,9 @@ object SharedDriver {
   lazy val instance: WebDriver = {
     WebDriverManager.chromedriver().setup()
     val options = new ChromeOptions()
-    options.addArguments("--headless", "--no-sandbox", "--disable-dev-shm-usage")
+    // A window of a usual desktop size. The default headless window is about 750 by 400 pixels: a control low on a page is then out of view,
+    // the page scrolls to it smoothly, and a click that comes before the scroll ends does not reach the control.
+    options.addArguments("--headless", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=1400,1000")
     val driver  = new ChromeDriver(options)
     driver.manage().timeouts().implicitlyWait(E2ESpec.implicitWait)
     Runtime.getRuntime.addShutdownHook(new Thread(() => driver.quit()))

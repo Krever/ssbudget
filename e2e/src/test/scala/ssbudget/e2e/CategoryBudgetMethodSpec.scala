@@ -164,7 +164,7 @@ class CategoryBudgetMethodSpec extends E2ESpec {
     choose("Method", "average")
     retype("Months", "")
 
-    def dots     = settings.findElements(By.cssSelector("svg circle")).asScala.toList
+    def dots     = settings.findElements(By.cssSelector("svg [data-point]")).asScala.toList
     def included = dots.filter(_.getAttribute("opacity") == "1")
 
     // Three months of history, all of them counted while the window is open.

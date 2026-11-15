@@ -1,207 +1,211 @@
 package ssbudget.frontend.components
 
 import com.raquo.laminar.api.L.*
+import ssbudget.frontend.components.ChartKit.*
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
-import ssbudget.shared.model.{Currency, FreeMoneyPoint, FreeMoneyProjection, FreeMoneyTrend, LineCause}
+import ssbudget.shared.model.{Currency, FreeMoneyPoint, FreeMoneyProjection, FreeMoneyTrend}
 
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
 /** A line chart of free money across one period, with an optional projection to the period's expected end.
   *
-  * The line is [[FreeMoneyTrend.anchored]]: free money with the savings transfers and the unplanned income taken out, ending on the real figure of
-  * the last day. Thus the line shows only what the plan lost, and the dashed projection continues it: the same series, the same colour, and the dash
-  * says that it is not measured. The zero rule is always in view, because the important question is on which side of zero the line ends.
+  * The main line is [[FreeMoneyTrend.anchored]]: free money with the savings transfers and the unplanned income taken out, ending on the real figure
+  * of the last day. Thus the line shows only what the plan lost. The dashed projection continues it: the same series, the same colour, and the dash
+  * says that it is not measured. Zero is always in view, because the important question is on which side of zero the line ends.
   *
-  * A second, thinner line in another colour is [[FreeMoneyTrend.projectionHistory]]: the projected end from each day, at the usual daily change. It
-  * is the only line with a legend, below the plot. It rises across days that were better than the usual day, and ends level with the projection's end
-  * dot.
+  * A second line in another colour is [[FreeMoneyTrend.projectionHistory]]: the projected end from each day, at the usual daily change. It rises
+  * across days that were better than the usual day, and ends level with the projection's end mark.
   *
-  * The other visual rules are those of [[Sparkline]]: labels in HTML below the plot, and a readout on each dot.
+  * It is a [[ChartKit.chart]], drawn by the rules that are stated there. There is no mark for each day: the pointer finds the day, and the readout of
+  * a day of the open period also names the causes of its change.
   */
 object FreeMoneyChart {
 
-  private val seriesColour = "#0d6efd"
-  private val forecastInk  = "#fd7e14"
-  private val gridInk      = "#adb5bd"
+  private val plotHeight = 156.0
 
-  private val w    = 480.0
-  private val edge = 4.0 // keeps the end dots off the viewBox border
+  /** What the pointer is on: a recorded day, or the projected end. */
+  private enum Hover {
+    case Day(index: Int)
+    case End(projection: FreeMoneyProjection)
+  }
 
-  /** The chart with its caption. `None` when there are fewer than two days to draw: one point is not a trend. */
+  /** The chart with its legend and its table. `None` when there are fewer than two days to draw: one point is not a trend.
+    *
+    * @param surface
+    *   what the chart is on: [[ChartKit.whiteSurface]] or [[ChartKit.lightSurface]]
+    */
   def apply(
       points: List[FreeMoneyPoint],
       projection: Option[FreeMoneyProjection],
       forecasts: List[(LocalDate, Long)],
       currency: Currency,
+      surface: String,
   ): Option[HtmlElement] =
     Option.when(points.sizeIs >= 2) {
-      val (first, last) = (points.head, points.last)
-      val endDay        = projection.fold(last.day)(_.endDay)
-      val result        = projection match {
-        case Some(p) => s"${MoneyFormatter.formatSigned(p.perDayCents)} / day · projected ${MoneyFormatter.formatSimple(p.endCents, currency)}"
-        case None    =>
-          s"${MoneyFormatter.formatSigned(FreeMoneyTrend.leakCents(points))} against the plan in ${ChronoUnit.DAYS.between(first.day, last.day)} days"
-      }
-      div(
-        dataAttr("chart") := "free-money",
-        plot(FreeMoneyTrend.anchored(points).toVector, projection, forecasts.toVector, causesOf(points), plotHeight = 96.0, dots = true),
-        // The labels are HTML, outside the plot: the plot stretches to the width of its container, and text inside it would stretch too.
-        div(
-          cls := "d-flex justify-content-between small text-muted font-sans-serif",
-          span(s"${Formatting.formatDay(first.day)} – ${Formatting.formatDay(endDay)}"),
-          span(result),
-        ),
-        // One point is not a line, and a legend for a line that is not there is noise.
-        Option.when(forecasts.sizeIs >= 2) {
-          div(
-            cls := "small text-muted font-sans-serif",
-            span(styleAttr := s"color: $forecastInk", "━ "),
-            "projected end from each day, at the usual pace",
-          )
+      val model = Model(points, projection, forecasts.toMap)
+      chart[Hover](
+        "free-money",
+        plotHeight,
+        s"Free money from ${Formatting.formatDay(model.firstDay)} to ${Formatting.formatDay(model.endDay)}. The figures are in the table below.",
+        surface,
+      )(
+        nearest = model.nearest,
+        step = model.step,
+        draw = draw(model, _),
+        focus = focus(model, _, _, currency),
+        legend = List(
+          Some(legendKey(lineKey(seriesInk), "Free money")),
+          Option.when(projection.isDefined)(legendKey(lineKey(seriesInk, dashed = true), "projected")),
+          // One point is not a line, and a legend for a line that is not there is noise.
+          Option.when(forecasts.sizeIs >= 2) {
+            legendKey(
+              lineKey(secondInk),
+              "Projected end, from each day",
+              hint = "Where the period would end, seen from each day, if the remaining days were usual days. It rises when days go better than usual.",
+            )
+          },
+        ).flatten,
+        result = projection match {
+          case Some(p) => s"${MoneyFormatter.formatSigned(p.perDayCents)} / day · projected ${MoneyFormatter.formatSimple(p.endCents, currency)}"
+          case None    =>
+            val days = ChronoUnit.DAYS.between(model.firstDay, model.lastDay)
+            s"${MoneyFormatter.formatSigned(FreeMoneyTrend.leakCents(points))} against the plan in $days days"
         },
+        tableHead = List("Day", "Free money", "Change", "Projected end"),
+        tableRows = model.line.indices.map { i =>
+          val (day, cents) = model.line(i)
+          List(
+            Formatting.formatDay(day),
+            MoneyFormatter.formatBare(cents),
+            model.change(i).fold("")(MoneyFormatter.formatSigned),
+            model.forecasts.get(day).fold("")(MoneyFormatter.formatBare),
+          )
+        } ++ projection.map(p => List(s"${Formatting.formatDay(p.endDay)} (projected)", MoneyFormatter.formatBare(p.endCents), "", "")),
       )
     }
-
-  /** The causes of each day that has some. A closed period has none, and its readouts then give the day and the value only. */
-  private def causesOf(points: List[FreeMoneyPoint]): Map[LocalDate, List[LineCause]] =
-    points.collect { case p if p.causes.nonEmpty => p.day -> p.causes }.toMap
 
   /** The line only, at the height of a table row. It shows the shape of a period; the figures are in the cells next to it. */
   def mini(points: List[FreeMoneyPoint]): Option[HtmlElement] =
     Option.when(points.sizeIs >= 2) {
+      val line  = FreeMoneyTrend.anchored(points).toVector
+      val first = line.head._1
+      val span0 = math.max(1L, ChronoUnit.DAYS.between(first, line.last._1)).toDouble
       span(
-        cls       := "d-inline-block align-middle",
-        styleAttr := "width: 96px",
-        plot(FreeMoneyTrend.anchored(points).toVector, None, Vector.empty, Map.empty, plotHeight = 18.0, dots = false),
+        cls := "d-inline-block align-middle",
+        spark(line.map { case (day, cents) => (ChronoUnit.DAYS.between(first, day) / span0, cents) }, s"Free money, ${line.size} days"),
       )
     }
 
-  /** The plot, split out because `L.svg.*` shadows the HTML names (`cls`, `line`, `x`, `y`) used above. */
-  private def plot(
-      days: Vector[(LocalDate, Long)],
-      projection: Option[FreeMoneyProjection],
-      forecasts: Vector[(LocalDate, Long)],
-      causes: Map[LocalDate, List[LineCause]],
-      plotHeight: Double,
-      dots: Boolean,
-  ): SvgElement = {
-    import com.raquo.laminar.api.L.svg.*
+  // --- the data of one chart ---------------------------------------------------------------------
 
-    // Keeps strokes at their stated width although the viewBox is stretched to the width of the container.
-    val vectorEffect = svgAttr("vector-effect", com.raquo.laminar.codecs.StringAsIsCodec, None)
-    val pad          = if dots then 6.0 else 2.0
+  /** The series of one chart and its scales. */
+  final private case class Model(points: List[FreeMoneyPoint], projection: Option[FreeMoneyProjection], forecasts: Map[LocalDate, Long]) {
 
-    val firstDay             = days.head._1
-    val (lastDay, lastCents) = days.last
-    val daySpan              = math.max(1L, ChronoUnit.DAYS.between(firstDay, projection.fold(lastDay)(_.endDay))).toDouble
+    /** The line that is drawn, one entry for each point and in the order of the points. */
+    val line: Vector[(LocalDate, Long)] = FreeMoneyTrend.anchored(points).toVector
+    private val byIndex                 = points.toVector
 
-    // Zero is always part of the range: a line that goes below it is the thing to see.
-    val values   = days.map(_._2) ++ forecasts.map(_._2) ++ projection.map(_.endCents) :+ 0L
-    val (lo, hi) = (values.min.toDouble, values.max.toDouble)
-    val range    = if hi == lo then 1.0 else hi - lo
+    val firstDay: LocalDate = line.head._1
+    val lastDay: LocalDate  = line.last._1
+    val endDay: LocalDate   = projection.fold(lastDay)(_.endDay)
 
-    def px(day: LocalDate): Double = edge + ChronoUnit.DAYS.between(firstDay, day) / daySpan * (w - 2 * edge)
-    def py(cents: Long): Double    = pad + (hi - cents) / range * (plotHeight - 2 * pad)
+    private val daySpan = math.max(1L, ChronoUnit.DAYS.between(firstDay, endDay)).toDouble
 
-    svg(
-      width               := "100%",
-      height              := plotHeight.toInt.toString,
-      viewBox             := s"0 0 ${w.toInt} ${plotHeight.toInt}",
-      preserveAspectRatio := "none",
-      titleTag(s"Free money, ${days.size} days"),
-      line(
-        x1           := "0",
-        y1           := py(0).toString,
-        x2           := w.toString,
-        y2           := py(0).toString,
-        stroke       := gridInk,
-        strokeWidth  := "1",
-        vectorEffect := "non-scaling-stroke",
-      ),
-      // Below the main line in the paint order: where the two cross, free money stays on top.
-      Option.when(forecasts.sizeIs >= 2) {
-        path(
-          d            := forecasts.indices.map(i => s"${if i == 0 then "M" else "L"}${px(forecasts(i)._1)},${py(forecasts(i)._2)}").mkString(" "),
-          fill         := "none",
-          stroke       := forecastInk,
-          strokeWidth  := "1.5",
-          vectorEffect := "non-scaling-stroke",
-        )
-      },
-      path(
-        d            := days.indices.map(i => s"${if i == 0 then "M" else "L"}${px(days(i)._1)},${py(days(i)._2)}").mkString(" "),
-        fill         := "none",
-        stroke       := seriesColour,
-        strokeWidth  := (if dots then "2" else "1.5"),
-        vectorEffect := "non-scaling-stroke",
-      ),
-      projection.map { p =>
-        List(
-          line(
-            x1              := px(lastDay).toString,
-            y1              := py(lastCents).toString,
-            x2              := px(p.endDay).toString,
-            y2              := py(p.endCents).toString,
-            stroke          := seriesColour,
-            strokeWidth     := "2",
-            strokeDashArray := "4 4",
-            vectorEffect    := "non-scaling-stroke",
-          ),
-          // Hollow: this point is expected, not recorded.
-          circle(
-            cx              := px(p.endDay).toString,
-            cy              := py(p.endCents).toString,
-            r               := "3",
-            fill            := "#fff",
-            stroke          := seriesColour,
-            strokeWidth     := "2",
-            vectorEffect    := "non-scaling-stroke",
-            titleTag(s"${Formatting.formatDay(p.endDay)}: ${MoneyFormatter.formatBare(p.endCents)} (projected)"),
-          ),
-        )
-      },
-      Option.when(dots && forecasts.sizeIs >= 2) {
-        forecasts.map { case (day, cents) =>
-          circle(
-            cx   := px(day).toString,
-            cy   := py(cents).toString,
-            r    := "2",
-            fill := forecastInk,
-            titleTag(s"${Formatting.formatDay(day)}: projected end ${MoneyFormatter.formatBare(cents)}"),
-          )
-        }
-      },
-      // One dot for each day, each with its own readout. This is the hover layer, and it needs no JavaScript.
-      Option.when(dots) {
-        days.indices.map { i =>
-          val (day, cents)   = days(i)
-          // The change from the day before, when there is a point for that day.
-          val change         = Option.when(i > 0 && days(i - 1)._1 == day.minusDays(1))(cents - days(i - 1)._2)
-          circle(
-            cx   := px(day).toString,
-            cy   := py(cents).toString,
-            r    := "2.5",
-            fill := seriesColour,
-            titleTag(readout(day, cents, change, causes.getOrElse(day, Nil))),
-          )
-        }
-      },
-    )
+    /** How far across the plot a day is, 0 to 1. */
+    def fraction(day: LocalDate): Double = ChronoUnit.DAYS.between(firstDay, day) / daySpan
+
+    // The same for each recorded day, computed once: a pointer move reads these and does no date arithmetic.
+    private val fractions = line.map { case (day, _) => fraction(day) }
+
+    // Zero is always part of the scale: a line that goes below it is the thing to see.
+    val scale: Scale = Scale.of(line.map(_._2) ++ forecasts.values ++ projection.map(_.endCents) :+ 0L, plotHeight)
+
+    def causes(index: Int): List[ssbudget.shared.model.LineCause] = byIndex(index).causes
+
+    /** The day labels: the first day, each seventh day after it, and the last day. The chart draws those that have room. */
+    def dayLabels(in: Area): Vector[(String, Double)] =
+      (Iterator.iterate(firstDay)(_.plusDays(7)).takeWhile(_.isBefore(endDay)).toVector :+ endDay)
+        .map(day => Formatting.formatDay(day) -> in.across(fraction(day)))
+
+    /** The change of the line from the day before, when the day before has a point. */
+    def change(index: Int): Option[Long] =
+      Option.when(index > 0 && line(index - 1)._1 == line(index)._1.minusDays(1))(line(index)._2 - line(index - 1)._2)
+
+    /** What a pointer at `at` is on: the nearest recorded day, or the projected end when the pointer is nearer to that. */
+    def nearest(at: Double, in: Area): Hover = {
+      val across = in.fractionAt(at)
+      val index  = fractions.indices.minBy(i => math.abs(fractions(i) - across))
+      projection match {
+        case Some(p) if math.abs(1.0 - across) < math.abs(fractions(index) - across) => Hover.End(p)
+        case _                                                                       => Hover.Day(index)
+      }
+    }
+
+    /** One day to the left or to the right of `from`. With no start, the last recorded day. */
+    def step(from: Option[Hover], by: Int): Hover = {
+      val last = line.size - 1
+      (from, projection) match {
+        case (None, _)                                      => Hover.Day(last)
+        case (Some(end: Hover.End), _)                      => if by < 0 then Hover.Day(last) else end
+        case (Some(Hover.Day(i)), Some(p)) if i + by > last => Hover.End(p)
+        case (Some(Hover.Day(i)), _)                        => Hover.Day(math.max(0, math.min(last, i + by)))
+      }
+    }
   }
 
-  /** How many causes a readout names. More than these, and the readout is a table, not a hint. */
-  private val causesShown = 4
+  // --- the plot and the readout --------------------------------------------------------------------
 
-  /** The text of one dot: the day and its value, the change from the day before, and the largest causes of that change, one on each line.
-    *
-    * The causes are read from the bank ledger as it is now. The last point of the current period is the live figure, so the change shown for it can
-    * be different from the sum of its causes for some minutes after an edit.
-    */
-  private def readout(day: LocalDate, cents: Long, change: Option[Long], causes: List[LineCause]): String = {
-    val head  = s"${Formatting.formatDay(day)}: ${MoneyFormatter.formatBare(cents)}" + change.fold("")(c => s" (${MoneyFormatter.formatSigned(c)})")
-    val shown = causes.take(causesShown).map(c => s"${c.label} ${MoneyFormatter.formatSigned(c.cents)}")
-    val rest  = causes.drop(causesShown).map(_.cents).sum
-    (head :: shown ++ Option.when(causes.sizeIs > causesShown)(s"others ${MoneyFormatter.formatSigned(rest)}")).mkString("\n")
+  private def draw(model: Model, in: Area): Seq[SvgElement] = {
+    def at(day: LocalDate, cents: Long): (Double, Double) = (in.across(model.fraction(day)), model.scale.py(cents))
+
+    val mainLine     = model.line.map { case (day, cents) => at(day, cents) }
+    val forecastLine = model.line.flatMap { case (day, _) => model.forecasts.get(day).map(at(day, _)) }
+    val end          = model.projection.map(p => at(p.endDay, p.endCents))
+
+    List[Seq[SvgElement]](
+      in.scaleRules(model.scale),
+      in.positionLabels(model.dayLabels(in)),
+      List(wash(mainLine, model.scale.py(0), seriesInk)),
+      Option.when(forecastLine.sizeIs >= 2)(seriesLine(forecastLine, secondInk, LineStyle.Secondary)).toList,
+      end.map(to => seriesLine(List(mainLine.last, to), seriesInk, LineStyle.Projected)).toList,
+      List(seriesLine(mainLine, seriesInk), in.mark(mainLine.last._1, mainLine.last._2, seriesInk)()),
+      end.map { case (endX, endY) => in.mark(endX, endY, seriesInk, hollow = true)() }.toList,
+    ).flatten
   }
+
+  /** What to mark and to say for the day under the pointer: the value first, then its change and what caused it. */
+  private def focus(model: Model, hover: Hover, in: Area, currency: Currency): Focus =
+    hover match {
+      case Hover.End(p)     =>
+        Focus(
+          in.across(model.fraction(p.endDay)),
+          List(FocusMark(model.scale.py(p.endCents), seriesInk, hollow = true)),
+          Formatting.formatDay(p.endDay),
+          List(
+            readoutRow(Some(lineKey(seriesInk, dashed = true)), "Projected", MoneyFormatter.formatSimple(p.endCents, currency), strong = true),
+            readoutRow(None, "Usual day", MoneyFormatter.formatSigned(p.perDayCents)),
+          ),
+        )
+      case Hover.Day(index) =>
+        val (day, cents) = model.line(index)
+        val forecast     = model.forecasts.get(day)
+        val causes       = model.causes(index)
+        val shown        = 4 // more than these, and the readout is a table, not a hint
+        val figures      = List(
+          Some(readoutRow(Some(lineKey(seriesInk)), "Free money", MoneyFormatter.formatSimple(cents, currency), strong = true)),
+          forecast.map(f => readoutRow(Some(lineKey(secondInk)), "Projected end", MoneyFormatter.formatBare(f))),
+          model.change(index).map(c => readoutRow(None, "Change", MoneyFormatter.formatSigned(c), strong = true)),
+        ).flatten
+        val reasons      = causes.take(shown).map(c => readoutRow(None, c.label, MoneyFormatter.formatSigned(c.cents)))
+        val others       = Option.when(causes.sizeIs > shown) {
+          readoutRow(None, "others", MoneyFormatter.formatSigned(causes.drop(shown).map(_.cents).sum))
+        }
+        Focus(
+          in.across(model.fraction(day)),
+          forecast.map(f => FocusMark(model.scale.py(f), secondInk)).toList :+ FocusMark(model.scale.py(cents), seriesInk),
+          Formatting.formatDay(day),
+          figures ++ reasons ++ others,
+        )
+    }
 }

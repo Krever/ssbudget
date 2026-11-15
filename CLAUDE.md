@@ -14,6 +14,12 @@ Personal budget tracker for tracking monthly expenses, bank balances, and calcul
 
 Think "Google Sheets for personal budget" not "enterprise dashboard with cards everywhere".
 
+**Charts** - every chart is a `ChartKit.chart` (frontend components), so they are all drawn and read in one way: a plot at the real
+pixel width of its container, one labelled scale, a pointer readout that snaps to the nearest position (arrow keys do the same), a
+legend with line keys, and the same figures as a table below. The kit owns that mechanism; a chart gives it only its series, how a
+pointer position maps to its data, and its text. `FreeMoneyChart` and `MonthlyHistoryChart` are the two charts. The one exception is
+`ChartKit.spark`, the line in a table row, which has no scale and no readout. A new chart starts from the kit, not from raw SVG.
+
 ## Core Concepts
 
 ### Period

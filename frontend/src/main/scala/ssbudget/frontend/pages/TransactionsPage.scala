@@ -3,7 +3,7 @@ package ssbudget.frontend.pages
 import com.raquo.laminar.api.L.*
 import io.circe.syntax.*
 import org.scalajs.dom
-import ssbudget.frontend.components.{CategoryCombobox, InlineEdit, RuleModal, Sparkline}
+import ssbudget.frontend.components.{CategoryCombobox, InlineEdit, MonthlyHistoryChart, RuleModal}
 import ssbudget.frontend.services.ApiClient
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -906,8 +906,10 @@ object TransactionsPage {
           ),
           div(
             cls := "px-2 pb-2",
-            child.maybe <-- summary.combineWith(cat.map(_.name).distinct).map { case (s, name) =>
-              s.map(s0 => Sparkline.monthly(s0.monthlyHistory, s0.direction, s0.expectedMagnitude, s0.currency, name))
+            // `distinct`: the summaries are loaded again after an edit of any category, and the chart of this one is made again only when its
+            // own figures are different.
+            child.maybe <-- summary.combineWith(cat.map(_.name)).distinct.map { case (s, name) =>
+              s.map(s0 => MonthlyHistoryChart(s0.monthlyHistory, s0.direction, s0.expectedMagnitude, s0.currency, name))
             },
           ),
         ),

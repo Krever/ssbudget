@@ -2,7 +2,7 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
-import ssbudget.frontend.components.{Badges, FreeMoneyChart, InlineEdit, Loading, PlanCard, TriageCard}
+import ssbudget.frontend.components.{Badges, ChartKit, FreeMoneyChart, InlineEdit, Loading, PlanCard, TriageCard}
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -36,24 +36,29 @@ object DashboardPage {
     * when the bank is synced, and then the history is loaded again.
     */
   private val freeMoneyTrend: Signal[Option[(List[FreeMoneyPoint], Option[FreeMoneyProjection], List[(LocalDate, Long)], Currency)]] =
-    dataService.freeMoneyHistory.combineWith(dataService.currentPeriod).combineWith(dataService.freeMoney).map { case (history, periodOpt, free) =>
-      periodOpt.map { period =>
-        val today  = DataService.today
-        val stored = history.getOrElse(period.id, Nil)
-        val now    = FreeMoneyPoint(
-          today,
-          free.amountCents,
-          stored.lastOption.fold(0L)(_.planLineCents),
-          stored.lastOption.fold(0L)(_.fromSavingsCents),
-          stored.lastOption.fold(0L)(_.unplannedIncomeCents),
-          measured = true,
-          // The causes are those of today's stored row. An older latest row belongs to another day, and its causes are not today's.
-          stored.lastOption.filter(_.day == today).fold(Nil)(_.causes),
-        )
-        val points = stored.filter(_.day.isBefore(today)) :+ now
-        (points, FreeMoneyTrend.project(period, points), FreeMoneyTrend.projectionHistory(period, points), free.currency)
+    dataService.freeMoneyHistory
+      .combineWith(dataService.currentPeriod)
+      .combineWith(dataService.freeMoney)
+      .map { case (history, periodOpt, free) =>
+        periodOpt.map { period =>
+          val today  = DataService.today
+          val stored = history.getOrElse(period.id, Nil)
+          val now    = FreeMoneyPoint(
+            today,
+            free.amountCents,
+            stored.lastOption.fold(0L)(_.planLineCents),
+            stored.lastOption.fold(0L)(_.fromSavingsCents),
+            stored.lastOption.fold(0L)(_.unplannedIncomeCents),
+            measured = true,
+            // The causes are those of today's stored row. An older latest row belongs to another day, and its causes are not today's.
+            stored.lastOption.filter(_.day == today).fold(Nil)(_.causes),
+          )
+          val points = stored.filter(_.day.isBefore(today)) :+ now
+          (points, FreeMoneyTrend.project(period, points), FreeMoneyTrend.projectionHistory(period, points), free.currency)
+        }
       }
-    }
+      // A reload that brings the same figures emits again. `distinct`, so that the chart is made again only when its figures are different.
+      .distinct
 
   /** When the balance was last driven by a bank sync (max over externally-sourced accounts). */
   private val lastSyncedAt: Signal[Option[Instant]] =
@@ -233,7 +238,7 @@ object DashboardPage {
         // daily rate. Absent until there are two days to draw.
         child.maybe <-- freeMoneyTrend.map {
           _.flatMap { case (points, projection, forecasts, currency) =>
-            FreeMoneyChart(points, projection, forecasts, currency).map { chart =>
+            FreeMoneyChart(points, projection, forecasts, currency, ChartKit.whiteSurface).map { chart =>
               div(
                 projection.map { p =>
                   div(

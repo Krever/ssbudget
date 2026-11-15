@@ -1,7 +1,7 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
-import ssbudget.frontend.components.{FreeMoneyChart, InlineEdit, Loading, LoadingState}
+import ssbudget.frontend.components.{ChartKit, FreeMoneyChart, InlineEdit, Loading, LoadingState}
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -252,10 +252,10 @@ object PeriodsPage {
     div(
       cls := "p-3 bg-light",
       // The second line is shown for a closed period too: it shows on which days the period went worse than its usual day.
-      FreeMoneyChart(points, projection, FreeMoneyTrend.projectionHistory(s.period, points), s.currency).map { chart =>
+      FreeMoneyChart(points, projection, FreeMoneyTrend.projectionHistory(s.period, points), s.currency, ChartKit.lightSurface).map { chart =>
         div(
           cls       := "mb-3",
-          // A width limit, because the plot stretches: at the full width of the table the line becomes too flat to read.
+          // A width limit, because the plot takes the full width of its container: at the width of the table the line becomes too flat to read.
           styleAttr := "max-width: 40rem",
           div(
             cls   := "text-muted small text-uppercase mb-1",
