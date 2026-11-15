@@ -1,0 +1,87 @@
+package ssbudget.backend.service
+
+import cats.effect.IO
+import cats.syntax.all.*
+import ssbudget.backend.db.Repositories
+import ssbudget.shared.model.*
+
+import java.time.{Instant, LocalDate, ZoneOffset}
+
+/** The balance of an account at a past instant, also for the time before its first recorded balance.
+  *
+  * A balance is recorded on each sync and on each manual edit. Where a record exists at or before the instant, that record is the answer: it was
+  * measured. Before the first record there is nothing measured, and the transaction ledger gives the answer: the first recorded balance, less all
+  * that the account moved between the instant and that record ([[BalanceHistory.carriedBack]]). On the recorded periods this gave the bank's own
+  * running balance to the cent.
+  *
+  * An account with no transactions (a manual one) has no ledger, so its first recorded balance stands for all the time before it.
+  */
+final case class BalanceHistory(
+    snapshots: Map[AccountId, List[BalanceSnapshot]], // oldest first
+    ledger: Map[AccountId, Map[LocalDate, Long]],     // day -> signed movement, in the account's currency
+) {
+
+  /** The balance at `at`, in the account's currency. None for an account with no recorded balance at all. */
+  def asOf(account: AccountId, at: Instant): Option[Long] = {
+    val history = snapshots.getOrElse(account, Nil)
+    history
+      .findLast(!_.recordedAt.isAfter(at))
+      .map(_.amount)
+      .orElse(BalanceHistory.carriedBack(history, ledger.getOrElse(account, Map.empty), BalanceHistory.dayOf(at)))
+  }
+}
+
+object BalanceHistory {
+
+  /** All recorded balances and the full ledger of `accounts`. */
+  def load(repos: Repositories, accounts: List[Account]): IO[BalanceHistory] =
+    for {
+      snaps    <- accounts.traverse(a => repos.balanceSnapshots.findByAccount(a.id).map(a.id -> _)).map(_.toMap)
+      now      <- IO.realTimeInstant
+      daily    <- repos.bankTransactions.dailyNetByAccount(Instant.EPOCH, now)
+      uidIndex <- accountUidIndex(repos)
+    } yield BalanceHistory(snaps.view.mapValues(_.sortBy(_.recordedAt.toEpochMilli)).toMap, ledgerByAccount(daily, uidIndex))
+
+  /** The balance at the end of `day`, for a `day` before the first record in `history` (oldest first).
+    *
+    * The anchor is the LAST record of the first recorded day, not the first record. An account that is made in the app starts with a record of zero,
+    * and the real balance comes with the sync a moment later; the first record would thus anchor all earlier days to zero. Bank entries carry a date
+    * and no time, so the anchor's own day counts as already in the anchor, and `day`'s own entries count as before the end of `day`.
+    */
+  def carriedBack(history: List[BalanceSnapshot], ledger: Map[LocalDate, Long], day: LocalDate): Option[Long] =
+    history.headOption.map { first =>
+      val anchorDay = dayOf(first.recordedAt)
+      val anchor    = history.takeWhile(s => dayOf(s.recordedAt) == anchorDay).last
+      anchor.amount - ledger.collect { case (d, cents) if d.isAfter(day) && !d.isAfter(anchorDay) => cents }.sum
+    }
+
+  /** The rows of `dailyNetByAccount`, keyed by the app account that each bank account moves. The cards of a card group are several bank accounts that
+    * feed one app account, so their movements add up. The amounts stay in the account's currency.
+    */
+  def ledgerByAccount(daily: List[(String, Currency, String, Long)], uidIndex: Map[String, AccountId]): Map[AccountId, Map[LocalDate, Long]] =
+    daily
+      .flatMap { case (uid, _, d, c) => uidIndex.get(uid).map((_, LocalDate.parse(d), c)) }
+      .groupBy(_._1)
+      .view
+      .mapValues(_.groupMapReduce(_._2)(_._3)(_ + _))
+      .toMap
+
+  /** bank account uid -> the app account whose balance it moves, resolving a card-group member to the group's account. */
+  def accountUidIndex(repos: Repositories): IO[Map[String, AccountId]] =
+    for {
+      connections <- repos.bankConnections.findAll
+      links       <- connections.traverse(c => repos.bankConnections.findLinksByConnection(c.id)).map(_.flatten)
+      groups      <- repos.cardGroups.findAll
+    } yield {
+      val groupAccount = groups.flatMap(g => g.accountId.map(g.id -> _)).toMap
+      links.flatMap { link =>
+        link.target match {
+          case BankLinkTarget.Account(id)         => Some(link.ebAccountUid -> id)
+          case BankLinkTarget.CardGroupMember(id) => groupAccount.get(id).map(link.ebAccountUid -> _)
+          case BankLinkTarget.Unlinked            => None
+        }
+      }.toMap
+    }
+
+  private def dayOf(instant: Instant): LocalDate = LocalDate.ofInstant(instant, ZoneOffset.UTC)
+}

@@ -70,8 +70,10 @@ statistic ran over — with the lookback window shaded, so the window can be pic
   budgeted bills paid from a savings account, and it counts from the day after the period opened. Plan the net amount: money that is
   moved to a savings account only to pay a budgeted bill from there is not saving
 
-`savingsPeriodChange` (current balance − balance at period start, from balance snapshots) is reported on the Dashboard as
-information only; it is not part of the free-money calculation.
+`savingsPeriodChange` (current balance − balance at period start) is reported on the Dashboard as information only; it is not part
+of the free-money calculation. The Periods page shows the same change for each period. Both read the balance at a period boundary
+from `BalanceHistory`: the recorded balance (snapshot) at or before that instant, and, before an account's first record, that first
+record carried back through the bank ledger. A manual account has no ledger, so its first record stands for all the time before it.
 
 ### Key Calculation
 ```

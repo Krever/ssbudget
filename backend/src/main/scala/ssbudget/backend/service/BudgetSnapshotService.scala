@@ -121,7 +121,7 @@ class BudgetSnapshotService(repos: Repositories) {
           // Unbounded below on purpose: a day is carried from the nearest snapshot at or before it, and that snapshot can predate any bound derived
           // from the days being written.
           dailyAcc   <- if needsLedger then repos.bankTransactions.dailyNetByAccount(Instant.EPOCH, endOfDay(today)) else IO.pure(Nil)
-          uidIndex   <- accountUidIndex
+          uidIndex   <- BalanceHistory.accountUidIndex(repos)
           // From the start of the earliest period in play: the outside-money terms are cumulative within a period.
           movements  <- repos.bankTransactions.dailyNetByAccountAndCategory(startOf(spendFrom), endOfDay(today))
         } yield {
@@ -149,15 +149,9 @@ class BudgetSnapshotService(repos: Repositories) {
                   _.groupMapReduce(r => LocalDate.parse(r._3))(r => (r._5, r._6)) { case ((o1, i1), (o2, i2)) => (o1 + o2, i1 + i2) }
                 }
                 .toMap,
-              // A card group's cards are several bank accounts feeding one app account, so re-key before grouping and they simply add up.
               // In the ACCOUNT's currency, unconverted: these movements are added to a balance that is itself in that currency, and the total is
               // converted once, afterwards. Converting here too would count a foreign movement at the square of its rate.
-              dailyByAccount = dailyAcc
-                .flatMap { case (uid, _, d, c) => uidIndex.get(uid).map((_, LocalDate.parse(d), c)) }
-                .groupBy(_._1)
-                .view
-                .mapValues(_.groupMapReduce(_._2)(_._3)(_ + _))
-                .toMap,
+              dailyByAccount = BalanceHistory.ledgerByAccount(dailyAcc, uidIndex),
               movements = movements.map { case (uid, cur, d, category, internal, cents) =>
                 val day = LocalDate.parse(d)
                 Movement(day, onSpendingAccount = uidIndex.get(uid).exists(spending), category, internal, rateTable.convert(cents, cur, day))
@@ -167,23 +161,6 @@ class BudgetSnapshotService(repos: Repositories) {
         }
     }
   }
-
-  /** bank account uid -> the app account whose balance it moves, resolving a card-group member to the group's account. */
-  private def accountUidIndex: IO[Map[String, AccountId]] =
-    for {
-      connections <- repos.bankConnections.findAll
-      links       <- connections.traverse(c => repos.bankConnections.findLinksByConnection(c.id)).map(_.flatten)
-      groups      <- repos.cardGroups.findAll
-    } yield {
-      val groupAccount = groups.flatMap(g => g.accountId.map(g.id -> _)).toMap
-      links.flatMap { link =>
-        link.target match {
-          case BankLinkTarget.Account(id)         => Some(link.ebAccountUid -> id)
-          case BankLinkTarget.CardGroupMember(id) => groupAccount.get(id).map(link.ebAccountUid -> _)
-          case BankLinkTarget.Unlinked            => None
-        }
-      }.toMap
-    }
 
   // --- one day --------------------------------------------------------------------------------
 
@@ -298,9 +275,9 @@ class BudgetSnapshotService(repos: Repositories) {
   /** An account's balance at the end of `day`, in its own currency.
     *
     * Today is simply what the account says. For a past day, the nearest balance snapshot is carried to that day through the transaction ledger —
-    * forwards when the snapshot precedes the day, backwards when the only snapshots are later. Balances are recorded on sync, so most days have no
-    * snapshot of their own, and it is the ledger that makes them knowable rather than flat. An account with no snapshots at all (and so no history to
-    * anchor to) contributes nothing rather than a guess.
+    * forwards when the snapshot precedes the day, backwards when the only snapshots are later ([[BalanceHistory.carriedBack]]). Balances are recorded
+    * on sync, so most days have no snapshot of their own, and it is the ledger that makes them knowable rather than flat. An account with no
+    * snapshots at all (and so no history to anchor to) contributes nothing rather than a guess.
     */
   private def balanceOf(w: World, account: Account, day: LocalDate): Option[Long] =
     if day == w.today then Some(account.balanceCents)
@@ -314,7 +291,7 @@ class BudgetSnapshotService(repos: Repositories) {
 
       history.findLast(s => !dayOf(s.recordedAt).isAfter(day)) match {
         case Some(before) => Some(before.amount + movement(dayOf(before.recordedAt), day))
-        case None         => history.headOption.map(first => first.amount - movement(day, dayOf(first.recordedAt)))
+        case None         => BalanceHistory.carriedBack(history, ledger, day)
       }
     }
 

@@ -16,7 +16,7 @@ import ssbudget.backend.db.Repositories
 import ssbudget.backend.db.repository.{TransactionFilter, TransactionSearchRow}
 import ssbudget.backend.search.TransactionSearch
 import ssbudget.backend.service.BudgetQueries.*
-import ssbudget.backend.service.{BudgetSnapshotService, CategorySummaryService, CurrencyService}
+import ssbudget.backend.service.{BalanceHistory, BudgetSnapshotService, CategorySummaryService, CurrencyService}
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 import ssbudget.shared.rules.RuleMatcher
@@ -344,13 +344,11 @@ object Routes {
       accounts  <- repos.accounts.findAll
       periodOpt <- repos.periods.findCurrent
       baselines <- periodOpt.toList.flatTraverse { p =>
-                     accounts.filter(_.role == AccountRole.Savings).flatTraverse { acc =>
-                       for {
-                         atStart  <- repos.balanceSnapshots.balanceAsOf(acc.id, p.startDate)
-                         // Baseline = balance at period start, else the earliest recorded balance (first observation ≈ start) — bank balances are
-                         // snapshotted on sync, not before the period, so mid-period first observations are common.
-                         baseline <- if atStart.isDefined then IO.pure(atStart) else repos.balanceSnapshots.earliestAmount(acc.id)
-                       } yield baseline.map(b => AccountPeriodBaseline(acc.id, Money(b, acc.currency))).toList
+                     val savings = accounts.filter(_.role == AccountRole.Savings)
+                     // The balance at the period's start. An account whose first balance was recorded after that start (bank balances are
+                     // recorded on sync, so this is usual for a new link) gets it from the ledger: see [[BalanceHistory]].
+                     BalanceHistory.load(repos, savings).map { history =>
+                       savings.flatMap(acc => history.asOf(acc.id, p.startDate).map(b => AccountPeriodBaseline(acc.id, Money(b, acc.currency))))
                      }
                    }
     } yield Right(baselines)
@@ -387,7 +385,8 @@ object Routes {
       // Every period needs each account's balance at two instants. Read each account's snapshot history ONCE here and resolve the boundaries in memory:
       // asking the repository per (account, boundary, period) was a query per cell of that grid.
       snapshots <- accounts.traverse(acc => repos.balanceSnapshots.findByAccount(acc.id).map(acc.id -> _)).map(_.toMap)
-      summaries <- periods.traverse(periodSummary(repos, converter, accounts, defs, cats, snapshots))
+      history   <- BalanceHistory.load(repos, accounts.filter(_.role == AccountRole.Savings))
+      summaries <- periods.traverse(periodSummary(repos, converter, accounts, defs, cats, snapshots, history))
     } yield Right(summaries)
 
   private def periodSummary(
@@ -397,6 +396,7 @@ object Routes {
       defs: List[BudgetItemDefinition],
       cats: List[Category],
       snapshots: Map[AccountId, List[BalanceSnapshot]],
+      savingsHistory: BalanceHistory,
   )(p: Period): IO[PeriodSummary] = {
     val (primary, toPrimary) = converter
 
@@ -410,17 +410,15 @@ object Routes {
     def balanceAt(acc: Account, at: Option[Instant]): Option[Long] =
       at.fold(Option(acc.balanceCents))(i => snapshots.getOrElse(acc.id, Nil).find(!_.recordedAt.isAfter(i)).map(_.amount))
 
-    val savingsDelta = savings.map { acc =>
-      (balanceAt(acc, Some(p.startDate)), balanceAt(acc, p.endDate)) match {
-        case (Some(start), Some(end)) => toPrimary(end - start, acc.currency)
-        // First recorded during the period: the earliest snapshot is the baseline, as on the dashboard (see `savingsPeriodBaselines`). For an
-        // account made in the app, that is its opening zero, so the full balance counts as added in this period.
-        case (None, Some(end))        => snapshots.getOrElse(acc.id, Nil).lastOption.fold(0L)(first => toPrimary(end - first.amount, acc.currency))
-        // Nothing recorded by the period's end: the account did not exist yet.
-        case _                        => 0L
-      }
+    // A savings balance at a boundary before the account's first record comes from the ledger (see [[BalanceHistory]]). So a period that began
+    // before the balances were recorded shows what the bank ledger says the accounts did, and not zero.
+    def savingsAt(acc: Account, at: Option[Instant]): Option[Long] =
+      at.fold(Option(acc.balanceCents))(savingsHistory.asOf(acc.id, _))
+    val savingsDelta                                               = savings.map { acc =>
+      // None only for an account with no recorded balance at all.
+      (savingsAt(acc, Some(p.startDate)), savingsAt(acc, p.endDate)).mapN((start, end) => toPrimary(end - start, acc.currency)).getOrElse(0L)
     }.sum
-    val endBalances  = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
+    val endBalances                                                = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
 
     for {
       flows   <- repos.bankTransactions.flowsBetween(from, to)
