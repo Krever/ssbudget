@@ -76,15 +76,22 @@ class BudgetSnapshotService(repos: Repositories) {
       inSpan = world.filter(w => w.periods.headOption.exists(p => !p.startDay.isAfter(date)))
     } yield inSpan.map(snapshot(_, date))
 
-  /** Today, plus every earlier day back to the first period that has no row yet. Today is always included: the day is still moving. */
+  /** Today, plus every earlier day that has no row yet, back to where the record begins. Today is always included: the day is still moving.
+    *
+    * The record begins on its first row, and never grows backwards. A period that is added later for the time BEFORE that row (a backfill of the
+    * period history) thus gets no daily rows: they could only be computed with the budgets of today, which says nothing about that time. With an
+    * empty table the record begins at the first period.
+    */
   private def daysDue(periods: List[Period], today: LocalDate): IO[List[LocalDate]] =
     earliestDay(periods) match {
       // Nothing has started yet, so there is no budget to measure.
-      case None           => IO.pure(Nil)
-      case Some(firstDay) =>
-        repos.dailyBudgetSnapshots
-          .datesBetween(firstDay, today)
-          .map(known => allDays(firstDay, today).filter(d => d == today || !known.contains(d)))
+      case None              => IO.pure(Nil)
+      case Some(firstPeriod) =>
+        for {
+          recordStart <- repos.dailyBudgetSnapshots.earliestDate
+          firstDay     = recordStart.filter(_.isAfter(firstPeriod)).getOrElse(firstPeriod)
+          known       <- repos.dailyBudgetSnapshots.datesBetween(firstDay, today)
+        } yield allDays(firstDay, today).filter(d => d == today || !known.contains(d))
     }
 
   // --- the world, loaded once -----------------------------------------------------------------

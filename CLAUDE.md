@@ -42,6 +42,12 @@ pointer position maps to its data, and its text. `FreeMoneyChart` and `MonthlyHi
   `Pending Income`. Timing is deliberately not modelled — the app takes an approximate, eventually-consistent view of when money
   lands, because dating every expense would cost more effort than the precision is worth
 - All calculations are relative to the current period
+- A period can be added later for the time before the app was in use (a backfill of the period history, done with a script). The
+  Periods page shows its figures from the bank ledger: in, out, saved, market result and the balances at its end, all through
+  `BalanceHistory`. It gets NO daily free-money rows: the record of `daily_budget_snapshots` begins on its first row and never grows
+  backwards, because old days could only be computed with the budgets of today
+- The planned-item figures of the Periods page (the "Planned paid" column and the "Plan execution" block) show only when a listed
+  period has planned items
 
 ### Budget Items
 

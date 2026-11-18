@@ -142,11 +142,19 @@ object PeriodsPage {
   /** Columns: the disclosure caret + Start, Days, In, Out, Net, Planned, Saved, Market, End balance, Free money. */
   private val historyColumns = 11
 
+  /** Has this period something to say about planned items? With no planned item in use, the figures about them are all zero. */
+  private def hasPlan(s: PeriodSummary): Boolean = s.plannedTotal > 0 || s.incomeReceivedCents != 0
+
   private def periodHistoryCard(
       summaries: Signal[LoadingState[List[PeriodSummary]]],
       freeMoney: Signal[Map[PeriodId, List[FreeMoneyPoint]]],
       expanded: Var[Set[PeriodId]],
-  ): HtmlElement =
+  ): HtmlElement = {
+    // The "Planned paid" column and the sentence about it show only when a listed period has planned items.
+    val noPlan: Signal[Boolean] = summaries.map {
+      case LoadingState.Loaded(list) => !list.exists(hasPlan)
+      case _                         => false
+    }
     div(
       cls := "card",
       div(cls := "card-header py-2", div("Period History")),
@@ -161,7 +169,7 @@ object PeriodsPage {
               th(cls  := "text-end", "In"),
               th(cls  := "text-end", "Out"),
               th(cls  := "text-end", "Net"),
-              th(cls  := "text-end", "Planned paid"),
+              th(cls  := "text-end", cls.toggle("d-none") <-- noPlan, "Planned paid"),
               th(
                 cls   := "text-end",
                 title := "What was saved in the period (the change of the savings accounts plus what was moved into investments), and the savings balance at its end",
@@ -183,23 +191,29 @@ object PeriodsPage {
             case (LoadingState.Error(msg), _, _)          => List(messageBody(s"Couldn't load period history: $msg", "text-danger"))
             case (LoadingState.Loaded(Nil), _, _)         => List(messageBody("No periods yet — start one above.", "text-muted"))
             case (LoadingState.Loaded(list), open, trend) =>
+              val showPlan   = list.exists(hasPlan)
               // The Transactions page can only reproduce two windows — the current period and the one before it — so only those rows get a link out.
               val previousId = list.find(_.period.endDate.isDefined).map(_.period.id)
               list.map { s =>
                 val window =
                   if s.ongoing then Some(MonthFilter.CurrentPeriod)
                   else Option.when(previousId.contains(s.period.id))(MonthFilter.PreviousPeriod)
-                periodBody(s, open.contains(s.period.id), window, expanded, trend)
+                periodBody(s, open.contains(s.period.id), window, expanded, trend, showPlan)
               }
           },
         ),
       ),
       div(
         cls   := "card-footer py-2 small text-muted",
-        "In/Out come from bank transactions (internal transfers excluded), so cash and unconnected banks are invisible there. " +
+        "In/Out come from bank transactions (internal transfers excluded), so cash and unconnected banks are invisible there. Periods from before " +
+          "the app was in use have no free money record. ",
+        span(
+          cls.toggle("d-none") <-- noPlan,
           "“Planned paid” is what you recorded against planned items — it overlaps with Out rather than adding to it.",
+        ),
       ),
     )
+  }
 
   private def messageBody(text: String, textCls: String): HtmlElement =
     tbody(tr(td(colSpan := historyColumns, cls := s"p-3 small $textCls", text)))
@@ -211,6 +225,7 @@ object PeriodsPage {
       linkWindow: Option[String],
       expanded: Var[Set[PeriodId]],
       trend: Map[PeriodId, List[FreeMoneyPoint]],
+      showPlan: Boolean,
   ): HtmlElement = {
     val points       = trend.getOrElse(s.period.id, Nil)
     val plannedLabel =
@@ -232,7 +247,7 @@ object PeriodsPage {
         td(cls := "text-end font-monospace text-success", signed(s.inflowCents)),
         td(cls := "text-end font-monospace text-danger", signed(-s.outflowCents)),
         td(cls := s"text-end font-monospace fw-bold ${amountCls(s.netCents)}", signed(s.netCents)),
-        td(cls := "text-end font-monospace", plannedLabel),
+        td(cls := s"text-end font-monospace${if showPlan then "" else " d-none"}", plannedLabel),
         td(
           cls  := "text-end font-monospace text-nowrap",
           span(cls := s"small ${amountCls(s.savedCents)}", signed(s.savedCents)),
@@ -295,16 +310,19 @@ object PeriodsPage {
       },
       div(
         cls := "row g-3",
-        div(
-          cls := "col-md-4",
-          div(cls := "text-muted small text-uppercase mb-1", "Plan execution"),
-          div(cls := "small", s"${s.plannedSettled} of ${s.plannedTotal} planned expenses settled"),
-          div(cls := "small", s"Paid ${money(s.plannedPaidCents)} of ${money(s.plannedEstimateCents)} estimated"),
-          div(cls := "small", s"Planned income received: ${money(s.incomeReceivedCents)}"),
-          div(cls := "small text-muted mt-1", "Estimates shown are each item's current value — definitions aren't versioned."),
+        // The plan block has a place only when the period had planned items.
+        Option.when(hasPlan(s))(
+          div(
+            cls := "col-md-4",
+            div(cls := "text-muted small text-uppercase mb-1", "Plan execution"),
+            div(cls := "small", s"${s.plannedSettled} of ${s.plannedTotal} planned expenses settled"),
+            div(cls := "small", s"Paid ${money(s.plannedPaidCents)} of ${money(s.plannedEstimateCents)} estimated"),
+            div(cls := "small", s"Planned income received: ${money(s.incomeReceivedCents)}"),
+            div(cls := "small text-muted mt-1", "Estimates shown are each item's current value — definitions aren't versioned."),
+          ),
         ),
         div(
-          cls := "col-md-8",
+          cls := (if hasPlan(s) then "col-md-8" else "col-12"),
           div(
             cls := "d-flex justify-content-between align-items-baseline mb-1",
             span(cls := "text-muted small text-uppercase", "Where the money went"),

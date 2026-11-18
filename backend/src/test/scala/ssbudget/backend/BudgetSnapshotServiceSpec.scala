@@ -373,6 +373,24 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
       }
     }
 
+    "does not grow backwards when an earlier period is added" in {
+      withFixture { (service, repos, xa) =>
+        val earlier = periodStart.minusDays(30)
+        for {
+          _      <- service.ensureUpToDate
+          before <- repos.dailyBudgetSnapshots.findAll
+          // A period for the time before the record began, as a backfill of the period history makes it.
+          _      <- sql"""INSERT INTO periods (id, started_at, expected_end, ended_at)
+                          VALUES ('per0', ${at(earlier, 9)}, $periodStart, ${at(periodStart, 9)})""".update.run.transact(xa)
+          _      <- service.ensureUpToDate
+          after  <- repos.dailyBudgetSnapshots.findAll
+        } yield {
+          after.map(_.onDate) shouldBe before.map(_.onDate)
+          after.map(_.onDate).min shouldBe periodStart
+        }
+      }
+    }
+
     "does not reach a period that is closed" in {
       withFixture { (service, repos, xa) =>
         val closedOn = periodStart.plusDays(6)

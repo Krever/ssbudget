@@ -33,6 +33,9 @@ trait DailyBudgetSnapshotRepository {
     */
   def datesBetween(from: LocalDate, to: LocalDate): IO[Set[LocalDate]]
 
+  /** The first day that has a row: where the record begins. None while the table is empty. */
+  def earliestDate: IO[Option[LocalDate]]
+
   def findByDate(date: LocalDate): IO[Option[DailyBudgetSnapshot]]
 
   /** Every row, oldest first. */
@@ -69,6 +72,9 @@ class DailyBudgetSnapshotRepositoryImpl(xa: Transactor[IO]) extends DailyBudgetS
     }
     writes.sequence_.transact(xa)
   }
+
+  override def earliestDate: IO[Option[LocalDate]] =
+    sql"SELECT MIN(on_date) FROM daily_budget_snapshots".query[Option[LocalDate]].unique.transact(xa)
 
   override def datesBetween(from: LocalDate, to: LocalDate): IO[Set[LocalDate]] =
     sql"SELECT on_date FROM daily_budget_snapshots WHERE on_date >= $from AND on_date <= $to"

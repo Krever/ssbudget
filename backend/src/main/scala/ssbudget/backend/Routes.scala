@@ -415,7 +415,7 @@ object Routes {
       rows   <- repos.dailyBudgetSnapshots.findAll
     } yield Right(FreeMoneyHistory(rows, causes))
 
-  private val periodSummaryDefaultCount = 12
+  private val periodSummaryDefaultCount = 24
 
   /** How many categories each period's spend breakdown lists. */
   private val periodSummaryCategoryCap = 6
@@ -429,11 +429,10 @@ object Routes {
       defs      <- repos.expenseDefinitions.findAll
       cats      <- repos.categories.findAll
       converter <- primaryConverter(repos)
-      // Every period needs each account's balance at two instants. Read each account's snapshot history ONCE here and resolve the boundaries in memory:
-      // asking the repository per (account, boundary, period) was a query per cell of that grid.
-      snapshots <- accounts.traverse(acc => repos.balanceSnapshots.findByAccount(acc.id).map(acc.id -> _)).map(_.toMap)
-      history   <- BalanceHistory.load(repos, accounts.filter(a => AccountRole.held(a.role)))
-      summaries <- periods.traverse(periodSummary(repos, converter, accounts, defs, cats, snapshots, history))
+      // Every period needs each account's balance at two instants. The history of each account is read ONCE here, and the boundaries are resolved
+      // in memory.
+      history   <- BalanceHistory.load(repos, accounts)
+      summaries <- periods.traverse(periodSummary(repos, converter, accounts, defs, cats, history))
     } yield Right(summaries)
 
   private def periodSummary(
@@ -442,8 +441,7 @@ object Routes {
       accounts: List[Account],
       defs: List[BudgetItemDefinition],
       cats: List[Category],
-      snapshots: Map[AccountId, List[BalanceSnapshot]],
-      heldHistory: BalanceHistory,
+      history: BalanceHistory,
   )(p: Period): IO[PeriodSummary] = {
     val (primary, toPrimary) = converter
 
@@ -453,29 +451,24 @@ object Routes {
     val savings            = accounts.filter(_.role == AccountRole.Savings)
     val investment         = accounts.filter(_.role == AccountRole.Investment)
 
-    // Balances come from snapshots, which are stamped at real instants — so they use the period's exact bounds rather than the transaction window's day
-    // boundaries. A running period has no end, and its "balance at the end" is simply the account's live balance. `findByAccount` returns newest first,
-    // so the balance as of an instant is the first snapshot recorded at or before it.
+    // A balance at a period boundary: the recorded balance at or before that instant, and, before the first record of an account, that record
+    // carried back through the bank ledger (see [[BalanceHistory]]). So a period from before the balances were recorded shows what the bank
+    // ledger says the accounts did, and not zero. A running period has no end: its "balance at the end" is the live balance.
     def balanceAt(acc: Account, at: Option[Instant]): Option[Long] =
-      at.fold(Option(acc.balanceCents))(i => snapshots.getOrElse(acc.id, Nil).find(!_.recordedAt.isAfter(i)).map(_.amount))
-
-    // The balance of a savings or investment account at a boundary before its first record comes from the ledger (see [[BalanceHistory]]). So a
-    // period that began before the balances were recorded shows what the bank ledger says the accounts did, and not zero.
-    def heldAt(acc: Account, at: Option[Instant]): Option[Long]  =
-      at.fold(Option(acc.balanceCents))(heldHistory.asOf(acc.id, _))
+      at.fold(Option(acc.balanceCents))(history.asOf(acc.id, _))
     // The change across the period and the balance at its end, for the accounts of one role. At today's rates, as every other figure of the
     // summary. Thus the change of a foreign account is only what moved, not what the rate did.
-    def changeAndEnd(group: List[Account]): (Long, Option[Long]) = {
+    def changeAndEnd(group: List[Account]): (Long, Option[Long])   = {
       val change = group.map { acc =>
         // None only for an account with no recorded balance at all.
-        (heldAt(acc, Some(p.startDate)), heldAt(acc, p.endDate)).mapN((start, end) => toPrimary(end - start, acc.currency)).getOrElse(0L)
+        (balanceAt(acc, Some(p.startDate)), balanceAt(acc, p.endDate)).mapN((start, end) => toPrimary(end - start, acc.currency)).getOrElse(0L)
       }.sum
-      val ends   = group.flatMap(acc => heldAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
+      val ends   = group.flatMap(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
       (change, Option.when(ends.nonEmpty)(ends.sum))
     }
-    val (savingsDelta, savingsEnd)                               = changeAndEnd(savings)
-    val (investmentDelta, investmentEnd)                         = changeAndEnd(investment)
-    val endBalances                                              = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
+    val (savingsDelta, savingsEnd)                                 = changeAndEnd(savings)
+    val (investmentDelta, investmentEnd)                           = changeAndEnd(investment)
+    val endBalances                                                = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
 
     for {
       flows   <- repos.bankTransactions.flowsBetween(from, to)
