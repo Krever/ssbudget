@@ -347,16 +347,16 @@ object Routes {
     } yield Right(newPeriod)
   }
 
-  /** Balance at the current period's start per account (see [[AccountPeriodBaseline]] — the client derives the Δ from its live balances). No current
-    * period, or no recorded history for an account → no entry, and the client shows no Δ. Informational only — not part of the free-money calc.
+  /** Balance at the current period's start per savings and investment account (see [[AccountPeriodBaseline]] — the client derives the Δ from its live
+    * balances). No current period, or no recorded history for an account → no entry, and the client shows no Δ. Informational only — not part of the
+    * free-money calc.
     */
   private def savingsPeriodBaselines(repos: Repositories): Result[List[AccountPeriodBaseline]] =
     for {
       accounts  <- repos.accounts.findAll
       periodOpt <- repos.periods.findCurrent
       baselines <- periodOpt.toList.flatTraverse { p =>
-                     // All accounts. A savings or investment account is read by its balance change; a spending account by what was spent from it.
-                     val savings    = accounts
+                     val savings    = accounts.filter(a => AccountRole.held(a.role))
                      // The balance at the period's start. An account whose first balance was recorded after that start (bank balances are
                      // recorded on sync, so this is usual for a new link) gets it from the ledger: see [[BalanceHistory]].
                      val (from, to) = periodWindow(p)
@@ -364,11 +364,6 @@ object Routes {
                        history   <- BalanceHistory.load(repos, savings)
                        converter <- primaryConverter(repos)
                        moved     <- movedToInvestments(repos, converter._2)(from, to)
-                       spentRows <- repos.bankTransactions.spentByAccountBetween(from, to)
-                       uidIndex  <- BalanceHistory.accountUidIndex(repos)
-                       spent      = spentRows
-                                      .flatMap { case (uid, currency, cents) => uidIndex.get(uid).map(_ -> converter._2(cents, currency)) }
-                                      .groupMapReduce(_._1)(_._2)(_ + _)
                      } yield savings.flatMap { acc =>
                        history
                          .asOf(acc.id, p.startDate)
@@ -378,8 +373,6 @@ object Routes {
                              Money(b, acc.currency),
                              // "Moved" is a figure of investment accounts only.
                              if acc.role == AccountRole.Investment then moved.getOrElse(acc.id, 0L) else 0L,
-                             // "Spent" is a figure of spending accounts only.
-                             if acc.role == AccountRole.Spending then spent.getOrElse(acc.id, 0L) else 0L,
                            ),
                          )
                      }

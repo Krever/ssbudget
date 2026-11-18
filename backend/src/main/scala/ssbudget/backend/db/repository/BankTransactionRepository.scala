@@ -100,11 +100,6 @@ trait BankTransactionRepository {
     */
   def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]]
 
-  /** What was spent over `[from, to)`, per (bank account uid, currency): the sum of the non-internal debits, as a negative amount. The transactions
-    * of a transfer category are not spend, so they are not in it. A refund is a credit, so it is not in it either.
-    */
-  def spentByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]]
-
   /** Spend per (category, currency, YYYY-MM) over `[from, to)`, categorized + non-internal — a per-month breakdown. `includeInflows` as in
     * [[spendByCategoryBetween]] (false = gross outflow, e.g. for the analytics chart; true = net, for the budget statistic).
     */
@@ -298,16 +293,6 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
                                          WHERE l.link_target_kind = 'account' AND l.link_target_id = c.transfer_account_id)
             AND t.booked_at >= $from""" ++ upper ++
       fr"GROUP BY c.transfer_account_id, t.currency").query[(AccountId, Currency, Long)].to[List].transact(xa)
-  }
-
-  override def spentByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]] = {
-    val upper = to.fold(Fragment.empty)(t => fr"AND booked_at < $t")
-    (fr"""SELECT eb_account_uid, currency, SUM(amount_cents)
-          FROM bank_transactions
-          WHERE is_internal = 0 AND amount_cents < 0
-            AND (category_id IS NULL OR category_id NOT IN (SELECT id FROM categories WHERE transfer_account_id IS NOT NULL))
-            AND booked_at >= $from""" ++ upper ++
-      fr"GROUP BY eb_account_uid, currency").query[(String, Currency, Long)].to[List].transact(xa)
   }
 
   override def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]] = {

@@ -77,15 +77,12 @@ trait DataService {
   /** `role`: only a change between Savings and Investment is accepted by the server. */
   def updateAccount(id: AccountId, name: String, currency: Currency, role: AccountRole): Future[Unit]
 
-  // Balance at period start per account of any role, in the account's own currency (see AccountPeriodBaseline); no recorded history -> no entry.
-  // The name is from the time when only savings accounts had one.
+  // Balance at period start per savings and investment account, in the account's own currency (see AccountPeriodBaseline); no recorded history ->
+  // no entry.
   def savingsBaselines: Signal[Map[AccountId, Money]]
 
   // Net amount moved into each investment account in the current period, in primary-currency cents (see AccountPeriodBaseline.movedCents).
   def investmentMoved: Signal[Map[AccountId, Long]]
-
-  // What was spent from each spending account in the current period, in primary-currency cents, negative (see AccountPeriodBaseline.spentCents).
-  def periodSpent: Signal[Map[AccountId, Long]]
 
   // Derived signals
   def currentPeriod: Signal[Option[Period]]

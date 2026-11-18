@@ -20,7 +20,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   private val availableCurrenciesVar: Var[List[(String, String)]] = Var(List.empty)
   private val categorySummariesVar: Var[List[CategorySummary]]    = Var(List.empty)
   private val investmentMovedVar: Var[Map[AccountId, Long]]       = Var(Map.empty) // net moved into each investment account, primary cents
-  private val periodSpentVar: Var[Map[AccountId, Long]]           = Var(Map.empty) // spent from each spending account, primary cents, negative
   private val savingsBaselinesVar: Var[Map[AccountId, Money]]     = Var(Map.empty) // per savings-account balance at period start, in account currency
 
   private val freeMoneyHistoryVar: Var[Map[PeriodId, List[FreeMoneyPoint]]]  = Var(Map.empty)
@@ -74,7 +73,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       categorySummariesVar.set(categorySumms)
       savingsBaselinesVar.set(baselines.map(b => b.accountId -> b.baseline).toMap)
       investmentMovedVar.set(baselines.map(b => b.accountId -> b.movedCents).toMap)
-      periodSpentVar.set(baselines.map(b => b.accountId -> b.spentCents).toMap)
     }
   }
 
@@ -172,7 +170,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
 
   override def savingsBaselines: Signal[Map[AccountId, Money]] = savingsBaselinesVar.signal
   override def investmentMoved: Signal[Map[AccountId, Long]]   = investmentMovedVar.signal
-  override def periodSpent: Signal[Map[AccountId, Long]]       = periodSpentVar.signal
 
   // Mutation methods
   private def upsertAccount(account: Account): Unit =
