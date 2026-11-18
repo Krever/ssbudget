@@ -84,6 +84,24 @@ class CategoryRepositorySpec extends RepositorySpec {
     }
   }
 
+  "a transfer category keeps its investment account, and loses it when the account is cleared" in {
+    val repo     = new CategoryRepositoryImpl(xa)
+    val accounts = new AccountRepositoryImpl(xa)
+    val broker   = savingsAccount("inv-1", "Broker", Currency.EUR, 0).copy(role = AccountRole.Investment)
+    val linked   = category("c-1", "From broker").copy(transferAccount = Some(broker.id))
+    for {
+      _       <- accounts.create(broker)
+      _       <- repo.create(linked)
+      _       <- repo.create(category("c-2", "Groceries"))
+      created <- repo.findById(CategoryId("c-1"))
+      _       <- repo.clearTransferAccount(broker.id)
+      cleared <- repo.findAll
+    } yield {
+      created shouldBe Some(linked)
+      cleared.map(_.transferAccount) shouldBe List(None, None)
+    }
+  }
+
   "delete removes the category" in {
     val repo = new CategoryRepositoryImpl(xa)
     for {

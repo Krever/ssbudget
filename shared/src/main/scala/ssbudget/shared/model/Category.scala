@@ -17,12 +17,19 @@ final case class Category(
     budgetType: Option[CategoryBudgetType] = None, // None = not a budget; otherwise how its monthly figure is drawn down
     budget: CategoryBudget = CategoryBudget(),     // how that monthly figure is derived
     billPayments: Int = 1,                         // payments a Bill expects per period; each one releases its 1/N share of the budget
+    // Some = the transactions of this category are transfers to or from that investment account (which has no bank ledger of its own). They are
+    // then money moved to or from savings, not income and not spend. Such a category is never a budget.
+    transferAccount: Option[AccountId] = None,
 ) derives Codec.AsObject {
 
   /** As it should be stored: the budget window clamped (see [[CategoryBudget.normalized]]) and the payment count held to
-    * 1..[[Category.maxBillPayments]].
+    * 1..[[Category.maxBillPayments]]. A transfer category has no budget type.
     */
-  def normalized: Category = copy(budget = budget.normalized, billPayments = billPayments.max(1).min(Category.maxBillPayments))
+  def normalized: Category = copy(
+    budgetType = if transferAccount.isDefined then None else budgetType,
+    budget = budget.normalized,
+    billPayments = billPayments.max(1).min(Category.maxBillPayments),
+  )
 }
 
 object Category {

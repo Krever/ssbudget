@@ -165,8 +165,16 @@ object Routes {
       existingOpt <- repos.accounts.findById(id)
       result      <- existingOpt match {
                        case Some(existing) =>
-                         val updated = existing.copy(name = dto.name, currency = dto.currency)
-                         repos.accounts.update(updated).as(Right(updated))
+                         val role = dto.role.getOrElse(existing.role)
+                         // A spending account has bank links, card groups and a place in free money. Only the two held roles can change places.
+                         if role != existing.role && !(AccountRole.held(role) && AccountRole.held(existing.role)) then {
+                           IO.pure(Left("Only a savings account and an investment account can change role"))
+                         } else {
+                           val updated = existing.copy(name = dto.name, currency = dto.currency, role = role)
+                           // Only an investment account has transfer categories.
+                           val unlink  = IO.whenA(role != AccountRole.Investment)(repos.categories.clearTransferAccount(id))
+                           (repos.accounts.update(updated) *> unlink).as(Right(updated))
+                         }
                        case None           => IO.pure(Left(s"Account not found: ${id.value}"))
                      }
     } yield result
@@ -198,6 +206,7 @@ object Routes {
                   case _                      =>
                     for {
                       _ <- repos.balanceSnapshots.deleteByAccountId(id)
+                      _ <- repos.categories.clearTransferAccount(id)
                       _ <- repos.accounts.delete(id)
                     } yield Right(())
                 }
@@ -338,23 +347,58 @@ object Routes {
     } yield Right(newPeriod)
   }
 
-  /** Balance at the current period's start per savings account (see [[AccountPeriodBaseline]] — the client derives the Δ from its live balances). No
-    * current period, or no recorded history for an account → no entry, and the client shows no Δ. Informational only — not part of the free-money
-    * calc.
+  /** Balance at the current period's start per savings and investment account (see [[AccountPeriodBaseline]] — the client derives the Δ from its live
+    * balances). No current period, or no recorded history for an account → no entry, and the client shows no Δ. Informational only — not part of the
+    * free-money calc.
     */
   private def savingsPeriodBaselines(repos: Repositories): Result[List[AccountPeriodBaseline]] =
     for {
       accounts  <- repos.accounts.findAll
       periodOpt <- repos.periods.findCurrent
       baselines <- periodOpt.toList.flatTraverse { p =>
-                     val savings = accounts.filter(_.role == AccountRole.Savings)
+                     val savings    = accounts.filter(a => AccountRole.held(a.role))
                      // The balance at the period's start. An account whose first balance was recorded after that start (bank balances are
                      // recorded on sync, so this is usual for a new link) gets it from the ledger: see [[BalanceHistory]].
-                     BalanceHistory.load(repos, savings).map { history =>
-                       savings.flatMap(acc => history.asOf(acc.id, p.startDate).map(b => AccountPeriodBaseline(acc.id, Money(b, acc.currency))))
+                     val (from, to) = periodWindow(p)
+                     for {
+                       history   <- BalanceHistory.load(repos, savings)
+                       converter <- primaryConverter(repos)
+                       moved     <- movedToInvestments(repos, converter._2)(from, to)
+                     } yield savings.flatMap { acc =>
+                       history
+                         .asOf(acc.id, p.startDate)
+                         .map(b =>
+                           AccountPeriodBaseline(
+                             acc.id,
+                             Money(b, acc.currency),
+                             // "Moved" is a figure of investment accounts only.
+                             if acc.role == AccountRole.Investment then moved.getOrElse(acc.id, 0L) else 0L,
+                           ),
+                         )
                      }
                    }
     } yield Right(baselines)
+
+  /** The net amount moved INTO each investment account over `[from, to)`, in the primary currency. Negative = taken out. It has two sources:
+    *   - the transfer categories of the account: the opposite of what the bank side shows (a withdrawal arrives at the bank);
+    *   - the account's own ledger, when it has one (for example card payments imported from a statement of the broker): its non-internal net, with
+    *     its own sign. A payment from the account is money taken out of the investment, and it is spend as on any other account.
+    *
+    * The map has an entry for other accounts with a ledger too. Callers read only the investment accounts.
+    */
+  private def movedToInvestments(repos: Repositories, toPrimary: (Long, Currency) => Long)(
+      from: Instant,
+      to: Option[Instant],
+  ): IO[Map[AccountId, Long]] =
+    for {
+      transfers <- repos.bankTransactions.transfersByAccountBetween(from, to)
+      ownLedger <- repos.bankTransactions.netByAccountBetween(from, to)
+      uidIndex  <- BalanceHistory.accountUidIndex(repos)
+    } yield {
+      val viaCategories = transfers.map { case (account, currency, cents) => account -> -toPrimary(cents, currency) }
+      val viaLedger     = ownLedger.flatMap { case (uid, currency, cents) => uidIndex.get(uid).map(_ -> toPrimary(cents, currency)) }
+      (viaCategories ++ viaLedger).groupMapReduce(_._1)(_._2)(_ + _)
+    }
 
   /** How many periods the retrospective summarizes when the client doesn't ask for a number. Each period costs a handful of aggregate queries, so
     * this is capped rather than unbounded.
@@ -388,7 +432,7 @@ object Routes {
       // Every period needs each account's balance at two instants. Read each account's snapshot history ONCE here and resolve the boundaries in memory:
       // asking the repository per (account, boundary, period) was a query per cell of that grid.
       snapshots <- accounts.traverse(acc => repos.balanceSnapshots.findByAccount(acc.id).map(acc.id -> _)).map(_.toMap)
-      history   <- BalanceHistory.load(repos, accounts.filter(_.role == AccountRole.Savings))
+      history   <- BalanceHistory.load(repos, accounts.filter(a => AccountRole.held(a.role)))
       summaries <- periods.traverse(periodSummary(repos, converter, accounts, defs, cats, snapshots, history))
     } yield Right(summaries)
 
@@ -399,13 +443,15 @@ object Routes {
       defs: List[BudgetItemDefinition],
       cats: List[Category],
       snapshots: Map[AccountId, List[BalanceSnapshot]],
-      savingsHistory: BalanceHistory,
+      heldHistory: BalanceHistory,
   )(p: Period): IO[PeriodSummary] = {
     val (primary, toPrimary) = converter
 
-    val (from, to) = periodWindow(p)
-    val spending   = accounts.filter(_.role == AccountRole.Spending)
-    val savings    = accounts.filter(_.role == AccountRole.Savings)
+    val (from, to)         = periodWindow(p)
+    val transferCategories = cats.filter(_.transferAccount.isDefined).map(_.id).toSet
+    val spending           = accounts.filter(_.role == AccountRole.Spending)
+    val savings            = accounts.filter(_.role == AccountRole.Savings)
+    val investment         = accounts.filter(_.role == AccountRole.Investment)
 
     // Balances come from snapshots, which are stamped at real instants — so they use the period's exact bounds rather than the transaction window's day
     // boundaries. A running period has no end, and its "balance at the end" is simply the account's live balance. `findByAccount` returns newest first,
@@ -413,21 +459,29 @@ object Routes {
     def balanceAt(acc: Account, at: Option[Instant]): Option[Long] =
       at.fold(Option(acc.balanceCents))(i => snapshots.getOrElse(acc.id, Nil).find(!_.recordedAt.isAfter(i)).map(_.amount))
 
-    // A savings balance at a boundary before the account's first record comes from the ledger (see [[BalanceHistory]]). So a period that began
-    // before the balances were recorded shows what the bank ledger says the accounts did, and not zero.
-    def savingsAt(acc: Account, at: Option[Instant]): Option[Long] =
-      at.fold(Option(acc.balanceCents))(savingsHistory.asOf(acc.id, _))
-    val savingsDelta                                               = savings.map { acc =>
-      // None only for an account with no recorded balance at all.
-      (savingsAt(acc, Some(p.startDate)), savingsAt(acc, p.endDate)).mapN((start, end) => toPrimary(end - start, acc.currency)).getOrElse(0L)
-    }.sum
-    // At today's rates, as every other figure of the summary. Thus the change of a foreign account is only what moved, not what the rate did.
-    val savingsEnds                                                = savings.flatMap(acc => savingsAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
-    val endBalances                                                = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
+    // The balance of a savings or investment account at a boundary before its first record comes from the ledger (see [[BalanceHistory]]). So a
+    // period that began before the balances were recorded shows what the bank ledger says the accounts did, and not zero.
+    def heldAt(acc: Account, at: Option[Instant]): Option[Long]  =
+      at.fold(Option(acc.balanceCents))(heldHistory.asOf(acc.id, _))
+    // The change across the period and the balance at its end, for the accounts of one role. At today's rates, as every other figure of the
+    // summary. Thus the change of a foreign account is only what moved, not what the rate did.
+    def changeAndEnd(group: List[Account]): (Long, Option[Long]) = {
+      val change = group.map { acc =>
+        // None only for an account with no recorded balance at all.
+        (heldAt(acc, Some(p.startDate)), heldAt(acc, p.endDate)).mapN((start, end) => toPrimary(end - start, acc.currency)).getOrElse(0L)
+      }.sum
+      val ends   = group.flatMap(acc => heldAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
+      (change, Option.when(ends.nonEmpty)(ends.sum))
+    }
+    val (savingsDelta, savingsEnd)                               = changeAndEnd(savings)
+    val (investmentDelta, investmentEnd)                         = changeAndEnd(investment)
+    val endBalances                                              = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
 
     for {
       flows   <- repos.bankTransactions.flowsBetween(from, to)
-      catRows <- repos.bankTransactions.spendByCategoryBetween(from, to)
+      moved   <- movedToInvestments(repos, toPrimary)(from, to)
+      // A deposit to an investment account is not spend, so a transfer category has no place in the spend breakdown.
+      catRows <- repos.bankTransactions.spendByCategoryBetween(from, to).map(_.filterNot(r => transferCategories(r._1)))
       records <- repos.expenseRecords.findByPeriod(p.id)
     } yield {
       val byId                                                             = defs.map(d => d.id -> d).toMap
@@ -459,7 +513,10 @@ object Routes {
         plannedSettled = expenses.count(_._1.settled),
         plannedTotal = expenses.size,
         savingsChangeCents = savingsDelta,
-        savingsEndCents = Option.when(savingsEnds.nonEmpty)(savingsEnds.sum),
+        savingsEndCents = savingsEnd,
+        investmentChangeCents = investmentDelta,
+        investmentMovedCents = investment.map(acc => moved.getOrElse(acc.id, 0L)).sum,
+        investmentEndCents = investmentEnd,
         // Partial by design: accounts without a snapshot that early are left out rather than sinking the whole figure to None.
         endBalanceCents = Option.when(endBalances.exists(_.isDefined))(endBalances.flatten.sum),
         topCategories = topCategories,
@@ -615,7 +672,15 @@ object Routes {
       result      <- existingOpt match {
                        case Some(_) =>
                          val updated = dto.toCategory(id)
-                         repos.categories.update(updated).as(Right(updated))
+                         // A transfer category must name an investment account: only that role splits its change into moved and market.
+                         updated.transferAccount.traverse(repos.accounts.findById).map(_.flatten).flatMap {
+                           case Some(acc) if acc.role != AccountRole.Investment =>
+                             IO.pure(Left(s"${acc.name} is not an investment account"))
+                           case None if updated.transferAccount.isDefined       =>
+                             IO.pure(Left("The account of this transfer category does not exist"))
+                           case _                                               =>
+                             repos.categories.update(updated).as(Right(updated))
+                         }
                        case None    => IO.pure(Left(s"Category not found: ${id.value}"))
                      }
     } yield result

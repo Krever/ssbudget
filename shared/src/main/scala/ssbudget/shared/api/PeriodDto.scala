@@ -31,12 +31,23 @@ final case class PeriodSummary(
     plannedTotal: Int,             // planned expenses tracked this period
     savingsChangeCents: Long,      // savings balances at period end − at period start (+ saved / − withdrawn)
     savingsEndCents: Option[Long], // savings balance at period end, at today's exchange rates; None when no savings account has a record
+    // The investment accounts. Their balance change has two parts. `investmentMovedCents` is the net amount moved into them (negative = withdrawn),
+    // from the bank transactions of their transfer categories: that part is saving. The rest is market result, and it is never added to what was saved.
+    investmentChangeCents: Long,
+    investmentMovedCents: Long,
+    investmentEndCents: Option[Long],
     endBalanceCents: Option[Long], // spending balance at period end, from snapshots; None when nothing was recorded that early
     topCategories: List[PeriodCategorySpend],
 ) derives Codec.AsObject {
 
   /** What the bank says the period netted: money in minus money out. Positive = the balance grew. */
   def netCents: Long = inflowCents - outflowCents
+
+  /** What was saved in the period: the change of the savings accounts, plus what was moved into the investment accounts. */
+  def savedCents: Long = savingsChangeCents + investmentMovedCents
+
+  /** What the market did to the investment accounts: their balance change less what was moved. */
+  def investmentMarketCents: Long = investmentChangeCents - investmentMovedCents
 
   def ongoing: Boolean = period.endDate.isEmpty
 }

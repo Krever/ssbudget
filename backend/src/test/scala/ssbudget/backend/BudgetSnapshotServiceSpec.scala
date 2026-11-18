@@ -228,6 +228,34 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
         _ <- tx("o5", "uid1", -30000, "PLN", periodStart.plusDays(6), internal = true, None)
       } yield ()).transact(xa)
 
+    "counts a withdrawal from an investment account as money from savings, not as unplanned income" in {
+      // The investment account has no bank ledger. Its withdrawal is seen only as an arrival on the spending account, in its transfer category.
+      def seedInvestment(xa: Transactor[IO], linked: Boolean): IO[Unit] =
+        (for {
+          _ <- sql"""INSERT INTO accounts (id, name, currency, role, balance_cents, balance_source, balance_updated_at)
+                     VALUES ('inv1', 'Broker', 'PLN', 'investment', 900000, 'manual', ${at(today)})""".update.run
+          _ <- sql"""INSERT INTO categories (id, name, color, transfer_account_id)
+                     VALUES ('brk', 'From broker', '#888', ${Option.when(linked)("inv1")})""".update.run
+          _ <- tx("i1", "uid1", 20000, "PLN", periodStart.plusDays(4), internal = false, Some("brk"))
+        } yield ()).transact(xa)
+
+      for {
+        plain  <- withFixture((service, _, xa) => seedInvestment(xa, linked = false) *> freeOn(service, periodStart.plusDays(4)))
+        linked <- withFixture((service, _, xa) => seedInvestment(xa, linked = true) *> freeOn(service, periodStart.plusDays(4)))
+      } yield {
+        // An ordinary category with no budget: its positive net is unplanned income.
+        plain.unplannedIncomeCents shouldBe 20000L
+        // A transfer category: the same 200 PLN is money from savings. The plan's own line leaves it out in both cases.
+        linked.unplannedIncomeCents shouldBe 0L
+        linked.fromSavingsCents shouldBe plain.fromSavingsCents + 20000L
+        linked.ledgerCents shouldBe plain.ledgerCents
+        linked.planLineCents shouldBe plain.planLineCents
+        // The investment account is not spendable, and it is not in the savings balance.
+        linked.spendableCents shouldBe plain.spendableCents
+        linked.savingsCents shouldBe 0L
+      }
+    }
+
     "counts transfers in and out of the spending accounts, from the day after the period opened" in {
       withFixture { (service, _, xa) =>
         for {

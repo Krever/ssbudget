@@ -283,6 +283,59 @@ class BankTransactionRepositorySpec extends RepositorySpec {
     } yield months shouldBe List("2026-03", "2026-01")
   }
 
+  "transactions of a transfer category are the moves of its investment account, and are not cash flow" in {
+    val repo     = new BankTransactionRepositoryImpl(xa)
+    val catRepo  = new CategoryRepositoryImpl(xa)
+    val accounts = new AccountRepositoryImpl(xa)
+    val broker   = savingsAccount("inv-1", "Broker", Currency.EUR, 0).copy(role = AccountRole.Investment)
+    val from     = Instant.parse("2026-01-01T00:00:00Z")
+    val to       = Some(Instant.parse("2026-02-01T00:00:00Z"))
+    val inJan    = Instant.parse("2026-01-10T00:00:00Z")
+    for {
+      _         <- accounts.create(broker)
+      _         <- catRepo.create(Category(CategoryId("cat-b"), "Broker moves", None, transferAccount = Some(broker.id)))
+      _         <- catRepo.create(Category(CategoryId("cat-1"), "Groceries", None))
+      // 500 withdrawn from the broker, 200 deposited to it, and one more withdrawal after the window.
+      _         <- repo.insertNew(tx("t1", "uid-1", "r1", amountCents = 50000, bookedAt = inJan, categoryId = Some(CategoryId("cat-b"))))
+      _         <- repo.insertNew(tx("t2", "uid-1", "r2", amountCents = -20000, bookedAt = inJan, categoryId = Some(CategoryId("cat-b"))))
+      _         <- repo.insertNew(
+                     tx("t3", "uid-1", "r3", amountCents = 7000, bookedAt = Instant.parse("2026-02-10T00:00:00Z"), categoryId = Some(CategoryId("cat-b"))),
+                   )
+      // Ordinary money: 100 of groceries and 900 of income with no category.
+      _         <- repo.insertNew(tx("t4", "uid-1", "r4", amountCents = -10000, bookedAt = inJan, categoryId = Some(CategoryId("cat-1"))))
+      _         <- repo.insertNew(tx("t5", "uid-1", "r5", amountCents = 90000, bookedAt = inJan))
+      // The broker has a ledger of its own: a 40 card payment, and a row in its own transfer category that must not count twice.
+      conns      = new BankConnectionRepositoryImpl(xa)
+      _         <- conns.create(BankConnection(BankConnectionId("conn-b"), "Broker", "PL", None, ConnectionStatus.Pending, None, None, importedAt))
+      _         <- conns.createLink(
+                     BankAccountLink(
+                       BankAccountLinkId("l-b"),
+                       BankConnectionId("conn-b"),
+                       "uid-b",
+                       BankLinkTarget.Account(broker.id),
+                       None,
+                       None,
+                       None,
+                       None,
+                       None,
+                       None,
+                       None,
+                     ),
+                   )
+      _         <- repo.insertNew(tx("t6", "uid-b", "r6", amountCents = -4000, bookedAt = inJan, connId = "conn-b"))
+      _         <- repo.insertNew(tx("t7", "uid-b", "r7", amountCents = -1500, bookedAt = inJan, connId = "conn-b", categoryId = Some(CategoryId("cat-b"))))
+      transfers <- repo.transfersByAccountBetween(from, to)
+      own       <- repo.netByAccountBetween(from, to)
+      flows     <- repo.flowsBetween(from, to)
+    } yield {
+      // The sign of the bank side: a net 300 arrived from the broker. The row on the broker's own ledger is not in it.
+      transfers shouldBe List((broker.id, Currency.PLN, 30000L))
+      own.toSet shouldBe Set(("uid-1", Currency.PLN, 110000L), ("uid-b", Currency.PLN, -5500L))
+      // A card payment from the broker is spend: 100 of groceries plus 40. The transfer-category row is not cash flow.
+      flows shouldBe List((Currency.PLN, 90000L, 14000L))
+    }
+  }
+
   "spendByCategoryBetween sums categorized spend per category (gross outflow by default, net with includeInflows), excluding uncategorized" in {
     val repo    = new BankTransactionRepositoryImpl(xa)
     val catRepo = new CategoryRepositoryImpl(xa)

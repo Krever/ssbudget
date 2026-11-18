@@ -819,8 +819,13 @@ object BankingPage {
             onChange.mapToValue --> { v => link(l.id, valueToTarget(v)) },
             option(value := "", "— not linked —"),
             linkable.map { a =>
-              val v     = targetToValue(BankLinkTarget.Account(a.id))
-              val label = if a.role == AccountRole.Savings then s"Savings: ${a.name} (${a.currency.code})" else s"${a.name} (${a.currency.code})"
+              val v      = targetToValue(BankLinkTarget.Account(a.id))
+              val prefix = a.role match {
+                case AccountRole.Spending   => ""
+                case AccountRole.Savings    => "Savings: "
+                case AccountRole.Investment => "Investment: "
+              }
+              val label  = s"$prefix${a.name} (${a.currency.code})"
               option(value := v, selected := (v == currentVal), label)
             },
             groups.map { g =>

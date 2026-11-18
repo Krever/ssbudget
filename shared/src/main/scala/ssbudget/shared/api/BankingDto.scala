@@ -93,17 +93,18 @@ final case class UpdateCategory(
     budgetType: Option[CategoryBudgetType] = None,
     budget: CategoryBudget = CategoryBudget(),
     billPayments: Int = 1,
+    transferAccount: Option[AccountId] = None,
 ) derives Codec.AsObject {
 
   /** The category this request describes, under the id the URL names, with its window and payment count clamped to what may actually be stored.
     * Paired with [[UpdateCategory.of]] so the field list is written once at each end rather than unpacked and repacked by hand.
     */
   def toCategory(id: CategoryId): Category =
-    Category(id, name, color, budgetType, budget, billPayments).normalized
+    Category(id, name, color, budgetType, budget, billPayments, transferAccount).normalized
 }
 
 object UpdateCategory {
-  def of(c: Category): UpdateCategory = UpdateCategory(c.name, c.color, c.budgetType, c.budget, c.billPayments)
+  def of(c: Category): UpdateCategory = UpdateCategory(c.name, c.color, c.budgetType, c.budget, c.billPayments, c.transferAccount)
 }
 
 /** Spending stats for a category, computed server-side from bank transactions (the browser no longer holds them). All amounts are converted to the

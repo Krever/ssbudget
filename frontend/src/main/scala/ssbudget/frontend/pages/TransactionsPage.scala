@@ -19,6 +19,7 @@ import ssbudget.shared.api.{
   SetNoteRequest,
   UpdateCategory,
 }
+import ssbudget.shared.model.{Account, AccountId, AccountRole}
 import ssbudget.shared.model.{
   BankTransaction,
   Category,
@@ -645,13 +646,18 @@ object TransactionsPage {
   /** The `<option>` value standing for "not a budget" — [[CategoryBudgetType]] has no case for it, since it is the absence of one. */
   private val offBudgetType = "off"
 
+  /** The start of the `<option>` value for "transfers to and from this investment account"; the account id follows. */
+  private val transferPrefix = "transfer:"
+
   /** A category's budget settings as one scannable line: how it's drawn down, then how its figure is derived and over how long — "Steady · median 6".
     * A category that isn't a budget reads as "—"; its figure is still computed and shown, but nothing consumes it.
     */
-  private def budgetSummary(c: Category): String = c.budgetType.fold("—") { t =>
-    val payments = if t == CategoryBudgetType.Bill && c.billPayments > 1 then s" ×${c.billPayments}" else ""
-    s"${t.toString}$payments · ${c.budget.summary}"
-  }
+  private def budgetSummary(c: Category): String = if c.transferAccount.isDefined then "Transfer"
+  else
+    c.budgetType.fold("—") { t =>
+      val payments = if t == CategoryBudgetType.Bill && c.billPayments > 1 then s" ×${c.billPayments}" else ""
+      s"${t.toString}$payments · ${c.budget.summary}"
+    }
 
   /** Inline explanation of the budget types (shown in the categories card on demand). Each type predicts the money still needed before the next
     * paycheck differently — see also `CategoryBudgetType.remaining`.
@@ -700,12 +706,15 @@ object TransactionsPage {
       reloadTransactions: () => Unit,
       onDrillDown: (CategoryId, String) => Unit,
   ): HtmlElement = {
-    val nameVar   = Var("")
-    val editingId = Var(Option.empty[CategoryId]) // category whose name is being edited inline
-    val editName  = Var("")
-    val showHelp  = Var(false)                    // toggles the budget-type explanation
-    val expanded  = Var(Set.empty[CategoryId])    // categories whose settings strip is open
-    val collapsed = Var(loadFlag(categoriesFoldKey))
+    val nameVar     = Var("")
+    val editingId   = Var(Option.empty[CategoryId]) // category whose name is being edited inline
+    val editName    = Var("")
+    val showHelp    = Var(false)                    // toggles the budget-type explanation
+    val expanded    = Var(Set.empty[CategoryId])    // categories whose settings strip is open
+    val collapsed   = Var(loadFlag(categoriesFoldKey))
+    // The investment accounts: each one is offered in the Type dropdown as "Transfer ↔ <account>".
+    val investments = Var(List.empty[Account])
+    apiClient.accounts.list().foreach(all => investments.set(all.filter(_.role == AccountRole.Investment)))
 
     def addCategory(): Unit = {
       val name = nameVar.now().trim
@@ -797,12 +806,24 @@ object TransactionsPage {
         v => CategoryBudgetMethod.fromString(v).foreach(setBudgetMethod(id, _)),
       )
 
-    /** How that figure is drawn down over the period — or Off, for a category that isn't a budget at all. */
+    /** How that figure is drawn down over the period — or Off, for a category that isn't a budget at all. A third kind of entry makes the category
+      * the transfers to and from an investment account (see `Category.transferAccount`): that is not a budget type, but it excludes one, so it is
+      * chosen in the same place. The dropdown is made again when the list of investment accounts arrives.
+      */
     def typeSelect(id: CategoryId, cat: Signal[Category]): HtmlElement =
-      enumSelect(
-        (offBudgetType -> "Off") :: CategoryBudgetType.values.toList.map(t => CategoryBudgetType.asString(t) -> t.toString),
-        cat.map(_.budgetType.fold(offBudgetType)(CategoryBudgetType.asString)),
-        v => editCategory(id)(_.copy(budgetType = if v == offBudgetType then None else CategoryBudgetType.fromString(v).toOption)),
+      span(
+        child <-- investments.signal.map { accounts =>
+          enumSelect(
+            (offBudgetType -> "Off") :: CategoryBudgetType.values.toList.map(t => CategoryBudgetType.asString(t) -> t.toString) :::
+              accounts.map(a => (transferPrefix + a.id.value) -> s"Transfer ↔ ${a.name}"),
+            cat.map(c => c.transferAccount.fold(c.budgetType.fold(offBudgetType)(CategoryBudgetType.asString))(transferPrefix + _.value)),
+            v =>
+              editCategory(id) { c =>
+                if v.startsWith(transferPrefix) then c.copy(budgetType = None, transferAccount = Some(AccountId(v.drop(transferPrefix.length))))
+                else c.copy(budgetType = if v == offBudgetType then None else CategoryBudgetType.fromString(v).toOption, transferAccount = None)
+              },
+          )
+        },
       )
 
     /** The text a field shows for a stored value. It is written again only when the STORED value changes, so a save of some other field does not

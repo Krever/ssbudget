@@ -266,7 +266,8 @@ class BudgetSnapshotService(repos: Repositories) {
   private def outsideMoney(w: World, period: Option[Period], day: LocalDate): (Long, Long, Long) =
     period.fold((0L, 0L, 0L)) { p =>
       val inPeriod  = w.movementsIn(p, day)
-      val transfers = inPeriod.filter(m => m.onSpendingAccount && m.internal).map(_.cents).sum
+      // A transfer category is the bank side of an investment account: its movements come from savings as an internal transfer does.
+      val transfers = inPeriod.filter(m => m.onSpendingAccount && (m.internal || m.category.exists(w.transferCategories))).map(_.cents).sum
       val paidFor   = inPeriod.filter(m => !m.onSpendingAccount && !m.internal && m.category.exists(w.budgeted)).map(_.cents).sum
       val income    = inPeriod.filter(w.isUnbudgeted).groupMapReduce(_.category)(_.cents)(_ + _).values.filter(_ > 0).sum
       (inPeriod.filter(_.onSpendingAccount).map(_.cents).sum, transfers - paidFor, income)
@@ -419,12 +420,16 @@ object BudgetSnapshotService {
     /** The categories that are budgets, by today's configuration. */
     lazy val budgeted: Set[CategoryId] = categories.filter(_.budgetType.isDefined).map(_.id).toSet
 
+    /** The categories that stand for transfers to and from an investment account (see `Category.transferAccount`), by today's configuration. */
+    lazy val transferCategories: Set[CategoryId] = categories.filter(_.transferAccount.isDefined).map(_.id).toSet
+
     /** The movements of period `p` up to `day`, from the day AFTER the period opened: the first day is the baseline, and the paycheck lands on it. */
     def movementsIn(p: Period, day: LocalDate): List[Movement] =
       movements.filter(m => m.day.isAfter(p.startDay) && !m.day.isAfter(day))
 
     /** Is this a movement of a group with no budget, on a spending account? Such a group is unplanned spend, or unplanned income. */
-    def isUnbudgeted(m: Movement): Boolean = m.onSpendingAccount && !m.internal && !m.category.exists(budgeted)
+    def isUnbudgeted(m: Movement): Boolean =
+      m.onSpendingAccount && !m.internal && !m.category.exists(budgeted) && !m.category.exists(transferCategories)
 
     /** The period `day` falls in: the last one that had started by then. Periods are contiguous, so that is also the one that had not yet ended. */
     def periodOn(day: LocalDate): Option[Period] =

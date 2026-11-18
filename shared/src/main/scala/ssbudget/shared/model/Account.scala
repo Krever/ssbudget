@@ -13,19 +13,29 @@ object AccountId extends StringId[AccountId]
 enum AccountRole {
   case Spending // a spendable account; its balance counts toward the free-money calculation
   case Savings  // a savings bucket; excluded from spendable balance
+  // Money whose value moves with a market (a crypto or stock portfolio). It is not spendable, and it is not savings: a change of its value is not
+  // money that was saved or withdrawn, so it is reported apart from the savings figures.
+  case Investment
 }
 
 object AccountRole {
   def asString(r: AccountRole): String = r match {
-    case Spending => "spending"
-    case Savings  => "savings"
+    case Spending   => "spending"
+    case Savings    => "savings"
+    case Investment => "investment"
   }
 
   def fromString(s: String): Either[String, AccountRole] = s match {
-    case "spending" => Right(Spending)
-    case "savings"  => Right(Savings)
-    case other      => Left(s"Unknown account role: $other")
+    case "spending"   => Right(Spending)
+    case "savings"    => Right(Savings)
+    case "investment" => Right(Investment)
+    case other        => Left(s"Unknown account role: $other")
   }
+
+  /** The roles that hold money outside the spendable balance. The app follows their balance change of a period; the user can move an account from one
+    * of them to the other.
+    */
+  val held: Set[AccountRole] = Set(Savings, Investment)
 
   given Codec[AccountRole] = EnumCodec(values, asString, "account role")
 }
@@ -54,8 +64,8 @@ object BalanceSource {
   given Codec[BalanceSource] = EnumCodec(values, asString, "balance source")
 }
 
-/** A money container: a spending account or a savings bucket. The current balance and its provenance live here uniformly; [[BalanceSnapshot]] rows
-  * are append-only history. Intended saving is modelled as a planned expense, not as a target on the bucket.
+/** A money container: a spending account, a savings bucket or an investment. The current balance and its provenance live here uniformly;
+  * [[BalanceSnapshot]] rows are append-only history. Intended saving is modelled as a planned expense, not as a target on the bucket.
   */
 final case class Account(
     id: AccountId,

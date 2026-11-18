@@ -76,7 +76,7 @@ class AccountsPageSpec extends E2ESpec {
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
-    val savingsCard = findCard("Savings Accounts")
+    val savingsCard = findCard("Savings & Investments")
     savingsCard.isDisplayed shouldBe true
   }
 
@@ -84,7 +84,7 @@ class AccountsPageSpec extends E2ESpec {
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
-    val savingsCard  = findCard("Savings Accounts")
+    val savingsCard  = findCard("Savings & Investments")
     val initialCount = rows(savingsCard).size
     click(savingsCard, "+ Add")
 
@@ -100,7 +100,7 @@ class AccountsPageSpec extends E2ESpec {
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
-    val savingsCard  = findCard("Savings Accounts")
+    val savingsCard  = findCard("Savings & Investments")
     val initialCount = rows(savingsCard).size
     click(savingsCard, "+ Add")
     click(savingsCard.findElement(By.cssSelector("tbody tr.table-success")), "Cancel")
@@ -114,7 +114,7 @@ class AccountsPageSpec extends E2ESpec {
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
-    val savingsCard = findCard("Savings Accounts")
+    val savingsCard = findCard("Savings & Investments")
     val targetRow   = savingsCard.findElement(By.xpath(".//tr[.//td[contains(text(),'Edit Savings Test')]]"))
     click(targetRow, "Edit")
 
@@ -134,7 +134,7 @@ class AccountsPageSpec extends E2ESpec {
     waitForPage("Accounts")
 
     // First add an account to delete
-    val savingsCard = findCard("Savings Accounts")
+    val savingsCard = findCard("Savings & Investments")
     click(savingsCard, "+ Add")
 
     val addRow = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))

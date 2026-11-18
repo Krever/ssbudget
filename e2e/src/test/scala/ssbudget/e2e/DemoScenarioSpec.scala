@@ -371,10 +371,10 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     injectDemoStyles()
 
     List("Emergency Fund", "Vacation Fund").foreach { name =>
-      demoClickButton(findCard("Savings Accounts"), "+ Add")
+      demoClickButton(findCard("Savings & Investments"), "+ Add")
       pause(shortPause)
 
-      val addRow    = findCard("Savings Accounts").findElement(By.cssSelector("tbody tr.table-success"))
+      val addRow    = findCard("Savings & Investments").findElement(By.cssSelector("tbody tr.table-success"))
       val nameInput = addRow.findElement(By.cssSelector("input[type='text']"))
       demoClick(nameInput)
       typeSlowly(nameInput, name)

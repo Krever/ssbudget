@@ -67,11 +67,22 @@ trait DataService {
 
   // Savings accounts (role == Savings). Buckets with a balance only — intended saving is modelled as a planned expense.
   def savingsAccounts: Signal[List[Account]]
-  def addSavingsAccount(name: String, currency: Currency): Future[Unit]
-  def updateAccount(id: AccountId, name: String, currency: Currency): Future[Unit]
 
-  // Balance at period start per savings account, in the account's own currency (see AccountPeriodBaseline); no recorded history -> no entry.
+  // Investment accounts (role == Investment): money at market value. Not spendable and not part of the savings figures.
+  def investmentAccounts: Signal[List[Account]]
+
+  /** Adds a savings or an investment account. */
+  def addSavingsAccount(name: String, currency: Currency, role: AccountRole): Future[Unit]
+
+  /** `role`: only a change between Savings and Investment is accepted by the server. */
+  def updateAccount(id: AccountId, name: String, currency: Currency, role: AccountRole): Future[Unit]
+
+  // Balance at period start per savings and investment account, in the account's own currency (see AccountPeriodBaseline); no recorded history ->
+  // no entry.
   def savingsBaselines: Signal[Map[AccountId, Money]]
+
+  // Net amount moved into each investment account in the current period, in primary-currency cents (see AccountPeriodBaseline.movedCents).
+  def investmentMoved: Signal[Map[AccountId, Long]]
 
   // Derived signals
   def currentPeriod: Signal[Option[Period]]
@@ -157,6 +168,47 @@ trait DataService {
       .combineWith(exchangeRates)
       .combineWith(primaryCurrency)
       .map { case (deltas, rates, primary) => DataService.sumInPrimary(deltas.values.toSeq, rates, primary) }
+
+  /** Σ of the investment accounts at their current value, in the primary currency. */
+  final def investmentBalance: Signal[Money] =
+    investmentAccounts
+      .combineWith(exchangeRates)
+      .combineWith(primaryCurrency)
+      .map { case (accounts, rates, primary) => DataService.sumInPrimary(accounts.map(_.balance), rates, primary) }
+
+  /** Per investment account, its balance change this period in its own currency. As [[savingsPeriodDeltas]]. */
+  final def investmentPeriodDeltas: Signal[Map[AccountId, Money]] =
+    investmentAccounts
+      .combineWith(savingsBaselines)
+      .map { case (accounts, baselines) =>
+        accounts.flatMap(acc => baselines.get(acc.id).map(b => acc.id -> Money(acc.balanceCents - b.amountCents, acc.currency))).toMap
+      }
+
+  /** Balance change of the investment accounts this period, in the primary currency: what was moved plus what the market did. */
+  final def investmentPeriodChange: Signal[Money] =
+    investmentPeriodDeltas
+      .combineWith(exchangeRates)
+      .combineWith(primaryCurrency)
+      .map { case (deltas, rates, primary) => DataService.sumInPrimary(deltas.values.toSeq, rates, primary) }
+
+  /** Net amount moved into the investment accounts this period (negative = withdrawn), in the primary currency. This part is saving. */
+  final def investmentMovedTotal: Signal[Money] =
+    investmentAccounts
+      .combineWith(investmentMoved)
+      .combineWith(primaryCurrency)
+      .map { case (accounts, moved, primary) => Money(accounts.map(a => moved.getOrElse(a.id, 0L)).sum, primary) }
+
+  /** What the market did to the investment accounts this period: their balance change less what was moved. Not saving. */
+  final def investmentMarketResult: Signal[Money] =
+    investmentPeriodChange.combineWith(investmentMovedTotal).map { case (change, moved) =>
+      Money(change.amountCents - moved.amountCents, change.currency)
+    }
+
+  /** What was saved this period: the change of the savings accounts plus what was moved into the investment accounts. */
+  final def savedThisPeriod: Signal[Money] =
+    savingsPeriodChange.combineWith(investmentMovedTotal).map { case (change, moved) =>
+      Money(change.amountCents + moved.amountCents, change.currency)
+    }
 
   /** Σ remaining per planned expense — what still has to come out of the balance before the next paycheck. */
   final def unpaidPlannedExpenses: Signal[Money] = remainingOn(plannedExpenses)

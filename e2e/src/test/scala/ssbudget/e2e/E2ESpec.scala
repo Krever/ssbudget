@@ -231,13 +231,13 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
-    val savingsCard = findCard("Savings Accounts")
+    val savingsCard = findCard("Savings & Investments")
     click(savingsCard, "+ Add")
 
     val addRow = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
     click(addRow, "Add")
-    eventually(findCard("Savings Accounts").getText should include(name))
+    eventually(findCard("Savings & Investments").getText should include(name))
   }
 
   /** One entry of the Dashboard's Plan, found by name: the block holding its bar, state line and buttons. Re-found on each call, because Laminar

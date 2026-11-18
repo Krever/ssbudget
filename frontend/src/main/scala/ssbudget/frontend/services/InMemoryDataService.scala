@@ -96,6 +96,7 @@ object InMemoryDataService extends DataService {
   override def accounts: Signal[List[Account]]                     = accountsVar.signal
   override def spendingAccounts: Signal[List[Account]]             = accountsVar.signal.map(_.filter(_.role == AccountRole.Spending))
   override def savingsAccounts: Signal[List[Account]]              = accountsVar.signal.map(_.filter(_.role == AccountRole.Savings))
+  override def investmentAccounts: Signal[List[Account]]           = accountsVar.signal.map(_.filter(_.role == AccountRole.Investment))
   override def periods: Signal[List[Period]]                       = periodsVar.signal
   override def exchangeRates: Signal[Map[Currency, Double]]        = exchangeRatesVar.signal
   override def currencySettings: Signal[List[CurrencySetting]]     = currencySettingsVar.signal
@@ -139,6 +140,7 @@ object InMemoryDataService extends DataService {
   override def categorySummaries: Signal[List[CategorySummary]]  = Val(List.empty)
   override def budgetedCategories: Signal[List[CategorySummary]] = Val(List.empty)
   override def savingsBaselines: Signal[Map[AccountId, Money]]   = Val(Map.empty)
+  override def investmentMoved: Signal[Map[AccountId, Long]]     = Val(Map.empty)
 
   override def setCategoryBudgetOverride(categoryId: CategoryId, remainingCents: Long): Future[Unit] = Future.successful(())
   override def clearCategoryBudgetOverride(categoryId: CategoryId): Future[Unit]                     = Future.successful(())
@@ -263,13 +265,13 @@ object InMemoryDataService extends DataService {
   private def getCurrentPeriod: Option[Period] =
     periodsVar.now().find(_.endDate.isEmpty)
 
-  override def addSavingsAccount(name: String, currency: Currency): Future[Unit] = {
-    upsert(savings(s"sav-${System.currentTimeMillis()}", name, currency, 0L))
+  override def addSavingsAccount(name: String, currency: Currency, role: AccountRole): Future[Unit] = {
+    upsert(savings(s"sav-${System.currentTimeMillis()}", name, currency, 0L).copy(role = role))
     Future.successful(())
   }
 
-  override def updateAccount(id: AccountId, name: String, currency: Currency): Future[Unit] = {
-    accountsVar.update(_.map(a => if a.id == id then a.copy(name = name, currency = currency) else a))
+  override def updateAccount(id: AccountId, name: String, currency: Currency, role: AccountRole): Future[Unit] = {
+    accountsVar.update(_.map(a => if a.id == id then a.copy(name = name, currency = currency, role = role) else a))
     Future.successful(())
   }
 

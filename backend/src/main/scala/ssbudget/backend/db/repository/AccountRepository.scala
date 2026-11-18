@@ -50,7 +50,7 @@ class AccountRepositoryImpl(xa: Transactor[IO]) extends AccountRepository {
   override def update(account: Account): IO[Unit] = {
     sql"""
       UPDATE accounts
-      SET name = ${account.name}, currency = ${account.currency}
+      SET name = ${account.name}, currency = ${account.currency}, role = ${account.role}
       WHERE id = ${account.id}
     """.update.run.transact(xa).void
   }

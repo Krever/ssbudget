@@ -139,8 +139,8 @@ object PeriodsPage {
       div(cls := "fw-semibold", value),
     )
 
-  /** Columns: the disclosure caret + Start, Days, In, Out, Net, Planned, Savings, End balance, Free money. */
-  private val historyColumns = 10
+  /** Columns: the disclosure caret + Start, Days, In, Out, Net, Planned, Saved, Market, End balance, Free money. */
+  private val historyColumns = 11
 
   private def periodHistoryCard(
       summaries: Signal[LoadingState[List[PeriodSummary]]],
@@ -156,16 +156,26 @@ object PeriodsPage {
           cls := "table table-sm table-hover mb-0 align-middle",
           thead(
             tr(
-              th(cls := "ps-3", "Start"),
-              th(cls := "text-end", "Days"),
-              th(cls := "text-end", "In"),
-              th(cls := "text-end", "Out"),
-              th(cls := "text-end", "Net"),
-              th(cls := "text-end", "Planned paid"),
-              th(cls := "text-end", title := "The change of the savings balance in the period, and the balance at its end", "Savings"),
-              th(cls := "text-end", "End balance"),
-              th(cls := "text-end", title := "Free money on each day of the period, and its last value", "Free money"),
-              th(cls := "pe-3", ""),
+              th(cls  := "ps-3", "Start"),
+              th(cls  := "text-end", "Days"),
+              th(cls  := "text-end", "In"),
+              th(cls  := "text-end", "Out"),
+              th(cls  := "text-end", "Net"),
+              th(cls  := "text-end", "Planned paid"),
+              th(
+                cls   := "text-end",
+                title := "What was saved in the period (the change of the savings accounts plus what was moved into investments), and the savings balance at its end",
+                "Saved",
+              ),
+              th(
+                cls   := "text-end",
+                title := "What the market did to the investment accounts in the period (their change less what was moved; spend and income inside the " +
+                  "investment account are in it), and their value at its end",
+                "Market",
+              ),
+              th(cls  := "text-end", "End balance"),
+              th(cls  := "text-end", title := "Free money on each day of the period, and its last value", "Free money"),
+              th(cls  := "pe-3", ""),
             ),
           ),
           children <-- summaries.combineWith(expanded.signal).combineWith(freeMoney).map {
@@ -225,8 +235,15 @@ object PeriodsPage {
         td(cls := "text-end font-monospace", plannedLabel),
         td(
           cls  := "text-end font-monospace text-nowrap",
-          span(cls := s"small ${amountCls(s.savingsChangeCents)}", signed(s.savingsChangeCents)),
+          span(cls := s"small ${amountCls(s.savedCents)}", signed(s.savedCents)),
           s.savingsEndCents.fold(emptyNode)(cents => span(cls := "ms-2", money(cents))),
+        ),
+        td(
+          cls  := "text-end font-monospace text-nowrap",
+          // No investment account with a record: the column has nothing to say.
+          s.investmentEndCents.fold[Node](span(cls := "text-muted", "—")) { cents =>
+            span(span(cls := s"small ${amountCls(s.investmentMarketCents)}", signed(s.investmentMarketCents)), span(cls := "ms-2", money(cents)))
+          },
         ),
         td(cls := "text-end font-monospace", s.endBalanceCents.fold("—")(money)),
         td(

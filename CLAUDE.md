@@ -70,6 +70,24 @@ statistic ran over — with the lookback window shaded, so the window can be pic
   budgeted bills paid from a savings account, and it counts from the day after the period opened. Plan the net amount: money that is
   moved to a savings account only to pay a budgeted bill from there is not saving
 
+**Investment accounts** (`AccountRole.Investment`) - money at market value (a crypto or stock portfolio)
+- Not spendable, and NOT part of the savings figures: the balance change of such an account is mostly what the market did
+- The change of a period has two parts. **Moved** is deposits less withdrawals; it is saving, and it joins the savings figures
+  ("Saved" = change of the savings accounts + moved). **Market result** is the rest, and it is shown apart
+- Such an account usually has no bank ledger in the app, so "moved" is read from the other side: a category can be made the
+  **transfer category** of one investment account (`Category.transferAccount`, the "Transfer ↔ account" entry of the Type dropdown
+  in the category settings strip). Its transactions are then transfers: not income, not spend, never a budget. Nothing in the code
+  names a category; the link is data
+- In the free-money terms, a transfer category on a spending account counts in `fromSavings`, as an internal transfer does, and
+  not in `unplannedIncome`. A withdrawal from an investment thus lowers "moved to savings"
+- An investment account can also have a ledger of its own (transactions on a bank account uid that is linked to it; today only a
+  script makes one, from a statement of the broker). Its non-internal transactions are money that entered or left the investment:
+  they count in "moved" with their own sign, and a payment is spend as on any other account
+- Known limit: money spent or received INSIDE the investment account that is in no ledger (a payout into it, card payments not
+  yet imported) lands in the market result
+- An account changes role only between Savings and Investment (Accounts page). The `savings` term of the daily snapshots holds
+  savings accounts only
+
 `savingsPeriodChange` (current balance − balance at period start) is reported on the Dashboard as information only; it is not part
 of the free-money calculation. The Periods page shows the same change for each period. Both read the balance at a period boundary
 from `BalanceHistory`: the recorded balance (snapshot) at or before that instant, and, before an account's first record, that first
@@ -105,7 +123,8 @@ projection) and on the Periods page (a row sparkline, and a chart in the expande
   free money also steps when money moves to or from savings and when unplanned income arrives; those steps say nothing about the plan
   and no slope survives them. The plan's own line falls steadily in every recorded period
 - It is built from three ledger terms, cumulative from the day AFTER the period opened: `ledger` (all movement on spending accounts),
-  `fromSavings` (internal transfers seen on spending accounts, plus budgeted bills paid from a non-spending account) and
+  `fromSavings` (internal transfers and transfer-category movements seen on spending accounts, plus budgeted bills paid from a
+  non-spending account) and
   `unplannedIncome` (per category without a budget: its net, where positive). The line is `ledger − fromSavings − unplannedIncome +
   stillToReceive − stillToPay`. It uses `ledger`, not `spendable`, because a balance and a booking date are often a day apart
 - Projection: current free money + the **median daily change** of the line × days left, never above the current value, and only
@@ -182,7 +201,7 @@ DailyBudgetSnapshot (table: daily_budget_snapshots):
 
 Account (spending accounts and savings buckets, unified):
   - id, name, currency
-  - role (spending|savings)
+  - role (spending|savings|investment)
   - balanceCents, balanceSource (manual|bank|card_group), balanceUpdatedAt
 
 Category / CategoryBudgetOverride:
@@ -193,6 +212,7 @@ Category / CategoryBudgetOverride:
         lookbackMonths                       -- completed months the average/median sees; NULL = all history
         fixedCents                           -- signed; the figure itself when method = fixed
       billPayments                           -- payments a Bill expects per period (default 1); each releases 1/N of the budget
+      transferAccount                        -- an investment account; the category is then its deposits and withdrawals, and no budget
   - override: (periodId, categoryId) -> remainingCents   -- per-period manual remaining
 
 ExchangeRate:

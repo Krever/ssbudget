@@ -19,6 +19,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   private val currencySettingsVar: Var[List[CurrencySetting]]     = Var(List.empty)
   private val availableCurrenciesVar: Var[List[(String, String)]] = Var(List.empty)
   private val categorySummariesVar: Var[List[CategorySummary]]    = Var(List.empty)
+  private val investmentMovedVar: Var[Map[AccountId, Long]]       = Var(Map.empty) // net moved into each investment account, primary cents
   private val savingsBaselinesVar: Var[Map[AccountId, Money]]     = Var(Map.empty) // per savings-account balance at period start, in account currency
 
   private val freeMoneyHistoryVar: Var[Map[PeriodId, List[FreeMoneyPoint]]]  = Var(Map.empty)
@@ -71,6 +72,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       availableCurrenciesVar.set(currencySettings.availableCurrencies.map(c => (c.code, c.name)))
       categorySummariesVar.set(categorySumms)
       savingsBaselinesVar.set(baselines.map(b => b.accountId -> b.baseline).toMap)
+      investmentMovedVar.set(baselines.map(b => b.accountId -> b.movedCents).toMap)
     }
   }
 
@@ -78,6 +80,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   override def accounts: Signal[List[Account]]                     = accountsVar.signal
   override def spendingAccounts: Signal[List[Account]]             = accountsVar.signal.map(_.filter(_.role == AccountRole.Spending))
   override def savingsAccounts: Signal[List[Account]]              = accountsVar.signal.map(_.filter(_.role == AccountRole.Savings))
+  override def investmentAccounts: Signal[List[Account]]           = accountsVar.signal.map(_.filter(_.role == AccountRole.Investment))
   override def periods: Signal[List[Period]]                       = periodsVar.signal
   override def exchangeRates: Signal[Map[Currency, Double]]        = exchangeRatesVar.signal
   override def currencySettings: Signal[List[CurrencySetting]]     = currencySettingsVar.signal
@@ -166,6 +169,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     )
 
   override def savingsBaselines: Signal[Map[AccountId, Money]] = savingsBaselinesVar.signal
+  override def investmentMoved: Signal[Map[AccountId, Long]]   = investmentMovedVar.signal
 
   // Mutation methods
   private def upsertAccount(account: Account): Unit =
@@ -266,11 +270,11 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
     })
   }
 
-  override def addSavingsAccount(name: String, currency: Currency): Future[Unit] =
-    client.accounts.create(CreateAccount(name, currency, AccountRole.Savings)).map(upsertAccount)
+  override def addSavingsAccount(name: String, currency: Currency, role: AccountRole): Future[Unit] =
+    client.accounts.create(CreateAccount(name, currency, role)).map(upsertAccount)
 
-  override def updateAccount(id: AccountId, name: String, currency: Currency): Future[Unit] =
-    client.accounts.update(id, UpdateAccount(name, currency)).map(upsertAccount)
+  override def updateAccount(id: AccountId, name: String, currency: Currency, role: AccountRole): Future[Unit] =
+    client.accounts.update(id, UpdateAccount(name, currency, Some(role))).map(upsertAccount)
 
   private def getCurrentPeriod: Option[Period] =
     periodsVar.now().find(_.endDate.isEmpty)

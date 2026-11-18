@@ -84,10 +84,21 @@ trait BankTransactionRepository {
   def spendByCategoryBetween(from: Instant, to: Option[Instant], includeInflows: Boolean = false): IO[List[(CategoryId, Currency, Long)]]
 
   /** Non-internal inflow / outflow totals per currency over `[from, to)`: `(currency, inflow, outflow)`, both positive cents. Internal transfers are
-    * excluded, so money moved between own accounts is neither income nor spend. Uncategorized transactions ARE counted — this is cash flow, not a
-    * category breakdown.
+    * excluded, so money moved between own accounts is neither income nor spend. For the same reason the transactions of a transfer category
+    * (`categories.transfer_account_id`) are excluded. Uncategorized transactions ARE counted — this is cash flow, not a category breakdown.
     */
   def flowsBetween(from: Instant, to: Option[Instant]): IO[List[(Currency, Long, Long)]]
+
+  /** Signed net of the transactions of transfer categories over `[from, to)`, per (the account the category names, currency). The sign is that of the
+    * bank side: a withdrawal from the investment account arrives at the bank and is positive. Internal transfers are not counted. A transaction on
+    * the ledger of the named account itself is not counted either: it is already a movement of that account (see [[netByAccountBetween]]).
+    */
+  def transfersByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(AccountId, Currency, Long)]]
+
+  /** Signed net of the non-internal transactions over `[from, to)`, per (bank account uid, currency): the money that came into an account from
+    * outside, less what left it.
+    */
+  def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]]
 
   /** Spend per (category, currency, YYYY-MM) over `[from, to)`, categorized + non-internal — a per-month breakdown. `includeInflows` as in
     * [[spendByCategoryBetween]] (false = gross outflow, e.g. for the analytics chart; true = net, for the budget statistic).
@@ -266,8 +277,30 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
             COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN amount_cents < 0 THEN -amount_cents ELSE 0 END), 0)
           FROM bank_transactions
-          WHERE is_internal = 0 AND booked_at >= $from""" ++ upper ++
+          WHERE is_internal = 0
+            AND (category_id IS NULL OR category_id NOT IN (SELECT id FROM categories WHERE transfer_account_id IS NOT NULL))
+            AND booked_at >= $from""" ++ upper ++
       fr"GROUP BY currency").query[(Currency, Long, Long)].to[List].transact(xa)
+  }
+
+  override def transfersByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(AccountId, Currency, Long)]] = {
+    val upper = to.fold(Fragment.empty)(t => fr"AND t.booked_at < $t")
+    (fr"""SELECT c.transfer_account_id, t.currency, SUM(t.amount_cents)
+          FROM bank_transactions t
+          JOIN categories c ON c.id = t.category_id
+          WHERE c.transfer_account_id IS NOT NULL AND t.is_internal = 0
+            AND t.eb_account_uid NOT IN (SELECT l.eb_account_uid FROM bank_account_links l
+                                         WHERE l.link_target_kind = 'account' AND l.link_target_id = c.transfer_account_id)
+            AND t.booked_at >= $from""" ++ upper ++
+      fr"GROUP BY c.transfer_account_id, t.currency").query[(AccountId, Currency, Long)].to[List].transact(xa)
+  }
+
+  override def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]] = {
+    val upper = to.fold(Fragment.empty)(t => fr"AND booked_at < $t")
+    (fr"""SELECT eb_account_uid, currency, SUM(amount_cents)
+          FROM bank_transactions
+          WHERE is_internal = 0 AND booked_at >= $from""" ++ upper ++
+      fr"GROUP BY eb_account_uid, currency").query[(String, Currency, Long)].to[List].transact(xa)
   }
 
   override def monthlySpendByCategory(from: Instant, to: Instant, includeInflows: Boolean): IO[List[(CategoryId, Currency, String, Long)]] = {

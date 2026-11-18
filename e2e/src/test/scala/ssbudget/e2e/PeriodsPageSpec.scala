@@ -84,7 +84,7 @@ class PeriodsPageSpec extends E2ESpec {
 
     // The retrospective's columns: bank cash flow, plan execution, savings movement, closing balance.
     val card = findCardByDiv("Period History")
-    List("In", "Out", "Net", "Planned paid", "Savings", "End balance").foreach(header => card.getText should include(header))
+    List("In", "Out", "Net", "Planned paid", "Saved", "Market", "End balance").foreach(header => card.getText should include(header))
   }
 
   it should "expand a period row into its spend breakdown" in {

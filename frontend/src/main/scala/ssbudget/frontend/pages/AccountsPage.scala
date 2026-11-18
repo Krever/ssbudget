@@ -113,7 +113,7 @@ object AccountsPage {
       () => {
         val name = Option(nameRef).map(_.value.trim).getOrElse("")
         if name.nonEmpty then dataService
-          .updateAccount(account.id, name, currencyValue.now())
+          .updateAccount(account.id, name, currencyValue.now(), account.role)
           .map(_ => editingAccountId.set(None))
         else scala.concurrent.Future.successful(())
       },
@@ -213,7 +213,7 @@ object AccountsPage {
       cls := "card",
       div(
         cls := "card-header py-2 d-flex justify-content-between align-items-center",
-        span("Savings Accounts"),
+        span("Savings & Investments"),
         button(cls := "btn btn-sm btn-outline-success", "+ Add", onClick --> { _ => addingSavings.set(true) }),
       ),
       div(
@@ -221,13 +221,14 @@ object AccountsPage {
         table(
           cls := "table table-sm table-hover mb-0",
           thead(
-            tr(th("Account"), th("Currency"), th("Balance"), th("Actions")),
+            tr(th("Account"), th("Type"), th("Currency"), th("Balance"), th("Actions")),
           ),
           tbody(
             children <-- dataService.savingsAccounts
+              .combineWith(dataService.investmentAccounts)
               .combineWith(editingSavingsId.signal)
-              .map { case (accounts, editingId) =>
-                accounts.map(account => savingsRow(account, editingId))
+              .map { case (savings, investments, editingId) =>
+                (savings ++ investments).map(account => savingsRow(account, editingId))
               },
             child <-- addingSavings.signal
               .combineWith(dataService.enabledCurrencies)
@@ -241,10 +242,26 @@ object AccountsPage {
       ),
       div(
         cls := "card-footer py-2 text-muted small",
-        "Balances are edited from the Dashboard. To plan a contribution, add it there as a planned expense.",
+        "Balances are edited from the Dashboard. An investment is money at market value: its change is not counted as saving, only what you move " +
+          "in or out is. To record those moves, set a category's budget type to Transfer on the Transactions page.",
       ),
     )
   }
+
+  private def roleLabel(role: AccountRole): String = role match {
+    case AccountRole.Investment => "Investment"
+    case _                      => "Savings"
+  }
+
+  /** Savings or Investment: the two roles this card holds, and the two an account can change between. */
+  private def roleSelect(current: AccountRole, onPick: AccountRole => Unit): HtmlElement =
+    select(
+      cls := "form-select form-select-sm",
+      List(AccountRole.Savings, AccountRole.Investment).map { r =>
+        option(value := AccountRole.asString(r), selected := (r == current), roleLabel(r))
+      },
+      onChange.mapToValue --> { v => AccountRole.fromString(v).foreach(onPick) },
+    )
 
   private def savingsRow(account: Account, editingId: Option[AccountId]): HtmlElement = {
     if editingId.contains(account.id) then editSavingsRow(account)
@@ -258,6 +275,7 @@ object AccountsPage {
 
       tr(
         td(account.name, Badges.source(account.balanceSource)),
+        td(cls := "small", roleLabel(account.role)),
         td(span(cls := "badge text-bg-success", account.currency.code)),
         td(cls := "font-monospace", balanceEl),
         actions,
@@ -268,12 +286,13 @@ object AccountsPage {
   private def editSavingsRow(account: Account): HtmlElement = {
     var nameRef: org.scalajs.dom.html.Input = null
     val currencyValue                       = Var(account.currency)
+    val roleValue                           = Var(account.role)
 
     val saveAction = Loading.actionGroup(
       "Save",
       () => {
         val name = Option(nameRef).map(_.value.trim).getOrElse("")
-        if name.nonEmpty then dataService.updateAccount(account.id, name, currencyValue.now()).map(_ => editingSavingsId.set(None))
+        if name.nonEmpty then dataService.updateAccount(account.id, name, currencyValue.now(), roleValue.now()).map(_ => editingSavingsId.set(None))
         else scala.concurrent.Future.successful(())
       },
       "btn btn-primary btn-sm",
@@ -291,6 +310,7 @@ object AccountsPage {
           saveAction.onEnter,
         ),
       ),
+      td(roleSelect(account.role, roleValue.set)),
       td(
         child <-- dataService.enabledCurrencies.map { currencies =>
           select(
@@ -321,12 +341,13 @@ object AccountsPage {
   private def addSavingsRow(currencies: List[Currency], primaryCurrency: Currency): HtmlElement = {
     var nameRef: org.scalajs.dom.html.Input = null
     val currencyValue                       = Var(primaryCurrency)
+    val roleValue                           = Var[AccountRole](AccountRole.Savings)
 
     val addAction = Loading.actionGroup(
       "Add",
       () => {
         val name = Option(nameRef).map(_.value.trim).getOrElse("")
-        if name.nonEmpty then dataService.addSavingsAccount(name, currencyValue.now()).map(_ => addingSavings.set(false))
+        if name.nonEmpty then dataService.addSavingsAccount(name, currencyValue.now(), roleValue.now()).map(_ => addingSavings.set(false))
         else scala.concurrent.Future.successful(())
       },
       "btn btn-success btn-sm",
@@ -344,6 +365,7 @@ object AccountsPage {
           addAction.onEnter,
         ),
       ),
+      td(roleSelect(AccountRole.Savings, roleValue.set)),
       td(
         select(
           cls := "form-select form-select-sm",

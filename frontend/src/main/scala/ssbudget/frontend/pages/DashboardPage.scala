@@ -410,6 +410,34 @@ object DashboardPage {
                 accounts.map(account => accountQuickRow(account, isEditing, deltas.get(account.id)))
               },
             subtotalRow("savings", Some(dataService.savingsPeriodChange), dataService.savingsBalance),
+            // Investments are a third kind of money: at market value, so their change is not what was saved. The group shows only when there is
+            // such an account. Its change is split into what was moved (that part is saving) and what the market did.
+            children <-- dataService.investmentAccounts
+              .combineWith(dataService.investmentPeriodDeltas)
+              .combineWith(isEditingBalances.signal)
+              .map { case (accounts, deltas, isEditing) =>
+                if accounts.isEmpty then Nil
+                else {
+                  groupHeading("— Investments —", deltaHeader = "Δ period") ::
+                    accounts.map(account => accountQuickRow(account, isEditing, deltas.get(account.id))) :::
+                    List(
+                      subtotalRow("investments", Some(dataService.investmentPeriodChange), dataService.investmentBalance),
+                      partRow(
+                        "moved in / out",
+                        "Deposits less withdrawals, from the transactions of the transfer categories",
+                        dataService.investmentMovedTotal,
+                      ),
+                      partRow("market result", "The change of value that is not a deposit or a withdrawal", dataService.investmentMarketResult),
+                      groupHeading("— Saved this period —"),
+                      partRow(
+                        "savings change + moved to investments",
+                        "The change of the savings accounts plus what was moved into the investment accounts. The market result is not in it.",
+                        dataService.savedThisPeriod,
+                        strong = true,
+                      ),
+                    )
+                }
+              },
           ),
         ),
       ),
@@ -429,6 +457,16 @@ object DashboardPage {
     */
   private def deltaSpan(delta: Money): HtmlElement =
     if delta.amountCents == 0 then span() else MoneyFormatter.formatDelta(delta)
+
+  /** One named part of a group's change: a label and a signed amount in the Δ column. */
+  private def partRow(label: String, hint: String, amount: Signal[Money], strong: Boolean = false): HtmlElement =
+    tr(
+      cls   := (if strong then "fw-bold" else "text-muted small"),
+      title := hint,
+      td(cls := (if strong then "" else "ps-4"), label),
+      td(cls := deltaCellCls, child <-- amount.map(MoneyFormatter.formatDelta)),
+      td(),
+    )
 
   private def subtotalRow(group: String, delta: Option[Signal[Money]], balance: Signal[Money]): HtmlElement =
     tr(
