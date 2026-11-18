@@ -347,16 +347,17 @@ object Routes {
     } yield Right(newPeriod)
   }
 
-  /** Balance at the current period's start per savings and investment account (see [[AccountPeriodBaseline]] — the client derives the Δ from its live
-    * balances). No current period, or no recorded history for an account → no entry, and the client shows no Δ. Informational only — not part of the
-    * free-money calc.
+  /** Balance at the current period's start per account (see [[AccountPeriodBaseline]] — the client derives the Δ from its live balances). No current
+    * period, or no recorded history for an account → no entry, and the client shows no Δ. Informational only — not part of the free-money calc.
     */
   private def savingsPeriodBaselines(repos: Repositories): Result[List[AccountPeriodBaseline]] =
     for {
       accounts  <- repos.accounts.findAll
       periodOpt <- repos.periods.findCurrent
       baselines <- periodOpt.toList.flatTraverse { p =>
-                     val savings    = accounts.filter(a => AccountRole.held(a.role))
+                     // All accounts. The change of a spending account is mostly the paycheck less the spend, so it says little; it is given so that the
+                     // three groups of the Dashboard read the same way.
+                     val savings    = accounts
                      // The balance at the period's start. An account whose first balance was recorded after that start (bank balances are
                      // recorded on sync, so this is usual for a new link) gets it from the ledger: see [[BalanceHistory]].
                      val (from, to) = periodWindow(p)

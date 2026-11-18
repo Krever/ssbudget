@@ -387,124 +387,177 @@ object DashboardPage {
             button(tpe := "button", cls := "btn-close btn-close-sm", onClick --> { _ => syncMessage.set(None) }),
           )
         }),
-        // Two self-contained groups, each closed by its own total the way a spreadsheet sums a block — spending and savings are different kinds of
-        // money, so their figures never share a row or add up to a grand total. The spending total is the headline's BALANCE; the savings total
-        // carries the group's Δ sum (net saved/withdrawn this period, in the primary currency). The Δ column is savings-only (see
-        // AccountPeriodBaseline), so its header lives on the savings group heading rather than in the table head over rows it never applies to.
+        // One ledger of three groups: spending, savings and investments are different kinds of money, so their figures never add up in a row.
+        // The heading row of a group carries its totals, so there is no "Total" row to find. Every amount is in the primary currency, so a
+        // column can be read down; the own currency of a foreign account is the small line under its name.
         table(
-          cls := "table table-sm table-hover mb-0",
-          thead(tr(th("Account"), th(), th(cls := "text-end", "Balance"))),
-          tbody(
-            groupHeading("— Spending —"),
-            children <-- dataService.spendingAccounts
-              .combineWith(isEditingBalances.signal)
-              .map { case (accounts, isEditing) =>
-                accounts.map(account => accountQuickRow(account, isEditing))
-              },
-            subtotalRow("spending", None, dataService.bankAccountBalance),
-            groupHeading("— Savings —", deltaHeader = "Δ period"),
-            children <-- dataService.savingsAccounts
-              .combineWith(dataService.savingsPeriodDeltas)
-              .combineWith(isEditingBalances.signal)
-              .map { case (accounts, deltas, isEditing) =>
-                accounts.map(account => accountQuickRow(account, isEditing, deltas.get(account.id)))
-              },
-            subtotalRow("savings", Some(dataService.savingsPeriodChange), dataService.savingsBalance),
-            // Investments are a third kind of money: at market value, so their change is not what was saved. The group shows only when there is
-            // such an account. Its change is split into what was moved (that part is saving) and what the market did.
-            children <-- dataService.investmentAccounts
-              .combineWith(dataService.investmentPeriodDeltas)
-              .combineWith(isEditingBalances.signal)
-              .map { case (accounts, deltas, isEditing) =>
-                if accounts.isEmpty then Nil
-                else {
-                  groupHeading("— Investments —", deltaHeader = "Δ period") ::
-                    accounts.map(account => accountQuickRow(account, isEditing, deltas.get(account.id))) :::
-                    List(
-                      subtotalRow("investments", Some(dataService.investmentPeriodChange), dataService.investmentBalance),
-                      partRow(
-                        "moved in / out",
-                        "Deposits less withdrawals, from the transactions of the transfer categories",
-                        dataService.investmentMovedTotal,
+          cls := "table table-sm table-hover mb-0 accounts-ledger",
+          thead(
+            tr(
+              th(),
+              th(cls := "text-end", "Δ period"),
+              th(cls := "text-end", child.text <-- dataService.primaryCurrency.map(c => s"Balance, ${c.code}")),
+            ),
+          ),
+          tbody(children <-- ledgerRows),
+        ),
+        ledgerSummary(),
+      ),
+    )
+  }
+
+  /** Small spending accounts are shown one by one (true), or folded into one line (false). */
+  private val showSmallAccounts = Var(false)
+
+  /** A spending account under this balance, in the primary currency, says nothing at a glance. Two or more of them fold into one line. */
+  private val smallBalanceCents = 5000L
+
+  private def signedSpan(cents: Long): HtmlElement = span(cls := MoneyFormatter.amountCls(cents), MoneyFormatter.formatSigned(cents))
+
+  /** The rows of the ledger: per group its heading row with the totals, then its accounts. */
+  private def ledgerRows: Signal[List[HtmlElement]] =
+    dataService.accounts
+      .combineWith(dataService.savingsBaselines)
+      .combineWith(dataService.investmentMoved)
+      .combineWith(dataService.exchangeRates)
+      .combineWith(dataService.primaryCurrency)
+      .combineWith(isEditingBalances.signal)
+      .combineWith(showSmallAccounts.signal)
+      .map { case (accounts, baselines, moved, rates, primary, isEditing, showSmall) =>
+        def inPrimary(cents: Long, currency: Currency): Long =
+          MoneyFormatter.convertToPrimary(Money(cents, currency), primary, rates).amountCents
+        def balance(a: Account): Long                        = inPrimary(a.balanceCents, a.currency)
+        // The change of the period, in the primary currency. No recorded balance at the period's start: no figure, which is not zero.
+        def change(a: Account): Option[Long]                 = baselines.get(a.id).map(b => inPrimary(a.balanceCents - b.amountCents, a.currency))
+        def of(role: AccountRole): List[Account]             = accounts.filter(_.role == role)
+
+        def groupRow(key: String, label: String, group: List[Account], groupChange: Option[Long]): HtmlElement =
+          tr(
+            cls                     := "ledger-group",
+            dataAttr("group-total") := key,
+            td(label, span(cls := "ledger-count", s"${group.size} ${if group.size == 1 then "account" else "accounts"}")),
+            td(cls := "ledger-num", groupChange.filter(_ != 0).map(signedSpan)),
+            td(cls := "ledger-num", MoneyFormatter.formatBare(group.map(balance).sum)),
+          )
+
+        def nameCell(a: Account): HtmlElement =
+          td(a.name, Option.when(a.currency != primary)(span(cls := "ledger-sub", MoneyFormatter.formatSimple(a.balance))))
+
+        // A manual balance is typed in the account's own currency. A bank or card balance comes from a sync and stays as it is.
+        def balanceCell(a: Account): HtmlElement =
+          if isEditing && a.isManual then td(
+            div(
+              cls := "input-group input-group-sm",
+              input(
+                cls          := "form-control form-control-sm text-end",
+                tpe          := "number",
+                stepAttr     := "0.01",
+                defaultValue := InlineEdit.centsText(a.balanceCents),
+                onInput.mapToValue --> { v => v.toDoubleOption.foreach(d => editedBalances.update(_.updated(a.id, (d * 100).toLong))) },
+              ),
+              span(cls       := "input-group-text py-0", a.currency.code),
+            ),
+          )
+          else td(cls := s"ledger-num${if isEditing then " text-muted" else ""}", MoneyFormatter.formatBare(balance(a)))
+
+        def accountRow(a: Account, changeCell: HtmlElement): HtmlElement =
+          tr(cls := (if isEditing && a.isManual then "table-info" else ""), nameCell(a), changeCell, balanceCell(a))
+
+        def changeCell(a: Account): HtmlElement = td(cls := "ledger-num", change(a).filter(_ != 0).map(signedSpan))
+
+        // Spending: the change is the paycheck less the spend, shown for the same reading as the other groups. Small balances fold into one line.
+        val spending                                                                = of(AccountRole.Spending)
+        val small                                                                   = spending.filter(a => math.abs(balance(a)) < smallBalanceCents)
+        val folded                                                                  = if small.size >= 2 && !isEditing && !showSmall then small else Nil
+        val limitText                                                               = MoneyFormatter.formatBare(smallBalanceCents)
+        def foldToggle(text: String, show: Boolean, sum: Option[Long]): HtmlElement =
+          tr(
+            td(button(tpe := "button", cls := "btn btn-link btn-sm p-0 text-muted", text, onClick --> { _ => showSmallAccounts.set(show) })),
+            td(cls := "ledger-num", sum.map(_ => folded.flatMap(change).sum).filter(_ != 0).map(signedSpan)),
+            td(cls := "ledger-num text-muted", sum.map(MoneyFormatter.formatBare)),
+          )
+        val spendingRows                                                            = groupRow("spending", "Spending", spending, Some(spending.flatMap(change).sum)) ::
+          spending.filterNot(folded.contains).map(a => accountRow(a, changeCell(a))) :::
+          (if folded.nonEmpty then List(foldToggle(s"${folded.size} more with less than $limitText", show = true, Some(folded.map(balance).sum)))
+           else if small.size >= 2 && showSmall && !isEditing then List(
+             foldToggle(s"fold the ${small.size} with less than $limitText", show = false, None),
+           )
+           else Nil)
+
+        val savings     = of(AccountRole.Savings)
+        val savingsRows = groupRow("savings", "Savings", savings, Some(savings.flatMap(change).sum)) :: savings.map(a => accountRow(a, changeCell(a)))
+
+        // Investments: the change of an account has two parts, and only "moved" is saving. The group shows only when there is such an account.
+        val investments    = of(AccountRole.Investment)
+        val investmentRows =
+          if investments.isEmpty then Nil
+          else {
+            groupRow("investments", "Investments", investments, Some(investments.flatMap(change).sum)) ::
+              investments.map { a =>
+                val cell = change(a) match {
+                  case None    => td()
+                  case Some(c) =>
+                    val movedIn = moved.getOrElse(a.id, 0L)
+                    td(
+                      cls := "ledger-num",
+                      Option.when(c != 0)(signedSpan(c)),
+                      span(
+                        cls   := "ledger-sub",
+                        title := "Deposits less withdrawals and payments, from the transactions of the account and of its transfer categories",
+                        s"moved ${MoneyFormatter.formatSigned(movedIn)}",
                       ),
-                      partRow("market result", "The change of value that is not a deposit or a withdrawal", dataService.investmentMarketResult),
-                      groupHeading("— Saved this period —"),
-                      partRow(
-                        "savings change + moved to investments",
-                        "The change of the savings accounts plus what was moved into the investment accounts. The market result is not in it.",
-                        dataService.savedThisPeriod,
-                        strong = true,
+                      span(
+                        cls   := "ledger-sub",
+                        title := "The change of value that is not a deposit, a withdrawal or a payment",
+                        s"market ${MoneyFormatter.formatSigned(c - movedIn)}",
                       ),
                     )
                 }
-              },
-          ),
-        ),
-      ),
-    )
-  }
+                accountRow(a, cell)
+              }
+          }
 
-  private def groupHeading(label: String, deltaHeader: String = ""): HtmlElement = {
-    // Styling must sit on the cells: table-secondary sets its text colour directly on them, so classes on the row don't take.
-    val cell = cls := "py-1 small text-muted"
-    tr(cls := "table-secondary", td(cell, label), td(cell, cls := "text-end", deltaHeader), td(cell))
-  }
+        spendingRows ::: savingsRows ::: investmentRows
+      }
 
-  private val deltaCellCls = "text-end font-monospace small"
-
-  /** A balance change this period: signed, coloured, converted like a balance — but silent when absent or when nothing moved (a column of +0.00 would
-    * drown the few real movements).
-    */
-  private def deltaSpan(delta: Money): HtmlElement =
-    if delta.amountCents == 0 then span() else MoneyFormatter.formatDelta(delta)
-
-  /** One named part of a group's change: a label and a signed amount in the Δ column. */
-  private def partRow(label: String, hint: String, amount: Signal[Money], strong: Boolean = false): HtmlElement =
-    tr(
-      cls   := (if strong then "fw-bold" else "text-muted small"),
-      title := hint,
-      td(cls := (if strong then "" else "ps-4"), label),
-      td(cls := deltaCellCls, child <-- amount.map(MoneyFormatter.formatDelta)),
-      td(),
-    )
-
-  private def subtotalRow(group: String, delta: Option[Signal[Money]], balance: Signal[Money]): HtmlElement =
-    tr(
-      // table-group-divider doubles the top border, marking where the rows stop and their sum begins.
-      cls                     := "fw-bold table-group-divider",
-      dataAttr("group-total") := group,
-      td("Total"),
-      td(cls := deltaCellCls, delta.map(d => child <-- d.map(deltaSpan))),
-      td(cls := "text-end font-monospace", MoneyFormatter.formatChild(balance)),
-    )
-
-  private def accountQuickRow(account: Account, isEditing: Boolean, delta: Option[Money] = None): HtmlElement = {
-    val nameCell    = td(account.name, Badges.source(account.balanceSource))
-    val deltaCell   = td(cls := deltaCellCls, delta.map(deltaSpan))
-    val balanceView = MoneyFormatter.format(account.balanceCents, account.currency)
-
-    if isEditing && !account.isManual then
-    // Bank/card-driven balance: not manually editable, updated via Sync banks.
-    tr(nameCell, deltaCell, td(cls := "text-end font-monospace text-muted", balanceView))
-    else if isEditing then tr(
-      cls := "table-info",
-      nameCell,
-      deltaCell,
-      td(
+  /** The line under the ledger: what the period did to the money that is not for spending, and the sum of all three groups. */
+  private def ledgerSummary(): HtmlElement = {
+    def cell(label: String, hint: String, value: Signal[Money], signed: Boolean, note: Signal[String]): HtmlElement =
+      div(
+        title := hint,
+        div(cls := "ledger-label", label),
         div(
-          cls := "input-group input-group-sm",
-          input(
-            cls          := "form-control form-control-sm text-end",
-            tpe          := "number",
-            stepAttr     := "0.01",
-            defaultValue := InlineEdit.centsText(account.balanceCents),
-            onInput.mapToValue --> { v => v.toDoubleOption.foreach(d => editedBalances.update(_.updated(account.id, (d * 100).toLong))) },
-          ),
-          span(cls       := "input-group-text py-0", account.currency.code),
+          cls   := "ledger-value",
+          child <-- value.map(m => if signed then signedSpan(m.amountCents) else span(MoneyFormatter.formatBare(m.amountCents))),
         ),
-      ),
+        div(cls := "ledger-note", child.text <-- note),
+      )
+    val hasInvestments                                                                                              = dataService.investmentAccounts.map(_.nonEmpty).distinct
+    val saved                                                                                                       = cell(
+      "Saved this period",
+      "The change of the savings accounts plus what was moved into the investment accounts. The market result is not in it.",
+      dataService.savedThisPeriod,
+      signed = true,
+      dataService.savingsPeriodChange.combineWith(dataService.investmentMovedTotal).combineWith(hasInvestments).map { case (change, moved, has) =>
+        if has then s"savings ${MoneyFormatter.formatSigned(change.amountCents)} · moved ${MoneyFormatter.formatSigned(moved.amountCents)}"
+        else "the change of the savings accounts"
+      },
     )
-    else tr(nameCell, deltaCell, td(cls := "text-end font-monospace", balanceView))
+    val market                                                                                                      = cell(
+      "Market result",
+      "The change of value of the investment accounts that is not a deposit, a withdrawal or a payment",
+      dataService.investmentMarketResult,
+      signed = true,
+      Val("not counted as saving"),
+    )
+    val netWorth                                                                                                    = cell(
+      "Net worth",
+      "The balance of all accounts",
+      dataService.totalBalance,
+      signed = false,
+      hasInvestments.map(has => if has then "all three groups" else "spending and savings"),
+    )
+    div(cls := "ledger-summary", children <-- hasInvestments.map(has => if has then List(saved, market, netWorth) else List(saved, netWorth)))
   }
 
   private def startEditingBalances(): Unit = {

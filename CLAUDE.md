@@ -14,6 +14,14 @@ Personal budget tracker for tracking monthly expenses, bank balances, and calcul
 
 Think "Google Sheets for personal budget" not "enterprise dashboard with cards everywhere".
 
+**Look** - Bootstrap, plus one stylesheet of our own: `frontend/styles/app.css`. It sets the scale (root size 14px, so all of
+Bootstrap follows), the number face and the surfaces. A change of the general look goes there, not into page code.
+
+**Accounts ledger** (Dashboard) - one table of three groups (spending, savings, investments). The heading row of a group carries
+its totals, so there are no "Total" rows. Every amount is in the primary currency so that a column reads down; the own currency of a
+foreign account is the small line under its name. Spending accounts with a small balance fold into one line. The strip under the
+table holds what the period did: saved, market result, net worth.
+
 **Charts** - every chart is a `ChartKit.chart` (frontend components), so they are all drawn and read in one way: a plot at the real
 pixel width of its container, one labelled scale, a pointer readout that snaps to the nearest position (arrow keys do the same), a
 legend with line keys, and the same figures as a table below. The kit owns that mechanism; a chart gives it only its series, how a

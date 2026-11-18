@@ -16,9 +16,10 @@ final case class UpdateAccount(name: String, currency: Currency, role: Option[Ac
 /** Set an account's balance directly. Rejected server-side unless the account's balanceSource is Manual. */
 final case class UpdateAccountBalance(newBalanceCents: Long) derives Codec.AsObject
 
-/** The balance of a savings or investment account as of the current period's start (else its earliest recorded balance), in the account's own
-  * currency. The client derives the period delta as current balance − baseline, so the Δ stays fresh as balances are edited or synced, with no
-  * re-fetch to coordinate. Not for spending accounts: a spending account's balance moves with every purchase, so its period delta carries no signal.
+/** The balance of an account as of the current period's start (else its earliest recorded balance), in the account's own currency. The client derives
+  * the period delta as current balance − baseline, so the Δ stays fresh as balances are edited or synced, with no re-fetch to coordinate. For a
+  * savings or investment account the delta is the figure of interest. For a spending account it is the paycheck less the spend, which says little; it
+  * is there so that all groups read the same way.
   *
   * `movedCents` is for an investment account: the net amount moved INTO it in the current period (negative = withdrawn), in the PRIMARY currency,
   * read from the bank transactions of its transfer categories (see `Category.transferAccount`). The rest of the balance change is market result.

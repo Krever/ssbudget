@@ -1,0 +1,127 @@
+/* The look of the app on top of Bootstrap: denser type, numbers that line up, thinner and calmer surfaces.
+   One rule of scale: the root size goes from 16px to 14px, so every rem-based size of Bootstrap follows. */
+:root {
+  --bs-font-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --bs-border-color: #dee2e6;
+  --ss-muted: #5c636a;
+  --ss-rule: #e9ecef;
+  --ss-band: #f1f3f5;
+}
+
+html {
+  font-size: 14px;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A monospace face looks larger and heavier than the text face at the same size. */
+.font-monospace {
+  font-size: 0.94em;
+  letter-spacing: -0.01em;
+}
+
+.text-muted {
+  color: var(--ss-muted) !important;
+}
+
+.card {
+  border-color: #ced4da;
+  border-radius: 6px;
+}
+
+.card-header {
+  background: #f8f9fa;
+  border-bottom-color: #ced4da;
+}
+
+.table {
+  --bs-table-hover-bg: #f4f8ff;
+}
+
+.table > :not(caption) > * > * {
+  border-bottom-color: var(--ss-rule);
+}
+
+.table > thead > tr > th {
+  font-weight: 600;
+  border-bottom-color: #ced4da;
+}
+
+/* ---- Dashboard: the accounts ledger ---- */
+
+.accounts-ledger > thead > tr > th {
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--ss-muted);
+}
+
+.accounts-ledger > * > tr > :first-child {
+  padding-left: 1rem;
+}
+
+.accounts-ledger > * > tr > :last-child {
+  padding-right: 1rem;
+}
+
+.accounts-ledger td {
+  vertical-align: baseline;
+}
+
+/* The heading row of a group carries the group's totals. */
+.ledger-group {
+  --bs-table-bg: var(--ss-band);
+  --bs-table-hover-bg: var(--ss-band);
+  font-weight: 600;
+}
+
+.ledger-group > td {
+  border-top: 1px solid #ced4da;
+}
+
+.ledger-count {
+  margin-left: 0.5rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #e2e6ea;
+  color: #495057;
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
+.ledger-num {
+  font-family: var(--bs-font-monospace);
+  font-size: 0.94em;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* A second line under a name or an amount: the account's own currency, or a part of a change. */
+.ledger-sub {
+  display: block;
+  color: var(--ss-muted);
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.ledger-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  border-top: 2px solid #212529;
+}
+
+.ledger-summary .ledger-label,
+.ledger-summary .ledger-note {
+  color: var(--ss-muted);
+  font-size: 0.85rem;
+}
+
+.ledger-summary .ledger-value {
+  font-family: var(--bs-font-monospace);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
