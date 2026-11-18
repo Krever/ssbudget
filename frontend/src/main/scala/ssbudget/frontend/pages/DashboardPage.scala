@@ -389,7 +389,7 @@ object DashboardPage {
         }),
         // One ledger of three groups: spending, savings and investments are different kinds of money, so their figures never add up in a row.
         // The heading row of a group carries its totals, so there is no "Total" row to find. Every amount is in the primary currency, so a
-        // column can be read down; the own currency of a foreign account is the small line under its name.
+        // column can be read down; the own currency of a foreign account is the small line under its balance.
         table(
           cls := "table table-sm table-hover mb-0 accounts-ledger",
           thead(
@@ -419,11 +419,12 @@ object DashboardPage {
     dataService.accounts
       .combineWith(dataService.savingsBaselines)
       .combineWith(dataService.investmentMoved)
+      .combineWith(dataService.periodSpent)
       .combineWith(dataService.exchangeRates)
       .combineWith(dataService.primaryCurrency)
       .combineWith(isEditingBalances.signal)
       .combineWith(showSmallAccounts.signal)
-      .map { case (accounts, baselines, moved, rates, primary, isEditing, showSmall) =>
+      .map { case (accounts, baselines, moved, spent, rates, primary, isEditing, showSmall) =>
         def inPrimary(cents: Long, currency: Currency): Long =
           MoneyFormatter.convertToPrimary(Money(cents, currency), primary, rates).amountCents
         def balance(a: Account): Long                        = inPrimary(a.balanceCents, a.currency)
@@ -431,17 +432,21 @@ object DashboardPage {
         def change(a: Account): Option[Long]                 = baselines.get(a.id).map(b => inPrimary(a.balanceCents - b.amountCents, a.currency))
         def of(role: AccountRole): List[Account]             = accounts.filter(_.role == role)
 
-        def groupRow(key: String, label: String, group: List[Account], groupChange: Option[Long]): HtmlElement =
+        def groupRow(key: String, label: String, group: List[Account], groupChange: Option[Long], changeLabel: String = ""): HtmlElement =
           tr(
             cls                     := "ledger-group",
             dataAttr("group-total") := key,
             td(label, span(cls := "ledger-count", s"${group.size} ${if group.size == 1 then "account" else "accounts"}")),
-            td(cls := "ledger-num", groupChange.filter(_ != 0).map(signedSpan)),
+            td(
+              cls  := "ledger-num",
+              groupChange
+                .filter(_ != 0)
+                .map(c => span(Option.when(changeLabel.nonEmpty)(span(cls := "ledger-count me-2", changeLabel)), signedSpan(c))),
+            ),
             td(cls := "ledger-num", MoneyFormatter.formatBare(group.map(balance).sum)),
           )
 
-        def nameCell(a: Account): HtmlElement =
-          td(a.name, Option.when(a.currency != primary)(span(cls := "ledger-sub", MoneyFormatter.formatSimple(a.balance))))
+        def nameCell(a: Account): HtmlElement = td(a.name)
 
         // A manual balance is typed in the account's own currency. A bank or card balance comes from a sync and stays as it is.
         def balanceCell(a: Account): HtmlElement =
@@ -458,14 +463,24 @@ object DashboardPage {
               span(cls       := "input-group-text py-0", a.currency.code),
             ),
           )
-          else td(cls := s"ledger-num${if isEditing then " text-muted" else ""}", MoneyFormatter.formatBare(balance(a)))
+          else
+            td(
+              cls := s"ledger-num${if isEditing then " text-muted" else ""}",
+              MoneyFormatter.formatBare(balance(a)),
+              // The own currency of a foreign account: under the amount it explains.
+              Option.when(a.currency != primary)(span(cls := "ledger-sub", MoneyFormatter.formatSimple(a.balance))),
+            )
 
         def accountRow(a: Account, changeCell: HtmlElement): HtmlElement =
           tr(cls := (if isEditing && a.isManual then "table-info" else ""), nameCell(a), changeCell, balanceCell(a))
 
         def changeCell(a: Account): HtmlElement = td(cls := "ledger-num", change(a).filter(_ != 0).map(signedSpan))
 
-        // Spending: the change is the paycheck less the spend, shown for the same reading as the other groups. Small balances fold into one line.
+        // Spending: the column holds what was spent from the account in the period, not its balance change (that is only the paycheck less the
+        // spend). Small balances fold into one line.
+        def spentOf(group: List[Account]): Option[Long]                             = Some(group.map(a => spent.getOrElse(a.id, 0L)).sum)
+        def spentCell(a: Account): HtmlElement                                      =
+          td(cls := "ledger-num", title := "Spent from this account in the period", spentOf(List(a)).filter(_ != 0).map(signedSpan))
         val spending                                                                = of(AccountRole.Spending)
         val small                                                                   = spending.filter(a => math.abs(balance(a)) < smallBalanceCents)
         val folded                                                                  = if small.size >= 2 && !isEditing && !showSmall then small else Nil
@@ -473,11 +488,11 @@ object DashboardPage {
         def foldToggle(text: String, show: Boolean, sum: Option[Long]): HtmlElement =
           tr(
             td(button(tpe := "button", cls := "btn btn-link btn-sm p-0 text-muted", text, onClick --> { _ => showSmallAccounts.set(show) })),
-            td(cls := "ledger-num", sum.map(_ => folded.flatMap(change).sum).filter(_ != 0).map(signedSpan)),
+            td(cls := "ledger-num", sum.flatMap(_ => spentOf(folded)).filter(_ != 0).map(signedSpan)),
             td(cls := "ledger-num text-muted", sum.map(MoneyFormatter.formatBare)),
           )
-        val spendingRows                                                            = groupRow("spending", "Spending", spending, Some(spending.flatMap(change).sum)) ::
-          spending.filterNot(folded.contains).map(a => accountRow(a, changeCell(a))) :::
+        val spendingRows                                                            = groupRow("spending", "Spending", spending, spentOf(spending), changeLabel = "spent") ::
+          spending.filterNot(folded.contains).map(a => accountRow(a, spentCell(a))) :::
           (if folded.nonEmpty then List(foldToggle(s"${folded.size} more with less than $limitText", show = true, Some(folded.map(balance).sum)))
            else if small.size >= 2 && showSmall && !isEditing then List(
              foldToggle(s"fold the ${small.size} with less than $limitText", show = false, None),

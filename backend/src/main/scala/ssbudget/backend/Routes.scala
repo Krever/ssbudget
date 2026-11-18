@@ -355,8 +355,7 @@ object Routes {
       accounts  <- repos.accounts.findAll
       periodOpt <- repos.periods.findCurrent
       baselines <- periodOpt.toList.flatTraverse { p =>
-                     // All accounts. The change of a spending account is mostly the paycheck less the spend, so it says little; it is given so that the
-                     // three groups of the Dashboard read the same way.
+                     // All accounts. A savings or investment account is read by its balance change; a spending account by what was spent from it.
                      val savings    = accounts
                      // The balance at the period's start. An account whose first balance was recorded after that start (bank balances are
                      // recorded on sync, so this is usual for a new link) gets it from the ledger: see [[BalanceHistory]].
@@ -365,6 +364,11 @@ object Routes {
                        history   <- BalanceHistory.load(repos, savings)
                        converter <- primaryConverter(repos)
                        moved     <- movedToInvestments(repos, converter._2)(from, to)
+                       spentRows <- repos.bankTransactions.spentByAccountBetween(from, to)
+                       uidIndex  <- BalanceHistory.accountUidIndex(repos)
+                       spent      = spentRows
+                                      .flatMap { case (uid, currency, cents) => uidIndex.get(uid).map(_ -> converter._2(cents, currency)) }
+                                      .groupMapReduce(_._1)(_._2)(_ + _)
                      } yield savings.flatMap { acc =>
                        history
                          .asOf(acc.id, p.startDate)
@@ -374,6 +378,8 @@ object Routes {
                              Money(b, acc.currency),
                              // "Moved" is a figure of investment accounts only.
                              if acc.role == AccountRole.Investment then moved.getOrElse(acc.id, 0L) else 0L,
+                             // "Spent" is a figure of spending accounts only.
+                             if acc.role == AccountRole.Spending then spent.getOrElse(acc.id, 0L) else 0L,
                            ),
                          )
                      }

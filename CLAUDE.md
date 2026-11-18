@@ -19,7 +19,8 @@ Bootstrap follows), the number face and the surfaces. A change of the general lo
 
 **Accounts ledger** (Dashboard) - one table of three groups (spending, savings, investments). The heading row of a group carries
 its totals, so there are no "Total" rows. Every amount is in the primary currency so that a column reads down; the own currency of a
-foreign account is the small line under its name. Spending accounts with a small balance fold into one line. The strip under the
+foreign account is the small line under its balance. The change column holds the balance change of a savings or investment
+account, and what was spent from a spending account. Spending accounts with a small balance fold into one line. The strip under the
 table holds what the period did: saved, market result, net worth.
 
 **Charts** - every chart is a `ChartKit.chart` (frontend components), so they are all drawn and read in one way: a plot at the real

@@ -326,11 +326,14 @@ class BankTransactionRepositorySpec extends RepositorySpec {
       _         <- repo.insertNew(tx("t7", "uid-b", "r7", amountCents = -1500, bookedAt = inJan, connId = "conn-b", categoryId = Some(CategoryId("cat-b"))))
       transfers <- repo.transfersByAccountBetween(from, to)
       own       <- repo.netByAccountBetween(from, to)
+      spent     <- repo.spentByAccountBetween(from, to)
       flows     <- repo.flowsBetween(from, to)
     } yield {
       // The sign of the bank side: a net 300 arrived from the broker. The row on the broker's own ledger is not in it.
       transfers shouldBe List((broker.id, Currency.PLN, 30000L))
       own.toSet shouldBe Set(("uid-1", Currency.PLN, 110000L), ("uid-b", Currency.PLN, -5500L))
+      // Spent per account: the debits that are not transfers. The 900 of income and the transfer-category rows are not in it.
+      spent.toSet shouldBe Set(("uid-1", Currency.PLN, -10000L), ("uid-b", Currency.PLN, -4000L))
       // A card payment from the broker is spend: 100 of groceries plus 40. The transfer-category row is not cash flow.
       flows shouldBe List((Currency.PLN, 90000L, 14000L))
     }

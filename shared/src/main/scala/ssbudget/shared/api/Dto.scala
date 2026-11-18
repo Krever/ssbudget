@@ -17,14 +17,17 @@ final case class UpdateAccount(name: String, currency: Currency, role: Option[Ac
 final case class UpdateAccountBalance(newBalanceCents: Long) derives Codec.AsObject
 
 /** The balance of an account as of the current period's start (else its earliest recorded balance), in the account's own currency. The client derives
-  * the period delta as current balance − baseline, so the Δ stays fresh as balances are edited or synced, with no re-fetch to coordinate. For a
-  * savings or investment account the delta is the figure of interest. For a spending account it is the paycheck less the spend, which says little; it
-  * is there so that all groups read the same way.
+  * the period delta as current balance − baseline, so the Δ stays fresh as balances are edited or synced, with no re-fetch to coordinate. That delta
+  * is the figure of a savings or investment account. For a spending account it is only the paycheck less the spend, so the client shows `spentCents`
+  * there.
   *
   * `movedCents` is for an investment account: the net amount moved INTO it in the current period (negative = withdrawn), in the PRIMARY currency,
   * read from the bank transactions of its transfer categories (see `Category.transferAccount`). The rest of the balance change is market result.
+  *
+  * `spentCents` is for a spending account: what was spent from it in the current period, in the PRIMARY currency, as a negative amount. It is the sum
+  * of its non-internal debits; transfers to an investment account are not in it.
   */
-final case class AccountPeriodBaseline(accountId: AccountId, baseline: Money, movedCents: Long = 0) derives Codec.AsObject
+final case class AccountPeriodBaseline(accountId: AccountId, baseline: Money, movedCents: Long = 0, spentCents: Long = 0) derives Codec.AsObject
 
 final case class CreateBudgetItem(
     name: String,

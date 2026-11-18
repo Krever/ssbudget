@@ -141,6 +141,7 @@ object InMemoryDataService extends DataService {
   override def budgetedCategories: Signal[List[CategorySummary]] = Val(List.empty)
   override def savingsBaselines: Signal[Map[AccountId, Money]]   = Val(Map.empty)
   override def investmentMoved: Signal[Map[AccountId, Long]]     = Val(Map.empty)
+  override def periodSpent: Signal[Map[AccountId, Long]]         = Val(Map.empty)
 
   override def setCategoryBudgetOverride(categoryId: CategoryId, remainingCents: Long): Future[Unit] = Future.successful(())
   override def clearCategoryBudgetOverride(categoryId: CategoryId): Future[Unit]                     = Future.successful(())

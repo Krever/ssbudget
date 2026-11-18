@@ -84,6 +84,9 @@ trait DataService {
   // Net amount moved into each investment account in the current period, in primary-currency cents (see AccountPeriodBaseline.movedCents).
   def investmentMoved: Signal[Map[AccountId, Long]]
 
+  // What was spent from each spending account in the current period, in primary-currency cents, negative (see AccountPeriodBaseline.spentCents).
+  def periodSpent: Signal[Map[AccountId, Long]]
+
   // Derived signals
   def currentPeriod: Signal[Option[Period]]
   def plannedExpenses: Signal[List[BudgetItemDefinition]]
