@@ -59,6 +59,9 @@ trait DataService {
   // Investment accounts (role == Investment): money at market value. Not spendable and not part of the savings figures.
   def investmentAccounts: Signal[List[Account]]
 
+  // Holding accounts (role == Holding): pay that waits for the next period. Not spendable, not savings; part of the net worth.
+  def holdingAccounts: Signal[List[Account]]
+
   /** Adds a savings or an investment account. */
   def addSavingsAccount(name: String, currency: Currency, role: AccountRole): Future[Unit]
 

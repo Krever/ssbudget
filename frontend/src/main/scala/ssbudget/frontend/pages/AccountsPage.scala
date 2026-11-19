@@ -108,13 +108,14 @@ object AccountsPage {
   private def editAccountRow(account: Account): HtmlElement = {
     var nameRef: org.scalajs.dom.html.Input = null
     val currencyValue                       = Var(account.currency)
+    val roleValue                           = Var(account.role)
 
     val saveAction = Loading.actionGroup(
       "Save",
       () => {
         val name = Option(nameRef).map(_.value.trim).getOrElse("")
         if name.nonEmpty then dataService
-          .updateAccount(account.id, name, currencyValue.now(), account.role)
+          .updateAccount(account.id, name, currencyValue.now(), roleValue.now())
           .map(_ => editingAccountId.set(None))
         else scala.concurrent.Future.successful(())
       },
@@ -144,7 +145,9 @@ object AccountsPage {
           )
         },
       ),
-      td(colSpan := 2, cls := "text-muted small", "Balance is edited from Dashboard"),
+      // What the account is for. "On hold" takes it out of the spendable balance; it then shows in the other card.
+      td(roleSelect(account.role, roleValue.set)),
+      td(cls := "text-muted small", "Balance: Dashboard"),
       td(
         div(
           cls := "btn-group btn-group-sm",
@@ -227,9 +230,10 @@ object AccountsPage {
           tbody(
             children <-- dataService.savingsAccounts
               .combineWith(dataService.investmentAccounts)
+              .combineWith(dataService.holdingAccounts)
               .combineWith(editingSavingsId.signal)
-              .map { case (savings, investments, editingId) =>
-                (savings ++ investments).map(account => savingsRow(account, editingId))
+              .map { case (savings, investments, holding, editingId) =>
+                (savings ++ investments ++ holding).map(account => savingsRow(account, editingId))
               },
             child <-- addingSavings.signal
               .combineWith(dataService.enabledCurrencies)
@@ -243,22 +247,25 @@ object AccountsPage {
       ),
       div(
         cls := "card-footer py-2 text-muted small",
-        "Balances are edited from the Dashboard. An investment is money at market value: its change is not counted as saving, only what you move " +
+        "Balances are edited from the Dashboard. On hold is money that waits for the next period: not spendable, and not savings. An investment is " +
+          "money at market value: its change is not counted as saving, only what you move " +
           "in or out is. To record those moves, set a category's budget type to Transfer on the Transactions page.",
       ),
     )
   }
 
   private def roleLabel(role: AccountRole): String = role match {
+    case AccountRole.Spending   => "Spending"
+    case AccountRole.Savings    => "Savings"
     case AccountRole.Investment => "Investment"
-    case _                      => "Savings"
+    case AccountRole.Holding    => "On hold"
   }
 
-  /** Savings or Investment: the two roles this card holds, and the two an account can change between. */
+  /** What the account is for. An account moves to the card of its new type when the type is changed. */
   private def roleSelect(current: AccountRole, onPick: AccountRole => Unit): HtmlElement =
     select(
       cls := "form-select form-select-sm",
-      List(AccountRole.Savings, AccountRole.Investment).map { r =>
+      AccountRole.values.toList.map { r =>
         option(value := AccountRole.asString(r), selected := (r == current), roleLabel(r))
       },
       onChange.mapToValue --> { v => AccountRole.fromString(v).foreach(onPick) },

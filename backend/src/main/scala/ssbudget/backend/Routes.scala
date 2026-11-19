@@ -150,9 +150,9 @@ object Routes {
       result      <- existingOpt match {
                        case Some(existing) =>
                          val role = dto.role.getOrElse(existing.role)
-                         // A spending account has bank links, card groups and a place in free money. Only the two held roles can change places.
-                         if role != existing.role && !(AccountRole.held(role) && AccountRole.held(existing.role)) then {
-                           IO.pure(Left("Only a savings account and an investment account can change role"))
+                         // The account of a card group is the remaining limit of the cards: that is spendable money and nothing else.
+                         if role != existing.role && existing.balanceSource == BalanceSource.CardGroup then {
+                           IO.pure(Left("The account of a card group stays a spending account"))
                          } else {
                            val updated = existing.copy(name = dto.name, currency = dto.currency, role = role)
                            // Only an investment account has transfer categories.

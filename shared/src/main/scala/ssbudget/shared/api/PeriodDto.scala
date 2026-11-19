@@ -26,6 +26,7 @@ final case class PeriodSummary(
     investmentMovedCents: Long,
     investmentEndCents: Option[Long],
     endBalanceCents: Option[Long], // spending balance at period end, from snapshots; None when nothing was recorded that early
+    holdingEndCents: Option[Long], // what was on hold at period end; None when there is no holding account with a record
     topCategories: List[PeriodCategorySpend],
 ) derives Codec.AsObject {
 

@@ -9,7 +9,8 @@ import ssbudget.shared.api.PeriodSummary
   *
   * A position is the end of a period; the open period ends "now". The net worth is the series the chart is about. Savings and investments are lines
   * of context below it: the first shows what was put aside, the second moves with the market too. The spending balance is not a line of its own,
-  * because at the end of a period it is what is left before the paycheck, and it says little; it is in the readout and in the table.
+  * because at the end of a period it is what is left before the paycheck, and it says little; it is in the readout and in the table, as is the money
+  * on hold.
   *
   * It is a [[ChartKit.chart]], drawn by the rules that are stated there. A period is a discrete position and there are few of them, so the net worth
   * has a mark for each period.
@@ -52,6 +53,7 @@ object NetWorthChart {
               readoutRow(Some(lineKey(secondInk)), "Savings", MoneyFormatter.formatBare(p.savings)),
               readoutRow(Some(lineKey(thirdInk)), "Investments", MoneyFormatter.formatBare(p.investments)),
               readoutRow(None, "Spending", MoneyFormatter.formatBare(p.spending)),
+              readoutRow(None, "On hold", MoneyFormatter.formatBare(p.onHold)),
             ),
           )
         },
@@ -61,8 +63,8 @@ object NetWorthChart {
           legendKey(lineKey(thirdInk), "investments", "At their value at the end of the period: this line moves with the market too"),
         ),
         result = money(points.last.netWorth),
-        tableHead = List("End of period", "Spending", "Savings", "Investments", "Net worth"),
-        tableRows = model.points.map(p => p.label :: List(p.spending, p.savings, p.investments, p.netWorth).map(MoneyFormatter.formatBare)),
+        tableHead = List("End of period", "Spending", "On hold", "Savings", "Investments", "Net worth"),
+        tableRows = model.points.map(p => p.label :: List(p.spending, p.onHold, p.savings, p.investments, p.netWorth).map(MoneyFormatter.formatBare)),
       )
     }
   }
@@ -71,20 +73,21 @@ object NetWorthChart {
   /** `label` names the end of the period in full, for the readout and the table. `axis` is the short form under the plot, where a full date of each
     * period has no room.
     */
-  final private case class Point(label: String, axis: String, spending: Long, savings: Long, investments: Long) {
-    val netWorth: Long = spending + savings + investments
+  final private case class Point(label: String, axis: String, spending: Long, onHold: Long, savings: Long, investments: Long) {
+    val netWorth: Long = spending + onHold + savings + investments
   }
 
   private object Point {
 
     /** None when no account has a balance on record at the end of the period: there is nothing to draw, and zero would be a false figure. */
     def of(s: PeriodSummary): Option[Point] = {
-      val parts = List(s.endBalanceCents, s.savingsEndCents, s.investmentEndCents)
+      val parts = List(s.endBalanceCents, s.holdingEndCents, s.savingsEndCents, s.investmentEndCents)
       Option.when(parts.exists(_.isDefined)) {
         Point(
           s.period.endDate.fold("now")(Formatting.formatDate),
           s.period.endDate.fold("now")(Formatting.formatDateShort),
           s.endBalanceCents.getOrElse(0L),
+          s.holdingEndCents.getOrElse(0L),
           s.savingsEndCents.getOrElse(0L),
           s.investmentEndCents.getOrElse(0L),
         )

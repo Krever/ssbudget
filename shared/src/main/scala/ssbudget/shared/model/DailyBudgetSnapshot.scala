@@ -43,9 +43,11 @@ object SnapshotSource {
   *   as the two terms below are dated: a balance is read at a sync, a transaction has the bank's booking date, and they are often a day apart.
   * @param fromSavingsCents
   *   money that reached the plan from outside the spending accounts since the period's first day: a transfer in from savings, or a budgeted bill paid
-  *   directly from a savings account. Negative when money went to savings. Cumulative within the period.
+  *   directly from a savings account. Negative when money went to savings. A transfer from or to a holding account is not in it. Cumulative within
+  *   the period.
   * @param unplannedIncomeCents
-  *   income since the period's first day that no plan expected: the net inflow of each category that is not a budget, where that net is positive.
+  *   income since the period's first day that no plan expected: the net inflow of each category that is not a budget, where that net is positive. Pay
+  *   that was on hold (see `AccountRole.Holding`) is in it too, from the moment it arrives on a spending account or pays a budgeted bill directly.
   *   Cumulative within the period.
   * @param daysRemaining
   *   to the period's expected end; `None` when no period was open that day.

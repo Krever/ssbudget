@@ -73,6 +73,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   override def spendingAccounts: Signal[List[Account]]             = accountsVar.signal.map(_.filter(_.role == AccountRole.Spending))
   override def savingsAccounts: Signal[List[Account]]              = accountsVar.signal.map(_.filter(_.role == AccountRole.Savings))
   override def investmentAccounts: Signal[List[Account]]           = accountsVar.signal.map(_.filter(_.role == AccountRole.Investment))
+  override def holdingAccounts: Signal[List[Account]]              = accountsVar.signal.map(_.filter(_.role == AccountRole.Holding))
   override def periods: Signal[List[Period]]                       = periodsVar.signal
   override def exchangeRates: Signal[Map[Currency, Double]]        = exchangeRatesVar.signal
   override def currencySettings: Signal[List[CurrencySetting]]     = currencySettingsVar.signal

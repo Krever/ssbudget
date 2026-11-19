@@ -516,6 +516,13 @@ object DashboardPage {
        )
        else Nil)
 
+    // On hold: pay that waits for the next period. A balance and nothing more: it is not spendable, and to put money here is not saving. The
+    // group shows only when there is such an account.
+    val holding     = of(AccountRole.Holding)
+    val holdingRows =
+      if holding.isEmpty then Nil
+      else groupRow("holding", "On hold", holding, None) :: holding.map(a => accountRow(a, td()))
+
     val savings     = of(AccountRole.Savings)
     val savingsRows = groupRow("savings", "Savings", savings, Some(savings.flatMap(change).sum)) :: savings.map(a => accountRow(a, changeCell(a)))
 
@@ -549,7 +556,7 @@ object DashboardPage {
           }
       }
 
-    spendingRows ::: savingsRows ::: investmentRows
+    spendingRows ::: holdingRows ::: savingsRows ::: investmentRows
   }
 
   /** The line under the ledger: what the period did to the money that is not for spending, and the sum of all three groups. */
@@ -587,7 +594,7 @@ object DashboardPage {
       "The balance of all accounts",
       dataService.totalBalance,
       signed = false,
-      hasInvestments.map(has => if has then "all three groups" else "spending and savings"),
+      Val("all accounts"),
     )
     div(cls := "ledger-summary", children <-- hasInvestments.map(has => if has then List(saved, market, netWorth) else List(saved, netWorth)))
   }

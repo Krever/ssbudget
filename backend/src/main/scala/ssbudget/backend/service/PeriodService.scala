@@ -142,6 +142,7 @@ class PeriodService(repos: Repositories) {
     val spending           = accounts.filter(_.role == AccountRole.Spending)
     val savings            = accounts.filter(_.role == AccountRole.Savings)
     val investment         = accounts.filter(_.role == AccountRole.Investment)
+    val holding            = accounts.filter(_.role == AccountRole.Holding)
 
     // A balance at a period boundary: the recorded balance at or before that instant, and, before the first record of an account, that record
     // carried back through the bank ledger (see [[BalanceHistory]]). So a period from before the balances were recorded shows what the bank
@@ -161,6 +162,7 @@ class PeriodService(repos: Repositories) {
     val (savingsDelta, savingsEnd)                                 = changeAndEnd(savings)
     val (investmentDelta, investmentEnd)                           = changeAndEnd(investment)
     val endBalances                                                = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
+    val holdingEnds                                                = holding.flatMap(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
 
     for {
       flows   <- repos.bankTransactions.flowsBetween(from, to)
@@ -192,6 +194,7 @@ class PeriodService(repos: Repositories) {
         investmentEndCents = investmentEnd,
         // Partial by design: accounts without a snapshot that early are left out rather than sinking the whole figure to None.
         endBalanceCents = Option.when(endBalances.exists(_.isDefined))(endBalances.flatten.sum),
+        holdingEndCents = Option.when(holdingEnds.nonEmpty)(holdingEnds.sum),
         topCategories = topCategories,
       )
     }

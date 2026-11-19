@@ -830,6 +830,7 @@ object BankingPage {
                 case AccountRole.Spending   => ""
                 case AccountRole.Savings    => "Savings: "
                 case AccountRole.Investment => "Investment: "
+                case AccountRole.Holding    => "On hold: "
               }
               val label  = s"$prefix${a.name} (${a.currency.code})"
               option(value := v, selected := (v == currentVal), label)

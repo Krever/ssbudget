@@ -10,7 +10,7 @@ final case class CreateAccount(
     role: AccountRole,
 ) derives Codec.AsObject
 
-/** `role` changes the role of the account. Only a change between Savings and Investment is accepted. None keeps the role. */
+/** `role` changes the role of the account. None keeps the role. An account that mirrors a card group stays a spending account. */
 final case class UpdateAccount(name: String, currency: Currency, role: Option[AccountRole] = None) derives Codec.AsObject
 
 /** Set an account's balance directly. Rejected server-side unless the account's balanceSource is Manual. */

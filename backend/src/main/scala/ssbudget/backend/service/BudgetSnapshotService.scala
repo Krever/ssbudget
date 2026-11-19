@@ -134,6 +134,7 @@ class BudgetSnapshotService(repos: Repositories) {
           movements  <- repos.bankTransactions.dailyNetByAccountAndCategory(startOf(spendFrom), endOfDay(today))
         } yield {
           val spending  = accounts.filter(_.role == AccountRole.Spending).map(_.id).toSet
+          val holding   = accounts.filter(_.role == AccountRole.Holding).map(_.id).toSet
           val rateTable = RateTable(primaryOpt.map(_.code).getOrElse(Currency.PLN), rates)
           Some(
             World(
@@ -158,9 +159,18 @@ class BudgetSnapshotService(repos: Repositories) {
               // In the ACCOUNT's currency, unconverted: these movements are added to a balance that is itself in that currency, and the total is
               // converted once, afterwards. Converting here too would count a foreign movement at the square of its rate.
               dailyByAccount = BalanceHistory.ledgerByAccount(dailyAcc, uidIndex),
-              movements = movements.map { case (uid, cur, d, category, internal, cents) =>
-                val day = LocalDate.parse(d)
-                Movement(day, onSpendingAccount = uidIndex.get(uid).exists(spending), category, internal, rateTable.convert(cents, cur, day))
+              movements = movements.map { m =>
+                val day     = LocalDate.parse(m.day)
+                val account = uidIndex.get(m.accountUid)
+                Movement(
+                  day,
+                  onSpendingAccount = account.exists(spending),
+                  onHoldingAccount = account.exists(holding),
+                  m.category,
+                  m.internal,
+                  m.withHolding,
+                  rateTable.convert(m.cents, m.currency, day),
+                )
               },
             ),
           )
@@ -266,12 +276,24 @@ class BudgetSnapshotService(repos: Repositories) {
     */
   private def outsideMoney(w: World, period: Option[Period], day: LocalDate): (Long, Long, Long) =
     period.fold((0L, 0L, 0L)) { p =>
-      val inPeriod  = w.movementsIn(p, day)
-      // A transfer category is the bank side of an investment account: its movements come from savings as an internal transfer does.
-      val transfers = inPeriod.filter(m => m.onSpendingAccount && (m.internal || m.category.exists(w.transferCategories))).map(_.cents).sum
-      val paidFor   = inPeriod.filter(m => !m.onSpendingAccount && !m.internal && m.category.exists(w.budgeted)).map(_.cents).sum
-      val income    = inPeriod.filter(w.isUnbudgeted).groupMapReduce(_.category)(_.cents)(_ + _).values.filter(_ > 0).sum
-      (inPeriod.filter(_.onSpendingAccount).map(_.cents).sum, transfers - paidFor, income)
+      val inPeriod                                              = w.movementsIn(p, day)
+      val onSpending                                            = inPeriod.filter(_.onSpendingAccount)
+      def budgetedSpendFrom(account: Movement => Boolean): Long =
+        inPeriod.filter(m => account(m) && !m.internal && m.category.exists(w.budgeted)).map(_.cents).sum
+
+      // Money from savings: internal transfers, and the bank side of an investment account (a transfer category). A transfer from or to a
+      // holding account is not one of them: to put pay on hold, or to take it from there, is not saving.
+      val transfers = onSpending.filter(m => (m.internal && !m.withHolding) || m.category.exists(w.transferCategories)).map(_.cents).sum
+      val paidFor   = budgetedSpendFrom(m => !m.onSpendingAccount && !m.onHoldingAccount)
+
+      // Pay that was on hold is income when it arrives on a spending account. It is also income, spent at once, when a budgeted bill is paid
+      // directly from the holding account. Both are income that no budget expected, so the plan's own line leaves them out. Only a net arrival
+      // counts, as for a category: money that goes ON hold is not a negative income.
+      val released   = math.max(0L, onSpending.filter(m => m.internal && m.withHolding).map(_.cents).sum)
+      val paidOnHold = budgetedSpendFrom(_.onHoldingAccount)
+      val income     = inPeriod.filter(w.isUnbudgeted).groupMapReduce(_.category)(_.cents)(_ + _).values.filter(_ > 0).sum
+
+      (onSpending.map(_.cents).sum, transfers - paidFor, income + released - paidOnHold)
     }
 
   /** An account's balance at the end of `day`, in its own currency.
@@ -382,7 +404,15 @@ object BudgetSnapshotService {
   }
 
   /** One day's net movement on one bank account, in one category, in the primary currency. */
-  final private case class Movement(day: LocalDate, onSpendingAccount: Boolean, category: Option[CategoryId], internal: Boolean, cents: Long)
+  final private case class Movement(
+      day: LocalDate,
+      onSpendingAccount: Boolean,
+      onHoldingAccount: Boolean, // the account holds money that waits for the next period (see `AccountRole.Holding`)
+      category: Option[CategoryId],
+      internal: Boolean,
+      withHolding: Boolean,      // the other side of the entries is a holding account
+      cents: Long,
+  )
 
   /** Everything the per-day computation reads, loaded once per pass. */
   final private case class World(

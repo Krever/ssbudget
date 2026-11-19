@@ -239,6 +239,39 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
         _ <- tx("o5", "uid1", -30000, "PLN", periodStart.plusDays(6), internal = true, None)
       } yield ()).transact(xa)
 
+    "counts pay that was on hold as income when it arrives, and not as money from savings" in {
+      // A second account of the user, with a bank link and an IBAN. On day 4 it sends 2,000 PLN to the spending account: an internal transfer that
+      // names that IBAN. On day 5 a 100 PLN bill of the budgeted category is paid directly from it.
+      def seedOther(xa: Transactor[IO], role: String): IO[Unit] =
+        (for {
+          _ <- sql"""INSERT INTO accounts (id, name, currency, role, balance_cents, balance_source, balance_updated_at)
+                     VALUES ('other', 'Other', 'PLN', $role, 500000, 'bank', ${at(today)})""".update.run
+          _ <- sql"""INSERT INTO bank_account_links (id, connection_id, eb_account_uid, link_target_kind, link_target_id, iban)
+                     VALUES ('link-o', 'conn1', 'uid-o', 'account', 'other', 'PL99 0000 0000 HOLD')""".update.run
+          // The bank writes the IBAN of the other side with no spaces and in lower case: the match must not depend on the form.
+          _ <- sql"""INSERT INTO bank_transactions
+                       (id, connection_id, eb_account_uid, dedup_key, amount_cents, currency, status, booked_at, raw_json, imported_at,
+                        is_internal, counterparty_account)
+                     VALUES ('h1', 'conn1', 'uid1', 'h1', 200000, 'PLN', 'booked', ${at(periodStart.plusDays(4), 0)}, '{}', ${at(today)},
+                             1, 'pl9900000000hold')""".update.run
+          _ <- tx("h2", "uid-o", -10000, "PLN", periodStart.plusDays(5), internal = false, Some("cat1"))
+        } yield ()).transact(xa)
+
+      for {
+        asSavings <- withFixture((service, _, xa) => seedOther(xa, "savings") *> freeOn(service, periodStart.plusDays(5)))
+        onHold    <- withFixture((service, _, xa) => seedOther(xa, "holding") *> freeOn(service, periodStart.plusDays(5)))
+      } yield {
+        // From a savings account, both are money from savings: the transfer, and the bill that savings paid.
+        asSavings.unplannedIncomeCents shouldBe 0L
+        // From a holding account, the same two amounts are income that arrived. Nothing was taken from savings.
+        onHold.unplannedIncomeCents shouldBe 210000L
+        onHold.fromSavingsCents shouldBe asSavings.fromSavingsCents - 210000L
+        // The plan's own line leaves the money out in both cases, and the ledger of the spending account is the same.
+        onHold.planLineCents shouldBe asSavings.planLineCents
+        onHold.ledgerCents shouldBe asSavings.ledgerCents
+      }
+    }
+
     "counts a withdrawal from an investment account as money from savings, not as unplanned income" in {
       // The investment account has no bank ledger. Its withdrawal is seen only as an arrival on the spending account, in its transfer category.
       def seedInvestment(xa: Transactor[IO], linked: Boolean): IO[Unit] =

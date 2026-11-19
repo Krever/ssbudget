@@ -16,6 +16,9 @@ enum AccountRole {
   // Money whose value moves with a market (a crypto or stock portfolio). It is not spendable, and it is not savings: a change of its value is not
   // money that was saved or withdrawn, so it is reported apart from the savings figures.
   case Investment
+  // Money that is in an account of its own and is not for this period: pay that came early and waits for the next period to open. It is not
+  // spendable (so it is not in free money), and it is not savings: to put money on hold, or to take it from there, is not saving.
+  case Holding
 }
 
 object AccountRole {
@@ -23,18 +26,18 @@ object AccountRole {
     case Spending   => "spending"
     case Savings    => "savings"
     case Investment => "investment"
+    case Holding    => "holding"
   }
 
   def fromString(s: String): Either[String, AccountRole] = s match {
     case "spending"   => Right(Spending)
     case "savings"    => Right(Savings)
     case "investment" => Right(Investment)
+    case "holding"    => Right(Holding)
     case other        => Left(s"Unknown account role: $other")
   }
 
-  /** The roles that hold money outside the spendable balance. The app follows their balance change of a period; the user can move an account from one
-    * of them to the other.
-    */
+  /** The roles whose balance change of a period is a figure of the app: what was saved, and what an investment did. */
   val held: Set[AccountRole] = Set(Savings, Investment)
 
   given Codec[AccountRole] = EnumCodec(values, asString, "account role")

@@ -60,6 +60,8 @@ class PeriodServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
       _ <- account("spend", "spending", 140000, "bank")
       _ <- account("sav", "savings", 580000, "manual")
       _ <- account("inv", "investment", 950000, "manual")
+      // Pay that waits for the next period: 800 at the end of March, 700 now.
+      _ <- account("hold", "holding", 70000, "manual")
       _ <- sql"INSERT INTO periods (id, started_at, expected_end, ended_at) VALUES ('march', $marchStart, '2026-04-01', $aprilStart)".update.run
       _ <- sql"INSERT INTO periods (id, started_at, expected_end, ended_at) VALUES ('april', $aprilStart, '2026-05-01', NULL)".update.run
       _ <- sql"""INSERT INTO bank_connections (id, aspsp_name, aspsp_country, status, created_at)
@@ -75,6 +77,7 @@ class PeriodServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
       _ <- balance("b4", "sav", 560000, "2026-03-31T12:00:00Z")
       _ <- balance("b5", "inv", 1000000, "2026-03-01T08:00:00Z")
       _ <- balance("b6", "inv", 900000, "2026-04-01T08:00:00Z")
+      _ <- balance("b7", "hold", 80000, "2026-03-30T10:00:00Z")
       _ <- tx("pay", 800000, "2026-03-05", internal = false, None)
       _ <- tx("food", -200000, "2026-03-10", internal = false, Some("groc"))
       _ <- tx("from-broker", 30000, "2026-03-15", internal = false, Some("brk"))
@@ -113,6 +116,8 @@ class PeriodServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
           // Saved: the savings accounts grew by 600, and 300 was taken out of the investment.
           march.savedCents shouldBe 30000L
           march.endBalanceCents shouldBe Some(150000L)
+          // Money on hold is a balance of its own: it is not in the spending balance, and it is not in the savings figures.
+          march.holdingEndCents shouldBe Some(80000L)
         }
       }
     }

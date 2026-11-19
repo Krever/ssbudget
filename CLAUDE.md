@@ -17,7 +17,8 @@ Think "Google Sheets for personal budget" not "enterprise dashboard with cards e
 **Look** - Bootstrap, plus one stylesheet of our own: `frontend/styles/app.css`. It sets the scale (root size 14px, so all of
 Bootstrap follows), the number face and the surfaces. A change of the general look goes there, not into page code.
 
-**Accounts ledger** (Dashboard) - one table of three groups (spending, savings, investments). The heading row of a group carries
+**Accounts ledger** (Dashboard) - one table of groups by account type (spending, on hold, savings, investments; a group with no
+account is not shown). The heading row of a group carries
 its totals, so there are no "Total" rows. Every amount is in the primary currency so that a column reads down; the own currency of a
 foreign account is the small line under its balance. Spending accounts have no change figure. Spending accounts with a small balance fold into one line. The strip under the
 table holds what the period did: saved, market result, net worth.
@@ -87,6 +88,15 @@ statistic ran over — with the lookback window shaded, so the window can be pic
   budgeted bills paid from a savings account, and it counts from the day after the period opened. Plan the net amount: money that is
   moved to a savings account only to pay a budgeted bill from there is not saving
 
+**Holding accounts** (`AccountRole.Holding`, "On hold" in the UI) - pay that came early and waits for the next period
+- Not spendable, so not in free money; not savings, so not in "Saved"; part of the net worth. The Accounts card shows them as a group
+  of their own, with a balance and no change figure
+- To put money on hold, or to take it from there, is not saving: an internal transfer between a spending account and a holding account
+  is not in `fromSavings`. The other side of a transfer is known by its IBAN (`bank_account_links.iban` of an account with this role)
+- Money from hold is income when it arrives: it counts in `unplannedIncome`, so the plan's own line leaves it out. A budgeted bill that
+  is paid directly from a holding account counts the same way. On the day a period opens it is part of the baseline, as the paycheck is
+- An account of any type can change type on the Accounts page, except the account of a card group
+
 **Investment accounts** (`AccountRole.Investment`) - money at market value (a crypto or stock portfolio)
 - Not spendable, and NOT part of the savings figures: the balance change of such an account is mostly what the market did
 - The change of a period has two parts. **Moved** is deposits less withdrawals; it is saving, and it joins the savings figures
@@ -102,8 +112,7 @@ statistic ran over — with the lookback window shaded, so the window can be pic
   they count in "moved" with their own sign, and a payment is spend as on any other account
 - Known limit: money spent or received INSIDE the investment account that is in no ledger (a payout into it, card payments not
   yet imported) lands in the market result
-- An account changes role only between Savings and Investment (Accounts page). The `savings` term of the daily snapshots holds
-  savings accounts only
+- The `savings` term of the daily snapshots holds savings accounts only
 
 `savingsPeriodChange` (current balance − balance at period start) is reported on the Dashboard as information only; it is not part
 of the free-money calculation. The Periods page shows the same change for each period. Both read the balance at a period boundary
@@ -199,7 +208,7 @@ DailyBudgetSnapshot (table: daily_budget_snapshots):
 
 Account (spending accounts and savings buckets, unified):
   - id, name, currency
-  - role (spending|savings|investment)
+  - role (spending|holding|savings|investment)
   - balanceCents, balanceSource (manual|bank|card_group), balanceUpdatedAt
 
 Category / CategoryBudgetOverride:

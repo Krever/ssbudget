@@ -33,6 +33,21 @@ final case class TransactionSearchRow(
     bookedAt: Instant,
 )
 
+/** The net of one bank account on one day, in one category: a row of `dailyNetByAccountAndCategory`.
+  *
+  * @param withHolding
+  *   the other side of these entries is a holding account of the user (see `AccountRole.Holding`)
+  */
+final case class AccountMovement(
+    accountUid: String,
+    currency: Currency,
+    day: String, // 'YYYY-MM-DD'
+    category: Option[CategoryId],
+    internal: Boolean,
+    withHolding: Boolean,
+    cents: Long,
+)
+
 trait BankTransactionRepository {
 
   /** Insert a transaction, or if one with the same (ebAccountUid, dedupKey) already exists, refresh its bank-derived fields from the latest parse (so
@@ -131,7 +146,7 @@ trait BankTransactionRepository {
     * `(bank account uid, currency, day, category, internal, signed net)`. This is what tells money that the plan moved from money that reached it
     * from outside — see [[ssbudget.shared.model.DailyBudgetSnapshot.fromSavingsCents]].
     */
-  def dailyNetByAccountAndCategory(from: Instant, to: Instant): IO[List[(String, Currency, String, Option[CategoryId], Boolean, Long)]]
+  def dailyNetByAccountAndCategory(from: Instant, to: Instant): IO[List[AccountMovement]]
 
   /** Most recent booked_at for an account, for incremental imports (None when the account has no transactions yet). */
   def latestBookedAt(ebAccountUid: String): IO[Option[Instant]]
@@ -340,13 +355,23 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
       .to[List]
       .transact(xa)
 
-  override def dailyNetByAccountAndCategory(from: Instant, to: Instant): IO[List[(String, Currency, String, Option[CategoryId], Boolean, Long)]] =
-    sql"""SELECT eb_account_uid, currency, substr(booked_at, 1, 10) AS d, category_id, is_internal, SUM(amount_cents)
+  override def dailyNetByAccountAndCategory(from: Instant, to: Instant): IO[List[AccountMovement]] =
+    // `with_holding`: the other side of the entry is a holding account of the user. It is known by the IBAN of the counterparty, which is the
+    // IBAN of a bank account that is linked to an account with that role.
+    sql"""SELECT eb_account_uid, currency, substr(booked_at, 1, 10) AS d, category_id, is_internal,
+                 CASE WHEN counterparty_account IS NOT NULL AND REPLACE(UPPER(counterparty_account), ' ', '') IN (
+                        SELECT REPLACE(UPPER(l.iban), ' ', '')
+                        FROM bank_account_links l JOIN accounts a ON a.id = l.link_target_id
+                        WHERE l.link_target_kind = 'account' AND a.role = 'holding' AND l.iban IS NOT NULL)
+                      THEN 1 ELSE 0 END AS with_holding,
+                 SUM(amount_cents)
           FROM bank_transactions
           WHERE booked_at >= $from AND booked_at <= $to
-          GROUP BY eb_account_uid, currency, d, category_id, is_internal"""
-      .query[(String, Currency, String, Option[CategoryId], Int, Long)]
-      .map { case (uid, currency, day, category, internal, cents) => (uid, currency, day, category, internal != 0, cents) }
+          GROUP BY eb_account_uid, currency, d, category_id, is_internal, with_holding"""
+      .query[(String, Currency, String, Option[CategoryId], Int, Int, Long)]
+      .map { case (uid, currency, day, category, internal, withHolding, cents) =>
+        AccountMovement(uid, currency, day, category, internal != 0, withHolding != 0, cents)
+      }
       .to[List]
       .transact(xa)
 
