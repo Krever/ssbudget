@@ -25,10 +25,26 @@ class BalanceHistorySpec extends AnyFreeSpec with Matchers {
     BalanceHistory(Map(acc -> snaps), Map(acc -> ledger.map { case (d, c) => day(d) -> c }.toMap))
 
   "A balance at an instant" - {
-    "is the last record at or before it, and the ledger is not read" in {
-      val h = history(List(snap("2026-07-09T14:00:00Z", 500_00), snap("2026-07-20T09:00:00Z", 700_00)), "2026-07-15" -> 999_00)
+    "is the last record at or before it, as it is, when the record is of the same day or of the day before" in {
+      val h = history(List(snap("2026-07-09T14:00:00Z", 500_00), snap("2026-07-20T09:00:00Z", 700_00)), "2026-07-09" -> 999_00, "2026-07-10" -> 50_00)
+      // The entries of the record's own day are in the record already.
       h.asOf(acc, Instant.parse("2026-07-09T14:00:00Z")) shouldBe Some(500_00)
-      h.asOf(acc, Instant.parse("2026-07-19T23:00:00Z")) shouldBe Some(500_00)
+      // The day after: the entries of the instant's own day count as after it.
+      h.asOf(acc, Instant.parse("2026-07-10T08:00:00Z")) shouldBe Some(500_00)
+      h.asOf(acc, Instant.parse("2026-07-20T09:00:01Z")) shouldBe Some(700_00)
+    }
+
+    "is an older record carried forward through the ledger: the days after the record's day, to the day before the instant" in {
+      val h = history(
+        List(snap("2026-07-09T14:00:00Z", 500_00), snap("2026-07-20T09:00:00Z", 700_00)),
+        "2026-07-09" -> 999_00, // the record's own day: in the record already
+        "2026-07-12" -> -40_00,
+        "2026-07-15" -> 100_00,
+        "2026-07-19" -> 7_00,   // the instant's own day: after it
+        "2026-07-25" -> 300_00, // after the instant
+      )
+      h.asOf(acc, Instant.parse("2026-07-19T23:00:00Z")) shouldBe Some(500_00 - 40_00 + 100_00)
+      // On the day of the next record the record wins again: it was measured.
       h.asOf(acc, Instant.parse("2026-07-20T09:00:01Z")) shouldBe Some(700_00)
     }
 

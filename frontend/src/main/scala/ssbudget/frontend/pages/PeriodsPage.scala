@@ -1,7 +1,7 @@
 package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
-import ssbudget.frontend.components.{ChartKit, FreeMoneyChart, InlineEdit, Loading, LoadingState}
+import ssbudget.frontend.components.{ChartKit, FreeMoneyChart, InlineEdit, Loading, LoadingState, NetWorthChart}
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -48,6 +48,7 @@ object PeriodsPage {
       ),
       // Closing a period rewrites the history below it, so the same action reloads the retrospective.
       currentPeriodCard(asOf => dataService.startNewPeriod(asOf).map(_ => load())),
+      netWorthCard(summaries.signal),
       periodHistoryCard(summaries.signal, dataService.freeMoneyHistory, expanded),
     )
   }
@@ -163,6 +164,22 @@ object PeriodsPage {
 
   /** Columns: the disclosure caret + Start, Days, In, Out, Net, Saved, Market, End balance, Free money, and the status. */
   private val historyColumns = 10
+
+  /** What was owned at the end of each listed period (see [[NetWorthChart]]). It shows when the periods are loaded and there are two or more. */
+  private def netWorthCard(summaries: Signal[LoadingState[List[PeriodSummary]]]): HtmlElement =
+    div(
+      child.maybe <-- summaries.map {
+        case LoadingState.Loaded(list) if list.size >= 2 =>
+          Some(
+            div(
+              cls := "card mb-3",
+              div(cls := "card-header py-2", div("Net worth")),
+              div(cls := "card-body py-2", NetWorthChart(list)),
+            ),
+          )
+        case _                                           => None
+      },
+    )
 
   private def periodHistoryCard(
       summaries: Signal[LoadingState[List[PeriodSummary]]],

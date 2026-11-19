@@ -29,6 +29,7 @@ object ChartKit {
   // The series colours are from a palette that was checked for colour-blind separation and for contrast on a light surface.
   val seriesInk = "#2a78d6"
   val secondInk = "#eb6834"
+  val thirdInk  = "#7b5ea7"
   val mutedInk  = "#6c757d"
 
   private val gridInk = "#e9ecef"

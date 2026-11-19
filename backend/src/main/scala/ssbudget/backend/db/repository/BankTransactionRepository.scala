@@ -400,5 +400,8 @@ object BankTransactionRepositoryImpl {
     "SPŁATA NALEŻNOŚCI", // credit-card repayment received (lands on the card account)
     "AUTOOSZCZĘDZANIE",  // automatic savings sweep
     "AUTOSAVER",
+    // A currency exchange inside one bank (Revolut): the money leaves the account of one currency and arrives on the account of the other.
+    // Neither entry names a counterparty, so without this both count as income and as spend.
+    "Exchanged to ",
   )
 }

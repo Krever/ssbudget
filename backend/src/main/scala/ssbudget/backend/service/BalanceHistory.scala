@@ -9,10 +9,13 @@ import java.time.{Instant, LocalDate, ZoneOffset}
 
 /** The balance of an account at a past instant, also for the time before its first recorded balance.
   *
-  * A balance is recorded on each sync and on each manual edit. Where a record exists at or before the instant, that record is the answer: it was
-  * measured. Before the first record there is nothing measured, and the transaction ledger gives the answer: the first recorded balance, less all
-  * that the account moved between the instant and that record ([[BalanceHistory.carriedBack]]). On the recorded periods this gave the bank's own
-  * running balance to the cent.
+  * A balance is recorded on each sync and on each manual edit, so a record is some days old when nobody opened the app. The answer is thus the last
+  * record at or before the instant, carried FORWARD through the transaction ledger: plus all that the account moved on the days after the record's
+  * day and before the instant's day. A record of the same day or of the day before is the answer as it is.
+  *
+  * Before the first record there is nothing measured, and the ledger gives the answer the other way: the first recorded balance, less all that the
+  * account moved between the instant and that record ([[BalanceHistory.carriedBack]]). On the recorded periods this gave the bank's own running
+  * balance to the cent.
   *
   * A bank entry has a date and no time. The entries of the instant's own day count as AFTER the instant: the answer from the ledger is the balance at
   * the end of the day before. These instants are period boundaries, and a period opens when the paycheck arrives; what moves on that day (the rest of
@@ -29,10 +32,12 @@ final case class BalanceHistory(
   /** The balance at `at`, in the account's currency. None for an account with no recorded balance at all. */
   def asOf(account: AccountId, at: Instant): Option[Long] = {
     val history = snapshots.getOrElse(account, Nil)
+    val moves   = ledger.getOrElse(account, Map.empty)
+    val lastDay = BalanceHistory.dayOf(at).minusDays(1)
     history
       .findLast(!_.recordedAt.isAfter(at))
-      .map(_.amount)
-      .orElse(BalanceHistory.carriedBack(history, ledger.getOrElse(account, Map.empty), BalanceHistory.dayOf(at).minusDays(1)))
+      .map(record => BalanceHistory.carriedForward(record, moves, lastDay))
+      .orElse(BalanceHistory.carriedBack(history, moves, lastDay))
   }
 }
 
@@ -46,6 +51,15 @@ object BalanceHistory {
       daily    <- repos.bankTransactions.dailyNetByAccount(Instant.EPOCH, now)
       uidIndex <- accountUidIndex(repos)
     } yield BalanceHistory(snaps.view.mapValues(_.sortBy(_.recordedAt.toEpochMilli)).toMap, ledgerByAccount(daily, uidIndex))
+
+  /** The balance at the end of `day`, from a record of that day or of an earlier one: the record, plus what the account moved on the days after the
+    * record's day, to `day`. The record's own day counts as already in the record (a balance is read in the middle of a day, and a bank entry has a
+    * date and no time), which is the rule of [[BudgetSnapshotService]] for a past day too.
+    */
+  def carriedForward(record: BalanceSnapshot, ledger: Map[LocalDate, Long], day: LocalDate): Long = {
+    val recordDay = dayOf(record.recordedAt)
+    record.amount + ledger.collect { case (d, cents) if d.isAfter(recordDay) && !d.isAfter(day) => cents }.sum
+  }
 
   /** The balance at the end of `day`, for a `day` before the first record in `history` (oldest first).
     *
