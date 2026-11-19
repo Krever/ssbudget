@@ -101,35 +101,53 @@ object Loading {
       btnClass: String = "btn btn-primary btn-sm",
   ): ActionGroup = new ActionGroup(label, action, btnClass)
 
-  /** Button with confirm dialog before action */
+  /** A button for an action that cannot be undone. The first click only arms it: the label changes to `armedLabel` and the button turns red. A second
+    * click within a few seconds runs the action; with no second click the button goes back. There is no dialog, so the eye stays on the row, and one
+    * stray click does nothing.
+    */
   def confirmActionButton(
       label: String,
-      confirmMessage: String,
       action: () => Future[Unit],
-      btnClass: String = "btn btn-danger btn-sm",
+      btnClass: String = "btn btn-outline-danger btn-sm",
+      armedLabel: String = "Sure?",
+      hint: String = "",
   ): HtmlElement = {
-    val loading = Var(false)
+    val loading          = Var(false)
+    val armed            = Var(false)
+    var timer            = Option.empty[Int]
+    def disarm(): Unit   = {
+      timer.foreach(dom.window.clearTimeout)
+      timer = None
+      armed.set(false)
+    }
     button(
-      tpe := "button",
-      cls := btnClass,
+      tpe   := "button",
+      cls <-- armed.signal.map(a => if a then "btn btn-danger btn-sm" else btnClass),
+      title := hint,
       disabled <-- loading.signal,
-      child <-- loading.signal.map {
-        case true  => spinner
-        case false => span(label)
+      child <-- loading.signal.combineWith(armed.signal).map {
+        case (true, _)      => spinner
+        case (false, true)  => span(armedLabel)
+        case (false, false) => span(label)
       },
-      onClick --> { _ =>
-        if dom.window.confirm(confirmMessage) then {
+      // The row behind the button often has a click handler of its own (open, expand): the click is for the button only.
+      onClick.stopPropagation --> { _ =>
+        if armed.now() then {
+          disarm()
           loading.set(true)
           action().onComplete { result =>
             loading.set(false)
             result match {
-              case Failure(ex) =>
-                dom.console.error(s"Action failed: ${ex.getMessage}")
+              case Failure(ex) => dom.console.error(s"Action failed: ${ex.getMessage}")
               case Success(_)  => // success
             }
           }
+        } else {
+          armed.set(true)
+          timer = Some(dom.window.setTimeout(() => disarm(), 4000))
         }
       },
+      onUnmountCallback(_ => timer.foreach(dom.window.clearTimeout)),
     )
   }
 }

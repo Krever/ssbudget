@@ -12,7 +12,7 @@ import sttp.tapir.server.http4s.Http4sServerInterpreter
 import ssbudget.backend.analytics.AnalyticsService
 import ssbudget.backend.auth.SessionService
 import ssbudget.backend.banking.{BankingService, CategorizationService, ImportJobService, RuleChange, RuleEngineService, TransactionImportService}
-import ssbudget.backend.db.Repositories
+import ssbudget.backend.db.{Database, Repositories}
 import ssbudget.backend.db.repository.{TransactionFilter, TransactionSearchRow}
 import ssbudget.backend.search.TransactionSearch
 import ssbudget.backend.service.BudgetQueries.*
@@ -823,6 +823,41 @@ object Routes {
         JFiles.write(tempPath, bytes)
       }
 
+      // The schema versions in the uploaded file. A file with no Flyway history is not a database of this app. A file with a version that this
+      // build does not know comes from a newer build: this build cannot run on it, and the next start would fail.
+      val uploadedVersions: IO[Either[String, Set[String]]] = IO.blocking {
+        val connection = java.sql.DriverManager.getConnection(s"jdbc:sqlite:${tempPath.toAbsolutePath}")
+        try {
+          val rows     = connection.createStatement().executeQuery("SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL")
+          val versions = Iterator.continually(rows).takeWhile(_.next()).map(_.getString(1)).toSet
+          Right(versions): Either[String, Set[String]]
+        } catch {
+          case _: java.sql.SQLException => Left("This file is not an SSBudget database: it has no migration history.")
+        } finally connection.close()
+      }
+
+      def checked(known: Set[String]): IO[Either[String, Unit]] = uploadedVersions.map(_.flatMap { uploaded =>
+        val unknown = uploaded -- known
+        Either.cond(
+          unknown.isEmpty,
+          (),
+          s"This backup is from a newer version of the app (schema ${unknown.toList.sorted.mkString(", ")}). Update the app first.",
+        )
+      })
+
+      // One copy of the database as it was, next to it. A wrong file in the import box is then not the end of the data.
+      val keepCurrent = IO.blocking {
+        val before = Paths.get(dbPath + ".before-import")
+        JFiles.deleteIfExists(before)
+        val pooled = xa.kernel.getConnection
+        try {
+          pooled.unwrap(classOf[SQLiteConnection]).getDatabase.backup("main", before.toAbsolutePath.toString, null)
+        } finally {
+          pooled.close()
+        }
+        ()
+      }
+
       val restoreDb = IO.blocking {
         // Close the POOLED connection, not the unwrapped SQLite one. `unwrap` hands back the underlying delegate; closing that shuts the physical
         // connection without ever returning the pool's entry, so every import leaked the pool's only connection and left the app hanging on the next
@@ -835,15 +870,25 @@ object Routes {
         }
       }
 
+      // The upload, and the two side files that SQLite makes when the upload is opened for the check.
       val cleanupTemp = IO.blocking {
-        if JFiles.exists(tempPath) then {
-          JFiles.delete(tempPath)
-        }
+        List("", "-shm", "-wal").foreach(suffix => JFiles.deleteIfExists(Paths.get(tempPath.toString + suffix)))
       }
 
-      (writeTemp *> restoreDb *> cleanupTemp)
-        .as(Right("Database imported successfully. Please refresh the page to see the updated data."))
-        .handleError(e => Left(s"Import failed: ${e.getMessage}"))
+      val work = for {
+        _       <- writeTemp
+        known   <- Database.knownVersions(xa)
+        allowed <- checked(known)
+        result  <- allowed match {
+                     case Left(reason) => IO.pure(Left(reason))
+                     case Right(())    =>
+                       // An older backup gets the migrations it lacks at once, so the code never runs on an old schema.
+                       (keepCurrent *> restoreDb *> Database.migrate(xa))
+                         .as(Right("Database imported successfully. Please refresh the page to see the updated data."))
+                   }
+      } yield result
+
+      work.guarantee(cleanupTemp.handleError(_ => ())).handleError(e => Left(s"Import failed: ${e.getMessage}"))
     }
   }
 }

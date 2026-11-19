@@ -452,7 +452,10 @@ object DashboardPage {
                 tpe          := "number",
                 stepAttr     := "0.01",
                 defaultValue := InlineEdit.centsText(a.balanceCents),
-                onInput.mapToValue --> { v => v.toDoubleOption.foreach(d => editedBalances.update(_.updated(a.id, (d * 100).toLong))) },
+                // The one parsing rule of the app (exact decimals, comma or dot). Text that is not an amount leaves the account as it was.
+                onInput.mapToValue --> { v =>
+                  editedBalances.update(m => InlineEdit.parseCentsOpt(v).fold(m - a.id)(cents => m.updated(a.id, cents)))
+                },
               ),
               span(cls       := "input-group-text py-0", a.currency.code),
             ),
@@ -584,7 +587,8 @@ object DashboardPage {
     val futures  =
       accounts
         .filter(_.isManual)
-        .flatMap(acc => edited.get(acc.id).map(amount => dataService.updateAccountBalance(acc.id, amount)))
+        // Only a balance that was changed is written: each write adds a record to the balance history.
+        .flatMap(acc => edited.get(acc.id).filter(_ != acc.balanceCents).map(amount => dataService.updateAccountBalance(acc.id, amount)))
 
     Future.sequence(futures).map { _ =>
       isEditingBalances.set(false)

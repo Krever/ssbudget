@@ -131,6 +131,8 @@ class CurrencySettingsSpec extends E2ESpec {
     val rowsBefore = currenciesCard.findElements(By.cssSelector("tbody tr")).asScala.size
     val gbpRow     = currenciesCard.findElement(By.xpath(".//tr[contains(.,'GBP')]"))
     click(gbpRow, "Remove")
+    // A removal takes two clicks: the first one arms the button.
+    click(gbpRow, "Sure?")
 
     eventually(currenciesCard.findElements(By.cssSelector("tbody tr")).asScala.size shouldBe (rowsBefore - 1))
     textShouldDisappear(currenciesCard, "GBP")

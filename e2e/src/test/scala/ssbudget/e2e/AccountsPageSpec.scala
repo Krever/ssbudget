@@ -148,6 +148,8 @@ class AccountsPageSpec extends E2ESpec {
     val toDelete = savingsCard.findElement(By.xpath(".//tr[.//td[contains(text(),'To Delete')]]"))
     click(toDelete, "Edit")
     click(savingsCard.findElement(By.cssSelector("tbody tr.table-warning")), "Del")
+    // A delete takes two clicks: the first one arms the button.
+    click(savingsCard.findElement(By.cssSelector("tbody tr.table-warning")), "Sure?")
 
     eventually(rows(savingsCard).size shouldBe (countAfterAdd - 1))
     rowShouldNotExist(savingsCard, "To Delete")

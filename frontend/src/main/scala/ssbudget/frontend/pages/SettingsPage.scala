@@ -781,11 +781,7 @@ object SettingsPage {
               "Set Primary",
               onClick --> { _ => setPrimary(code) },
             ),
-            button(
-              cls := "btn btn-outline-danger btn-sm",
-              "Remove",
-              onClick --> { _ => disableCurrency(code) },
-            ),
+            Loading.confirmActionButton("Remove", () => Future.successful(disableCurrency(code))),
           )
         },
       ),

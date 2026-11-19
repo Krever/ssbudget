@@ -69,7 +69,8 @@ object AccountsPage {
           cls := "d-flex justify-content-between",
           div(
             span(cls := "fw-bold", "Total: "),
-            span(cls := "font-monospace fw-bold text-primary", MoneyFormatter.formatChild(dataService.totalBalance)),
+            // The total of THIS table: the spending accounts. Savings and investments have their own card.
+            span(cls := "font-monospace fw-bold text-primary", MoneyFormatter.formatChild(dataService.bankAccountBalance)),
           ),
           child <-- dataService.exchangeRates.combineWith(dataService.primaryCurrency).map { case (rates, primary) =>
             if rates.isEmpty then emptyNode
@@ -149,10 +150,10 @@ object AccountsPage {
           cls := "btn-group btn-group-sm",
           saveAction.btn,
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => editingAccountId.set(None) }),
-          Loading.actionButton(
+          Loading.confirmActionButton(
             "Del",
             () => dataService.deleteAccount(account.id).map(_ => editingAccountId.set(None)),
-            "btn btn-danger btn-sm",
+            hint = "Deletes the account and its balance history",
           ),
         ),
       ),
@@ -328,10 +329,10 @@ object AccountsPage {
           cls := "btn-group btn-group-sm",
           saveAction.btn,
           button(tpe := "button", cls := "btn btn-secondary btn-sm", "Cancel", onClick --> { _ => editingSavingsId.set(None) }),
-          Loading.actionButton(
+          Loading.confirmActionButton(
             "Del",
             () => dataService.deleteAccount(account.id).map(_ => editingSavingsId.set(None)),
-            "btn btn-danger btn-sm",
+            hint = "Deletes the account and its balance history",
           ),
         ),
       ),

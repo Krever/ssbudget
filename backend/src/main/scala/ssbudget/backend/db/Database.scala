@@ -66,6 +66,14 @@ object Database {
         case Left(e)      => IO.println(s"Could not enable SQLite WAL mode (expected for in-memory databases): ${e.getMessage}")
       }
 
+  /** Bring the database of `xa` up to the schema of this build. Run at start, and after a database file is restored over the live one. */
+  def migrate(xa: HikariTransactor[IO]): IO[Unit] = migrateWithDataSource(xa)
+
+  /** The schema versions that this build knows, as Flyway writes them into `flyway_schema_history.version`. */
+  def knownVersions(xa: HikariTransactor[IO]): IO[Set[String]] = IO.blocking {
+    Flyway.configure().dataSource(xa.kernel).load().info().all().toList.flatMap(i => Option(i.getVersion).map(_.getVersion)).toSet
+  }
+
   private def migrateWithDataSource(xa: HikariTransactor[IO]): IO[Unit] = IO.blocking {
     val hikariDataSource = xa.kernel
     Flyway

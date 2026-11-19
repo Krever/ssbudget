@@ -15,7 +15,25 @@ object AuthRoutes {
 
   // Cookie configuration
   private val cookieMaxAge = JDuration.ofDays(30).toSeconds
-  private val cookieSecure = sys.env.get("SSBUDGET_COOKIE_SECURE").exists(_.toLowerCase == "true")
+
+  /** The session cookie is `Secure` when the app is served over https, which is read from the origins it is configured for (`SSBUDGET_RP_ORIGINS`).
+    * So a deployment is safe with no extra setting, and local http still works. `SSBUDGET_COOKIE_SECURE=true|false` overrides the rule.
+    */
+  private[backend] def cookieSecureFor(setting: Option[String], origins: Option[String]): Boolean =
+    setting.map(_.trim.toLowerCase) match {
+      case Some("true")  => true
+      case Some("false") => false
+      case _             => origins.exists(_.split(",").map(_.trim).filter(_.nonEmpty).forall(_.startsWith("https://")))
+    }
+
+  private val cookieSecure = cookieSecureFor(sys.env.get("SSBUDGET_COOKIE_SECURE"), sys.env.get("SSBUDGET_RP_ORIGINS"))
+
+  // Lax: the browser does not send the cookie with a request that another site starts, except a plain link to the app. That stops a hostile
+  // page from posting to the API with the owner's session.
+  private val cookieSameSite = Some(sttp.model.headers.Cookie.SameSite.Lax)
+
+  /** One throttle for the password login of the instance: there is one owner, so there is one counter. */
+  private val loginThrottle = new ssbudget.backend.auth.LoginThrottle()
 
   private def sessionCookie(token: String): CookieValueWithMeta =
     CookieValueWithMeta.unsafeApply(
@@ -26,7 +44,7 @@ object AuthRoutes {
       path = Some("/"),
       secure = cookieSecure,
       httpOnly = true,
-      sameSite = None,
+      sameSite = cookieSameSite,
       otherDirectives = Map.empty,
     )
 
@@ -39,7 +57,7 @@ object AuthRoutes {
       path = Some("/"),
       secure = cookieSecure,
       httpOnly = true,
-      sameSite = None,
+      sameSite = cookieSameSite,
       otherDirectives = Map.empty,
     )
 
@@ -262,10 +280,16 @@ object AuthRoutes {
       sessionService: SessionService,
       req: LoginRequest,
   ): IO[Either[String, CookieValueWithMeta]] = {
-    checkPassword(authConfigRepo, passwordService, req.password).flatMap {
-      case Some(true)  => sessionService.createSession().map(s => Right(sessionCookie(s.token)))
-      case Some(false) => IO.pure(Left("Invalid password"))
-      case None        => IO.pure(Left("Authentication not configured"))
+    IO.realTimeInstant.flatMap { now =>
+      loginThrottle.lockedFor(now) match {
+        case Some(seconds) => IO.pure(Left(s"Too many failed attempts. Try again in $seconds s."))
+        case None          =>
+          checkPassword(authConfigRepo, passwordService, req.password).flatMap {
+            case Some(true)  => IO(loginThrottle.succeeded()) *> sessionService.createSession().map(s => Right(sessionCookie(s.token)))
+            case Some(false) => IO.realTimeInstant.map(loginThrottle.failed).as(Left("Invalid password"))
+            case None        => IO.pure(Left("Authentication not configured"))
+          }
+      }
     }
   }
 

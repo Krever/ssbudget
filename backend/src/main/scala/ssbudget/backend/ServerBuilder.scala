@@ -49,6 +49,16 @@ object ServerBuilder {
     .map(_.split(",").toSet)
     .getOrElse(Set("http://localhost:3000", "http://localhost:8080"))
 
+  /** On a deployment that is served over https, tell the browser to use https only from now on. Without it, the first request of a visit can go out
+    * over plain http before the redirect.
+    */
+  private def withTransportSecurity(app: org.http4s.HttpApp[IO]): org.http4s.HttpApp[IO] =
+    if defaultRpOrigins.forall(_.trim.startsWith("https://")) then {
+      app.map(_.putHeaders(org.http4s.Header.Raw(org.typelevel.ci.CIString("Strict-Transport-Security"), "max-age=31536000")))
+    } else {
+      app
+    }
+
   // Static files directory (for production deployment)
   private val staticDir = sys.env.get("SSBUDGET_STATIC_DIR")
 
@@ -91,7 +101,7 @@ object ServerBuilder {
         val currencyService  = new CurrencyService(repos, sttpBackend)
         val bankingService   = new BankingService(repos, ebClientOpt)
         val importService    = new TransactionImportService(repos, ebClientOpt, ruleEngine)
-        val importJobService = new ImportJobService(repos, supervisor, bankingService, importService)
+        val importJobService = new ImportJobService(repos, supervisor, bankingService, importService, currencyService.refreshRates().map(_.void))
 
         val mcpTokens      = new McpTokenService(repos.mcpTokens)
         val categorization = new CategorizationService(repos, ruleEngine)
@@ -141,7 +151,7 @@ object ServerBuilder {
           .default[IO]
           .withHost(host"0.0.0.0")
           .withPort(port)
-          .withHttpApp(allRoutes.orNotFound)
+          .withHttpApp(withTransportSecurity(allRoutes.orNotFound))
           .build
       }
     } yield server

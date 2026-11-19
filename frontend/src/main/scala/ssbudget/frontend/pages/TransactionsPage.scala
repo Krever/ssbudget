@@ -3,7 +3,7 @@ package ssbudget.frontend.pages
 import com.raquo.laminar.api.L.*
 import io.circe.syntax.*
 import org.scalajs.dom
-import ssbudget.frontend.components.{CategoryCombobox, InlineEdit, MonthlyHistoryChart, RuleModal}
+import ssbudget.frontend.components.{CategoryCombobox, InlineEdit, Loading, MonthlyHistoryChart, RuleModal}
 import ssbudget.frontend.services.ApiClient
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -36,6 +36,7 @@ import ssbudget.shared.model.{
 import ssbudget.shared.rules.RuleMatcher
 
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
 import scala.scalajs.js
 import scala.util.{Failure, Success}
 
@@ -381,12 +382,13 @@ object TransactionsPage {
         label(cls := "form-label small mb-1", "Month"),
         select(
           cls     := "form-select form-select-sm",
-          value <-- monthFilter.signal,
           onChange.mapToValue --> monthFilter.writer,
           option(value := MonthFilter.All, "All months"),
           option(value := MonthFilter.CurrentPeriod, "Current period"),
           option(value := MonthFilter.PreviousPeriod, "Previous period"),
           children <-- months.map(_.map(m => option(value := m, m))),
+          // After the options, and again when they arrive: a select drops a value that has no option yet (see CLAUDE.md).
+          value <-- monthFilter.signal.combineWith(months).map { case (selected, _) => selected },
         ),
       ),
       div(
@@ -983,12 +985,12 @@ object TransactionsPage {
         spendCell(c, summary.map(_.currentPeriodSpentCents), money, MonthFilter.CurrentPeriod, ""),
         td(
           cls  := "text-end",
-          button(
-            tpe       := "button",
-            cls       := "btn-close",
-            styleAttr := "font-size: 0.6rem",
-            title     := "Delete category",
-            onClick.stopPropagation --> { _ => deleteCategory(c.id) },
+          Loading.confirmActionButton(
+            "×",
+            () => Future.successful(deleteCategory(c.id)),
+            btnClass = "btn btn-link btn-sm p-0 px-1 text-muted text-decoration-none",
+            armedLabel = "Delete?",
+            hint = "Delete category: clears it from all its transactions and deletes its rules",
           ),
         ),
       )
@@ -1215,12 +1217,12 @@ object TransactionsPage {
                     div(
                       cls    := "ms-auto d-flex gap-1",
                       button(
-                        tpe      := "button",
-                        cls      := "btn btn-sm btn-outline-secondary",
+                        tpe := "button",
+                        cls := "btn btn-sm btn-outline-secondary",
                         "Edit",
                         onClick --> { _ => onEdit(RuleModal.fromRule(rule)) },
                       ),
-                      button(tpe := "button", cls := "btn btn-sm btn-outline-danger", "Delete", onClick --> { _ => delete(rule.id) }),
+                      Loading.confirmActionButton("Delete", () => Future.successful(delete(rule.id))),
                     ),
                   )
                 }

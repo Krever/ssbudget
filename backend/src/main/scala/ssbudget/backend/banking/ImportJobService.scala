@@ -23,6 +23,8 @@ class ImportJobService(
     supervisor: Supervisor[IO],
     bankingService: BankingService,
     importService: TransactionImportService,
+    // Fetches fresh exchange rates. A sync runs it first, so that the balances it brings are converted at the rates of the same day.
+    refreshRates: IO[Either[String, Unit]] = IO.pure(Right(())),
 ) {
 
   /** Accumulates per-account items + connection warnings for one job, persisting on every change so the polling UI sees items/counts fill in. */
@@ -154,6 +156,8 @@ class ImportJobService(
       now             <- IO.realTimeInstant
       // Skip connections still pending authorization. A lapsed consent fails every call: say once what to do instead of an error per account.
       (lapsed, usable) = conns.filter(_.sessionId.isDefined).partition(_.health(now) == ConnectionHealth.NeedsRenewal)
+      // Rates that fail to load must not stop the sync: the figures then stay at the rates of the last good fetch.
+      _               <- refreshRates.handleError(t => Left(t.getMessage)).flatMap(_.left.toOption.traverse_(e => reporter.warn("Exchange rates", e)))
       _               <- lapsed.traverse_(c => reporter.warn(c.aspspName, "bank access has ended — renew it from the banner to sync again"))
       _               <- usable.traverse_ { conn =>
                            val bank = conn.aspspName

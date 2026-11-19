@@ -2,7 +2,7 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
-import ssbudget.frontend.components.InlineEdit
+import ssbudget.frontend.components.{InlineEdit, Loading}
 import ssbudget.frontend.services.{ApiClient, BankRenewal}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.shared.api.{
@@ -38,6 +38,7 @@ import ssbudget.shared.model.{
 }
 
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
 import java.time.Instant
 import scala.util.{Failure, Success}
 
@@ -653,7 +654,7 @@ object BankingPage {
           else emptyNode,
         ),
       ),
-      td(cls := "text-end", button(cls := "btn btn-outline-danger btn-sm", "Delete", onClick --> { _ => deleteGroup(g.id) })),
+      td(cls := "text-end", Loading.confirmActionButton("Delete", () => Future.successful(deleteGroup(g.id)))),
     )
   }
 
@@ -714,7 +715,7 @@ object BankingPage {
             div(
               cls       := "btn-group btn-group-sm",
               button(
-                cls      := "btn btn-outline-primary",
+                cls := "btn btn-outline-primary",
                 disabled <-- syncingVar.signal.map(_.contains(conn.id.value)),
                 child <-- syncingVar.signal.map(_.contains(conn.id.value)).map { syncing =>
                   if syncing then span(span(cls := "spinner-border spinner-border-sm me-1"), "Syncing...")
@@ -729,7 +730,12 @@ object BankingPage {
                 onClick --> { _ => renew(conn) },
               )
               else emptyNode,
-              button(cls := "btn btn-outline-danger", "Disconnect", onClick --> { _ => disconnect(conn.id) }),
+              Loading.confirmActionButton(
+                "Disconnect",
+                () => Future.successful(disconnect(conn.id)),
+                btnClass = "btn btn-outline-danger",
+                hint = "Removes the connection and the transactions that came through it",
+              ),
             ),
             div(
               cls       := "input-group input-group-sm",
