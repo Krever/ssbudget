@@ -107,7 +107,7 @@ object AuthTestServers {
     frontendProcess = Some(pb.run(logger))
   }
 
-  private def waitForServer(url: String, name: String, maxAttempts: Int = 60): Unit = {
+  private def waitForServer(url: String, name: String, maxAttempts: Int = 180): Unit = {
     var attempts = 0
     var ready    = false
 

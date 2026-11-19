@@ -1,6 +1,6 @@
 package ssbudget.e2e
 
-import org.openqa.selenium.By
+import org.openqa.selenium.{By, JavascriptExecutor}
 import org.openqa.selenium.chrome.ChromeOptions
 
 import java.io.File
@@ -17,7 +17,7 @@ class DatabaseSpec extends E2ESpec {
 
     // Configure Chrome to download to our temp directory
     val options = new ChromeOptions()
-    options.addArguments("--headless", "--no-sandbox", "--disable-dev-shm-usage")
+    options.addArguments("--headless", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=1400,1000")
     options.setExperimentalOption(
       "prefs",
       java.util.Map.of(
@@ -56,6 +56,8 @@ class DatabaseSpec extends E2ESpec {
 
     val dataCard   = findCardByH5("Data")
     val exportLink = dataCard.findElement(By.xpath(".//a[contains(.,'Export Database')]"))
+    // The link is low on a long page. Bring it to the middle of the window first: at the edge, another element can take the click.
+    driver.asInstanceOf[JavascriptExecutor].executeScript("arguments[0].scrollIntoView({block: 'center'})", exportLink)
     exportLink.click()
 
     // Wait for download to complete (check for .db file)
@@ -91,6 +93,8 @@ class DatabaseSpec extends E2ESpec {
 
     val dataCard   = findCardByH5("Data")
     val exportLink = dataCard.findElement(By.xpath(".//a[contains(.,'Export Database')]"))
+    // The link is low on a long page. Bring it to the middle of the window first: at the edge, another element can take the click.
+    driver.asInstanceOf[JavascriptExecutor].executeScript("arguments[0].scrollIntoView({block: 'center'})", exportLink)
     exportLink.click()
 
     // Wait for download

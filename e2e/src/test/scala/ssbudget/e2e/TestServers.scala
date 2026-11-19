@@ -76,7 +76,10 @@ object TestServers {
       ServerBuilder.build(repos, xa, port, testMode = true, dbPath = dbPathStr).useForever
     }
 
-    backendFiber = Some(serverIO.start.unsafeRunSync())
+    // A backend that fails to start must say why. Without this the only sign is the wait below, which ends in "failed to start" after minutes.
+    val reported = serverIO.onError(e => IO.blocking { println(s"[E2E] Backend failed: $e"); e.printStackTrace() })
+
+    backendFiber = Some(reported.start.unsafeRunSync())
   }
 
   private def startFrontend(): Unit = {
@@ -119,7 +122,7 @@ object TestServers {
     frontendProcess = Some(pb.run(logger))
   }
 
-  private def waitForServer(url: String, name: String, maxAttempts: Int = 60): Unit = {
+  private def waitForServer(url: String, name: String, maxAttempts: Int = 180): Unit = {
     var attempts = 0
     var ready    = false
 

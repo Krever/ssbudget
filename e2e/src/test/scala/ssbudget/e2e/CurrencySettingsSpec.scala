@@ -128,11 +128,15 @@ class CurrencySettingsSpec extends E2ESpec {
       click(currenciesCard, "Add Currency")
     }
 
+    eventually(currenciesCard.getText should include("GBP"))
     val rowsBefore = currenciesCard.findElements(By.cssSelector("tbody tr")).asScala.size
-    val gbpRow     = currenciesCard.findElement(By.xpath(".//tr[contains(.,'GBP')]"))
-    click(gbpRow, "Remove")
-    // A removal takes two clicks: the first one arms the button.
-    click(gbpRow, "Sure?")
+    // A removal takes two clicks: the first one arms the button. The table is drawn again when the list of currencies arrives, and a new row
+    // has a button that is not armed. So the row is found again on each attempt, and the two clicks are one step.
+    eventually {
+      val gbpRow = currenciesCard.findElement(By.xpath(".//tr[contains(.,'GBP')]"))
+      click(gbpRow, "Remove")
+      click(gbpRow, "Sure?")
+    }
 
     eventually(currenciesCard.findElements(By.cssSelector("tbody tr")).asScala.size shouldBe (rowsBefore - 1))
     textShouldDisappear(currenciesCard, "GBP")

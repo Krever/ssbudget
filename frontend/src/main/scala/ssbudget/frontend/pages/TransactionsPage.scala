@@ -810,23 +810,26 @@ object TransactionsPage {
 
     /** How that figure is drawn down over the period — or Off, for a category that isn't a budget at all. A third kind of entry makes the category
       * the transfers to and from an investment account (see `Category.transferAccount`): that is not a budget type, but it excludes one, so it is
-      * chosen in the same place. The dropdown is made again when the list of investment accounts arrives.
+      * chosen in the same place. Those entries arrive with the list of investment accounts, as children of the same select.
       */
-    def typeSelect(id: CategoryId, cat: Signal[Category]): HtmlElement =
-      span(
-        child <-- investments.signal.map { accounts =>
-          enumSelect(
-            (offBudgetType -> "Off") :: CategoryBudgetType.values.toList.map(t => CategoryBudgetType.asString(t) -> t.toString) :::
-              accounts.map(a => (transferPrefix + a.id.value) -> s"Transfer ↔ ${a.name}"),
-            cat.map(c => c.transferAccount.fold(c.budgetType.fold(offBudgetType)(CategoryBudgetType.asString))(transferPrefix + _.value)),
-            v =>
-              editCategory(id) { c =>
-                if v.startsWith(transferPrefix) then c.copy(budgetType = None, transferAccount = Some(AccountId(v.drop(transferPrefix.length))))
-                else c.copy(budgetType = if v == offBudgetType then None else CategoryBudgetType.fromString(v).toOption, transferAccount = None)
-              },
-          )
+    def typeSelect(id: CategoryId, cat: Signal[Category]): HtmlElement = {
+      val current: Signal[String]                     =
+        cat.map(c => c.transferAccount.fold(c.budgetType.fold(offBudgetType)(CategoryBudgetType.asString))(transferPrefix + _.value))
+      // The current entry is marked on the option, not with `value <--` on the select: see CLAUDE.md on selects with late options.
+      def entry(v: String, text: String): HtmlElement = option(value := v, selected <-- current.map(_ == v), text)
+      select(
+        cls := "form-select form-select-sm w-auto",
+        onChange.mapToValue --> { v =>
+          editCategory(id) { c =>
+            if v.startsWith(transferPrefix) then c.copy(budgetType = None, transferAccount = Some(AccountId(v.drop(transferPrefix.length))))
+            else c.copy(budgetType = if v == offBudgetType then None else CategoryBudgetType.fromString(v).toOption, transferAccount = None)
+          }
         },
+        entry(offBudgetType, "Off"),
+        CategoryBudgetType.values.toList.map(t => entry(CategoryBudgetType.asString(t), t.toString)),
+        children <-- investments.signal.map(_.map(a => entry(transferPrefix + a.id.value, s"Transfer ↔ ${a.name}"))),
       )
+    }
 
     /** The text a field shows for a stored value. It is written again only when the STORED value changes, so a save of some other field does not
       * overwrite what is being typed here.
