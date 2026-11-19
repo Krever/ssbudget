@@ -1,9 +1,9 @@
 package ssbudget.frontend
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 import ssbudget.frontend.auth.AuthState
-import ssbudget.frontend.components.{Layout, Loading, LoadingState}
+import ssbudget.frontend.components.{Layout, LoadingState}
 import ssbudget.frontend.pages.{LoginPage, SetupPage}
 import ssbudget.frontend.services.{AnalyticsState, ApiClient, DataService}
 import ssbudget.frontend.util.MoneyFormatter
@@ -20,9 +20,9 @@ object Main {
     val container = dom.document.getElementById("app")
 
     // First check auth state
-    AuthState.initialize(apiClient)
+    val _ = AuthState.initialize(apiClient)
 
-    render(container, appRoot())
+    val _ = render(container, appRoot())
   }
 
   private def appRoot(): HtmlElement = {
@@ -84,7 +84,7 @@ object Main {
           cls   := "btn btn-primary mt-3",
           "Retry",
           onClick --> { _ =>
-            AuthState.initialize(apiClient)
+            val _ = AuthState.initialize(apiClient)
           },
         ),
       ),

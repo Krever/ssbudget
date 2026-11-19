@@ -13,8 +13,8 @@ object MoneyFormatter {
     // Subscribe to updates (these subscriptions live for the app lifetime)
     import com.raquo.airstream.ownership.OneTimeOwner
     given owner: OneTimeOwner = new OneTimeOwner(() => ())
-    primaryCurrency.foreach(primaryCurrencyVar.set)
-    exchangeRates.foreach(exchangeRatesVar.set)
+    val _                     = primaryCurrency.foreach(primaryCurrencyVar.set)
+    val _                     = exchangeRates.foreach(exchangeRatesVar.set)
   }
 
   /** Current primary currency (reactive) */

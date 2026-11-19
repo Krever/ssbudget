@@ -7,7 +7,7 @@ import ssbudget.backend.ServerBuilder
 import ssbudget.backend.db.{Database, Repositories}
 
 import java.io.File
-import java.net.{HttpURLConnection, ServerSocket, URL}
+import java.net.{HttpURLConnection, ServerSocket}
 import java.nio.file.{Files, Path}
 import scala.sys.process.{Process, ProcessLogger}
 import scala.util.{Try, Using}
@@ -113,7 +113,7 @@ object AuthTestServers {
 
     while !ready && attempts < maxAttempts do {
       val result = Try {
-        val connection = new URL(url).openConnection().asInstanceOf[HttpURLConnection]
+        val connection = java.net.URI.create(url).toURL.openConnection().asInstanceOf[HttpURLConnection]
         connection.setConnectTimeout(2000)
         connection.setReadTimeout(2000)
         connection.setRequestMethod("GET")

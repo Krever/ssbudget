@@ -263,7 +263,6 @@ object WebAuthnService {
     }
 
     private def toRegistrationJson(response: PasskeyRegistrationResponse): String = {
-      import io.circe.syntax.*
       import io.circe.{Json, JsonObject}
 
       // The library expects a specific JSON format with clientExtensionResults
@@ -284,7 +283,6 @@ object WebAuthnService {
     }
 
     private def toAssertionJson(response: PasskeyAuthenticationResponse): String = {
-      import io.circe.syntax.*
       import io.circe.{Json, JsonObject}
 
       val responseObj = JsonObject(

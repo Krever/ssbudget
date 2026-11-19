@@ -54,7 +54,7 @@ class CategoryBudgetMethodSpec extends E2ESpec {
     */
   private def retype(name: String, text: String): Unit = eventually {
     val f        = field(name)
-    val existing = Option(f.getAttribute("value")).getOrElse("")
+    val existing = Option(f.getDomProperty("value")).getOrElse("")
     f.sendKeys(Keys.END.toString + Keys.BACK_SPACE.toString * existing.length + text + Keys.ENTER)
   }
 
@@ -108,14 +108,14 @@ class CategoryBudgetMethodSpec extends E2ESpec {
     choose("Method", "fixed")
 
     // Switching to Fixed seeds the amount with the statistic it replaces rather than zeroing it, and locks the window it no longer reads.
-    eventually(field("Amount").getAttribute("value") shouldBe "400")
+    eventually(field("Amount").getDomProperty("value") shouldBe "400")
     eventually(field("Months").isEnabled shouldBe false)
 
     retype("Amount", "1234")
 
     openSettings()
     eventually(new Select(field("Method")).getFirstSelectedOption.getText shouldBe "Fixed")
-    eventually(field("Amount").getAttribute("value") shouldBe "1234")
+    eventually(field("Amount").getDomProperty("value") shouldBe "1234")
     expectedShouldBe("1,234.00")
   }
 
@@ -143,14 +143,14 @@ class CategoryBudgetMethodSpec extends E2ESpec {
     eventually(field("Amount").isEnabled shouldBe true)
     eventually {
       val f = field("Amount")
-      f.sendKeys(Keys.END.toString + Keys.BACK_SPACE.toString * f.getAttribute("value").length + "4321")
+      f.sendKeys(Keys.END.toString + Keys.BACK_SPACE.toString * f.getDomProperty("value").length + "4321")
     }
     def save = settings.findElement(By.xpath(".//button[text()='Save']"))
     eventually(save.isEnabled shouldBe true) // a change that is not saved yet
 
     // The reload lands: the row shows the fixed figure, and the field still holds what was typed.
     expectedShouldBe("1,234.00")
-    field("Amount").getAttribute("value") shouldBe "4321"
+    field("Amount").getDomProperty("value") shouldBe "4321"
 
     save.click()
     expectedShouldBe("4,321.00")
@@ -158,7 +158,7 @@ class CategoryBudgetMethodSpec extends E2ESpec {
 
     // And it is stored, not just shown.
     openSettings()
-    eventually(field("Amount").getAttribute("value") shouldBe "4321")
+    eventually(field("Amount").getDomProperty("value") shouldBe "4321")
     expectedShouldBe("4,321.00")
   }
 
@@ -171,13 +171,13 @@ class CategoryBudgetMethodSpec extends E2ESpec {
     retype("Months", "")
 
     def dots     = settings.findElements(By.cssSelector("svg [data-point]")).asScala.toList
-    def included = dots.filter(_.getAttribute("opacity") == "1")
+    def included = dots.filter(_.getDomAttribute("opacity") == "1")
 
     // Three months of history, all of them counted while the window is open.
     eventually(dots.size shouldBe 3)
     eventually(included.size shouldBe 3)
     // Each dot carries its own readout rather than labelling every point on the chart.
-    eventually(dots.last.findElement(By.cssSelector("title")).getAttribute("textContent") should endWith("200.00"))
+    eventually(dots.last.findElement(By.cssSelector("title")).getDomProperty("textContent") should endWith("200.00"))
 
     // Narrowing the window dims what it drops, without losing it from the chart.
     retype("Months", "2")

@@ -36,7 +36,7 @@ class RuleInspectionSpec extends E2ESpec {
     val row   = txTable.findElement(By.xpath(".//tr[.//div[contains(text(),'Zabka E2E')]]"))
     val badge = row.findElement(ruleBadge)
 
-    badge.getAttribute("title") should include("Zabka rule")
+    badge.getDomAttribute("title") should include("Zabka rule")
   }
 
   it should "open that rule for inspection when the badge is clicked" in {
@@ -51,7 +51,7 @@ class RuleInspectionSpec extends E2ESpec {
     textShouldAppear(modal, "Edit rule")
 
     // Its name and the condition it matches on are both loaded (criteria render as editable inputs, so they're values not text).
-    val values = modal.findElements(By.cssSelector("input")).asScala.toList.map(_.getAttribute("value"))
+    val values = modal.findElements(By.cssSelector("input")).asScala.toList.map(_.getDomProperty("value"))
     values should contain("Fuel rule")
     values should contain("Orlen E2E")
 

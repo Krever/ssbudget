@@ -71,6 +71,6 @@ object BankRenewal {
 
   // Storage can be missing or blocked (private window); a run then just stops after the first bank.
   private def read(key: String): Option[String]       = Try(Option(dom.window.sessionStorage.getItem(key))).toOption.flatten
-  private def write(key: String, value: String): Unit = Try(dom.window.sessionStorage.setItem(key, value))
-  private def remove(key: String): Unit               = Try(dom.window.sessionStorage.removeItem(key))
+  private def write(key: String, value: String): Unit = Try(dom.window.sessionStorage.setItem(key, value)).getOrElse(())
+  private def remove(key: String): Unit               = Try(dom.window.sessionStorage.removeItem(key)).getOrElse(())
 }

@@ -20,7 +20,7 @@ object Main extends IOApp.Simple {
   private def ensureDbDirectoryExists: IO[Unit] = IO.blocking {
     val path = Paths.get(dbPath).getParent
     if path != null && !Files.exists(path) then {
-      Files.createDirectories(path)
+      val _ = Files.createDirectories(path)
     }
   }
 

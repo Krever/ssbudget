@@ -3,7 +3,7 @@ package ssbudget.backend
 import cats.effect.{IO, Resource}
 import cats.effect.std.Supervisor
 import cats.implicits.*
-import com.comcast.ip4s.{Host, Port, host}
+import com.comcast.ip4s.{Port, host}
 import doobie.hikari.HikariTransactor
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.server.Server

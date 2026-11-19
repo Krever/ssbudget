@@ -9,7 +9,7 @@ import scala.jdk.CollectionConverters.*
 
 class DatabaseSpec extends E2ESpec {
 
-  private var downloadDir: Path = _
+  private var downloadDir: Path = scala.compiletime.uninitialized
 
   override def beforeEach(): Unit = {
     // Create temp download directory

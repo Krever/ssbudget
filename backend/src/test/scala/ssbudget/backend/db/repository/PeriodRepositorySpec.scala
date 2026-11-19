@@ -1,6 +1,5 @@
 package ssbudget.backend.db.repository
 
-import cats.effect.IO
 import ssbudget.shared.model.*
 
 import java.time.{Instant, LocalDate}

@@ -41,7 +41,7 @@ class PeriodsPageSpec extends E2ESpec {
 
     // Now should have an active period with progress bar
     val progressBar = card.findElement(By.cssSelector(".progress-bar"))
-    progressBar.getAttribute("style") should include("width:")
+    progressBar.getDomAttribute("style") should include("width:")
   }
 
   it should "let the expected end be corrected, and count the days left from it" in {
@@ -56,7 +56,7 @@ class PeriodsPageSpec extends E2ESpec {
 
     // And it survives a reload, so the correction is stored on the period rather than held in the page.
     openPeriods()
-    eventually(expectedEndInput().getAttribute("value") shouldBe newEnd.toString)
+    eventually(expectedEndInput().getDomProperty("value") shouldBe newEnd.toString)
   }
 
   it should "show progress bar for current period" in {
@@ -65,7 +65,7 @@ class PeriodsPageSpec extends E2ESpec {
 
     val card        = findCardByDiv("Current Period")
     val progressBar = card.findElement(By.cssSelector(".progress-bar"))
-    progressBar.getAttribute("style") should include("width:")
+    progressBar.getDomAttribute("style") should include("width:")
   }
 
   it should "show at least one period in history when period exists" in {

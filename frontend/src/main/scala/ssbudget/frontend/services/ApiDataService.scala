@@ -33,7 +33,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   /** For an edit that changes the plan: when it is done, load the history again, and do not make the caller wait for that. */
   private def replanned(edit: Future[Unit]): Future[Unit] =
     edit.map { _ =>
-      refreshFreeMoneyHistory()
+      val _ = refreshFreeMoneyHistory()
       ()
     }
 

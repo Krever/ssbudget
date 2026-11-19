@@ -8,7 +8,7 @@ import ssbudget.frontend.components.Loading
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, WebAuthnFacade}
 import ssbudget.shared.api.{ChangePasswordRequest, CreateMcpTokenRequest, CreatedMcpToken, IdentityProof, McpTokenInfo, PasskeyInfo}
-import ssbudget.shared.model.{Currency, CurrencySetting}
+import ssbudget.shared.model.CurrencySetting
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
@@ -230,7 +230,7 @@ object SettingsPage {
             cls := "btn btn-outline-danger",
             "Logout",
             onClick --> { _ =>
-              AuthState.logout(apiClient)
+              val _ = AuthState.logout(apiClient)
             },
           ),
         ),

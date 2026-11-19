@@ -2,7 +2,6 @@ package ssbudget.backend.db.repository
 
 import cats.effect.IO
 import cats.effect.testing.scalatest.AsyncIOSpec
-import cats.effect.unsafe.implicits.global
 import doobie.Transactor
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.freespec.AsyncFreeSpec

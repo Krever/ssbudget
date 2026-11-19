@@ -2,8 +2,6 @@ package ssbudget.e2e
 
 import org.openqa.selenium.{By, Keys, WebElement}
 
-import scala.jdk.CollectionConverters.*
-
 /** The transaction search box: what it matches, how it reports approximate matches, and the filter widening that makes it usable from the page's
   * triage-first default view.
   */
@@ -116,7 +114,7 @@ class TransactionSearchSpec extends E2ESpec {
     driver.navigate().refresh()
     waitForPage("Transactions")
 
-    searchBox.getAttribute("value") shouldBe "pitula"
+    searchBox.getDomProperty("value") shouldBe "pitula"
     textShouldAppear(txTable, "WOJCIECH PITUŁA")
   }
 

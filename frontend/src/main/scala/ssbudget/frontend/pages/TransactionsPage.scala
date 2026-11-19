@@ -302,9 +302,9 @@ object TransactionsPage {
     val a    = dom.document.createElement("a").asInstanceOf[dom.html.Anchor]
     a.setAttribute("href", url)
     a.setAttribute("download", filename)
-    dom.document.body.appendChild(a)
+    val _    = dom.document.body.appendChild(a)
     a.click()
-    dom.document.body.removeChild(a)
+    val _    = dom.document.body.removeChild(a)
     dom.URL.revokeObjectURL(url)
   }
 

@@ -72,7 +72,7 @@ object TriageCard {
                 selectedId = Val(None),
                 onSelect = _.foreach(id => setCategory(t, id)), // no clear button on an uncategorized row, so there is no None to handle
                 apiClient = apiClient,
-                onCreated = () => { dataService.initialize(); () },
+                onCreated = () => { val _ = dataService.initialize(); () },
                 placeholderText = "Category…",
               ),
             ),
@@ -124,8 +124,8 @@ object TriageCard {
         ruleModalState,
         cats,
         apiClient,
-        () => { dataService.initialize(); loadTransactions() },
-        () => { dataService.initialize(); () },
+        () => { val _ = dataService.initialize(); loadTransactions() },
+        () => { val _ = dataService.initialize(); () },
       ),
     )
   }

@@ -2,7 +2,7 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
-import ssbudget.frontend.components.{Badges, ChartKit, FreeMoneyChart, InlineEdit, Loading, PlanCard, TriageCard}
+import ssbudget.frontend.components.{ChartKit, FreeMoneyChart, InlineEdit, Loading, PlanCard, TriageCard}
 import ssbudget.frontend.services.{ApiClient, DataService}
 import ssbudget.frontend.util.{Formatting, MoneyFormatter}
 import ssbudget.frontend.{Page, Router}
@@ -79,10 +79,10 @@ object DashboardPage {
   private def pollSyncJob(id: ImportJobId): Unit =
     api.jobs.get(id).onComplete {
       case Success(job) if job.status == ImportJobStatus.Running =>
-        dom.window.setTimeout(() => pollSyncJob(id), 2000d) // keep polling every 2s while it runs
+        val _ = dom.window.setTimeout(() => pollSyncJob(id), 2000d) // keep polling every 2s while it runs
         ()
       case Success(job)                                          =>
-        dataService.initialize()
+        val _    = dataService.initialize()
         syncingBanks.set(false)
         val base = s"Imported ${job.imported} new transaction(s)"
         syncMessage.set(job.message match {
@@ -98,7 +98,7 @@ object DashboardPage {
     div(
       cls := "container-fluid mt-3",
       // Refresh on each visit so changes made elsewhere (e.g. linking a bank account) are reflected without a manual page reload.
-      onMountCallback(_ => { dataService.initialize(); () }),
+      onMountCallback(_ => { val _ = dataService.initialize(); () }),
       div(
         cls := "d-flex justify-content-between align-items-center mb-3",
         h4(cls := "mb-0", "Dashboard"),
@@ -630,6 +630,6 @@ object DashboardPage {
     val summary    = buildSummaryText()
     val encodedMsg = URIUtils.encodeURIComponent(summary)
     val url        = s"https://wa.me/?text=$encodedMsg"
-    dom.window.open(url, "_blank")
+    val _          = dom.window.open(url, "_blank")
   }
 }

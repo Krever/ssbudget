@@ -3,7 +3,6 @@ package ssbudget.e2e
 import io.github.bonigarcia.wdm.WebDriverManager
 import org.openqa.selenium.{By, JavascriptExecutor, WebDriver, WebElement}
 import org.openqa.selenium.chrome.{ChromeDriver, ChromeOptions}
-import org.openqa.selenium.interactions.Actions
 import org.openqa.selenium.support.ui.{ExpectedConditions, WebDriverWait}
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.flatspec.AnyFlatSpec

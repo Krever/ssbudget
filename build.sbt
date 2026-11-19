@@ -43,6 +43,14 @@ def sqliteNativeOptions(classpath: Seq[File], target: File): Seq[String] = {
   options.getOrElse(Nil)
 }
 
+// The compiler is as strict as sbt-tpolecat makes it, and a warning fails the build in CI (the plugin reads the `CI` variable; locally a
+// warning is only shown). One exception, for test code: a ScalaTest test is a list of assertions, and each assertion is a value that is not
+// used. The two options that report such values would report every test, so tests compile without them.
+import org.typelevel.scalacoptions.ScalacOptions
+val testCodeOptions = Seq(
+  Test / tpolecatExcludeOptions ++= Set(ScalacOptions.warnNonUnitStatement, ScalacOptions.warnValueDiscard),
+)
+
 lazy val root = (project in file("."))
   .aggregate(shared.jvm, shared.js, backend, frontend, e2e)
   .settings(
@@ -60,6 +68,7 @@ lazy val e2e = (project in file("e2e"))
       "org.seleniumhq.selenium" % "selenium-java"    % "4.27.0" % Test,
       "io.github.bonigarcia"    % "webdrivermanager" % "5.9.2"  % Test,
     ),
+    testCodeOptions,
     Test / fork  := true,
     Test / javaOptions ++= Seq(
       s"-Duser.dir=${baseDirectory.value.getAbsolutePath}",
@@ -115,6 +124,7 @@ lazy val backend = (project in file("backend"))
       "org.typelevel"                 %% "cats-effect-testing-scalatest" % "1.6.0"  % Test,
       "org.wiremock"                   % "wiremock-standalone"           % "3.9.1"  % Test,
     ),
+    testCodeOptions,
     Compile / run / fork := true,
     sqliteNative         := sqliteNativeOptions((Test / dependencyClasspath).value.map(_.data), target.value),
     Compile / run / javaOptions ++= sqliteNative.value,

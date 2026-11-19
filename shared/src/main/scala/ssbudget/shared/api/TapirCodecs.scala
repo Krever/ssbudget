@@ -1,6 +1,6 @@
 package ssbudget.shared.api
 
-import sttp.tapir.{Codec, CodecFormat, DecodeResult}
+import sttp.tapir.{Codec, CodecFormat}
 import ssbudget.shared.model.*
 
 /** Tapir path codecs for ID types */

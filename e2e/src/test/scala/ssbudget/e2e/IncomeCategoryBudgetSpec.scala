@@ -1,6 +1,6 @@
 package ssbudget.e2e
 
-import org.openqa.selenium.{By, WebElement}
+import org.openqa.selenium.By
 import ssbudget.shared.model.CategoryBudgetType
 
 /** A category whose money flows IN (rent from a tenant, a recurring refund) used as a category budget. Its net spend is negative, so every budget

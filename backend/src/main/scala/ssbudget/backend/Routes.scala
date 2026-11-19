@@ -5,7 +5,6 @@ import cats.implicits.*
 import doobie.hikari.HikariTransactor
 import org.http4s.HttpRoutes
 import org.sqlite.SQLiteConnection
-import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.*
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
@@ -130,7 +129,7 @@ object Routes {
       // Database import/export
       route(Endpoints.database.download)(_ => exportDatabase(xa, dbPath)),
       route(Endpoints.database.`import`)(bytes => importDatabase(xa, dbPath, bytes)),
-    ) ++ (if testMode then List(route(Endpoints.test.reset)(_ => resetDatabase(repos))) else Nil)
+    ) ++ (if testMode then List(route(Endpoints.test.reset)(_ => resetDatabase)) else Nil)
 
     interpreter.toRoutes(routes)
   }
@@ -396,11 +395,8 @@ object Routes {
   private def periodDays(p: Period): Int =
     java.time.temporal.ChronoUnit.DAYS.between(p.startDate, p.endDate.getOrElse(Instant.now())).toInt
 
-  private def resetDatabase(repos: Repositories): Result[Unit] = {
-    // This is a test-only endpoint to reset the database
-    // In a real implementation, you'd want to be more careful here
-    IO.pure(Right(()))
-  }
+  /** The test-mode reset endpoint. It answers and changes nothing: the e2e servers start each run on a new database. */
+  private def resetDatabase: Result[Unit] = IO.pure(Right(()))
 
   private def getAllExchangeRates(repos: Repositories): Result[List[ExchangeRate]] = {
     // Get latest exchange rates for all enabled currencies to the primary currency
@@ -693,7 +689,7 @@ object Routes {
       val writeTemp = IO.blocking {
         val parentDir = tempPath.getParent
         if parentDir != null && !JFiles.exists(parentDir) then {
-          JFiles.createDirectories(parentDir)
+          val _ = JFiles.createDirectories(parentDir)
         }
         JFiles.write(tempPath, bytes)
       }

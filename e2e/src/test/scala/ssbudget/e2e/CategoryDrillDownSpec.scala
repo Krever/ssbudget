@@ -3,8 +3,6 @@ package ssbudget.e2e
 import org.openqa.selenium.{By, WebElement}
 import ssbudget.shared.model.CategoryBudgetType
 
-import scala.jdk.CollectionConverters.*
-
 /** Drilling from a category into the transactions behind it, from both entry points: the Dashboard's inline expansion of a category budget and
   * clicking a period spend figure on the Transactions page. Also covers that a filtered transactions URL is honoured on a cold load, since that's
   * what the link out produces.
@@ -26,7 +24,7 @@ class CategoryDrillDownSpec extends E2ESpec {
     TransactionSeed.addTransaction("Biedronka E2E", -14230, categoryId = Some(categoryId))
     TransactionSeed.addTransaction("Lidl E2E", -8810, categoryId = Some(categoryId))
 
-    val card = openBudgetsCard()
+    openBudgetsCard()
     textShouldAppear(planEntry("Drilldown Groceries"), "▸")
 
     planEntryName("Drilldown Groceries").click()
@@ -44,7 +42,7 @@ class CategoryDrillDownSpec extends E2ESpec {
     ensurePeriodExists()
     TransactionSeed.addCategory("Drilldown Empty", Some(CategoryBudgetType.Steady))
 
-    val card = openBudgetsCard()
+    openBudgetsCard()
     planEntryName("Drilldown Empty").click()
     textShouldAppear(findCard("Plan"), "No transactions this period")
   }

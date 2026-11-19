@@ -317,6 +317,14 @@ fly deploy --remote-only  # fly.io builds the image from those artifacts
 
 **MANDATORY: Always run `sbt scalafmtAll` before finishing work to format all Scala code.**
 
+**Compiler warnings are errors in CI.** `sbt-tpolecat` sets the strictest compiler options. Locally a warning is only shown; with `CI`
+set (GitHub Actions sets it; locally use `SBT_TPOLECAT_CI=1 sbt Test/compile`) a warning fails the build. Keep the build at zero
+warnings: remove an unused import, and write `val _ = expr` when a result is dropped on purpose. Test code compiles without the two
+options that report unused values, because a ScalaTest test is a list of assertions.
+
+**Tests to run for a change:** `sbt backend/test` (about 30 s) and `sbt e2e/test` (about 6 min, Chrome). Do not run two sbt commands
+at once in one checkout.
+
 **circe codecs**: Use `derives Codec.AsObject` for case classes. Only use manual `Encoder`/`Decoder` for:
 - AnyVal wrapper types (encode as the underlying type)
 - Enums with custom string representations

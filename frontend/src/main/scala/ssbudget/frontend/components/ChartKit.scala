@@ -100,16 +100,18 @@ object ChartKit {
       def label(of: (String, Double), anchor: String): SvgElement =
         text(x := of._2.toString, y := (plotHeight - 5).toString, textAnchor := anchor, fontSize := "11", fill := mutedInk, of._1)
 
-      candidates match {
-        case Vector()                 => Nil
-        case Vector(only)             => List(label(only, "middle"))
-        case first +: between :+ last =>
-          val nearAnEnd = labelRoom * 1.3
-          val kept      = between.foldLeft((Vector.empty[(String, Double)], first._2, nearAnEnd)) { case ((kept, keptAt, room), candidate) =>
-            if candidate._2 - keptAt >= room && last._2 - candidate._2 >= nearAnEnd then (kept :+ candidate, candidate._2, labelRoom)
-            else (kept, keptAt, room)
-          }
-          (label(first, "start") +: kept._1.map(label(_, "middle"))) :+ label(last, "end")
+      // Fewer than two candidates have no "first" and "last" to keep apart.
+      if candidates.size < 2 then candidates.map(label(_, "middle"))
+      else {
+        val first     = candidates.head
+        val last      = candidates.last
+        val between   = candidates.slice(1, candidates.size - 1)
+        val nearAnEnd = labelRoom * 1.3
+        val kept      = between.foldLeft((Vector.empty[(String, Double)], first._2, nearAnEnd)) { case ((kept, keptAt, room), candidate) =>
+          if candidate._2 - keptAt >= room && last._2 - candidate._2 >= nearAnEnd then (kept :+ candidate, candidate._2, labelRoom)
+          else (kept, keptAt, room)
+        }
+        (label(first, "start") +: kept._1.map(label(_, "middle"))) :+ label(last, "end")
       }
     }
 

@@ -2,8 +2,6 @@ package ssbudget.e2e
 
 import org.openqa.selenium.By
 
-import scala.jdk.CollectionConverters.*
-
 class TransactionsPageSpec extends E2ESpec {
 
   // `contains(., ...)` not `contains(text(), ...)`: the header span's first text node is the ▾/▸ caret, and `text()` in an argument position only

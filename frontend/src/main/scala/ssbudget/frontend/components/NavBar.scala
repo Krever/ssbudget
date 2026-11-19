@@ -52,7 +52,7 @@ object NavBar {
                 cls := "btn btn-outline-light btn-sm ms-2",
                 "Logout",
                 onClick --> { _ =>
-                  AuthState.logout(apiClient)
+                  val _ = AuthState.logout(apiClient)
                 },
               ),
             ),

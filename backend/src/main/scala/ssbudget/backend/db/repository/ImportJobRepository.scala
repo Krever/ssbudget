@@ -1,7 +1,6 @@
 package ssbudget.backend.db.repository
 
 import cats.effect.IO
-import cats.implicits.*
 import doobie.*
 import doobie.implicits.*
 import io.circe.parser.decode
