@@ -11,6 +11,38 @@ val circeVersion  = "0.14.10"
 val doobieVersion = "1.0.0-RC6"
 val sttpVersion   = "3.10.2"
 
+// The SQLite driver unpacks its native library to a NEW temporary file in each JVM. macOS checks a new library file before it loads it, and on
+// a busy machine that check takes minutes (measured on 2026-11-19: about 200 s for the first connection, against about 30 s with a stable
+// file; under a second on a quiet machine). So the JVMs that sbt starts for tests and for `run` use one stable copy for each driver version,
+// unpacked into the target directory. A platform that is not listed here keeps the default behaviour of the driver.
+lazy val sqliteNative = taskKey[Seq[String]]("JVM options that point the SQLite driver at a stable copy of its native library")
+
+def sqliteNativeOptions(classpath: Seq[File], target: File): Seq[String] = {
+  val os       = sys.props.getOrElse("os.name", "").toLowerCase
+  val arch     = sys.props.getOrElse("os.arch", "").toLowerCase match {
+    case "aarch64" | "arm64" => Some("aarch64")
+    case "x86_64" | "amd64"  => Some("x86_64")
+    case _                   => None
+  }
+  val platform =
+    if (os.contains("mac")) arch.map(a => (s"Mac/$a", "libsqlitejdbc.dylib"))
+    else if (os.contains("linux")) arch.map(a => (s"Linux/$a", "libsqlitejdbc.so"))
+    else None
+  val options  = for {
+    (dir, lib) <- platform
+    jar        <- classpath.find(_.getName.startsWith("sqlite-jdbc"))
+  } yield {
+    val out  = target / "sqlite-native" / jar.getName.stripSuffix(".jar")
+    val file = out / lib
+    if (!file.exists()) {
+      IO.unzip(jar, out / "unpacked", new SimpleFilter(_ == s"org/sqlite/native/$dir/$lib"))
+      IO.copyFile(out / "unpacked" / "org" / "sqlite" / "native" / dir / lib, file)
+    }
+    Seq(s"-Dorg.sqlite.lib.path=${out.getAbsolutePath}", s"-Dorg.sqlite.lib.name=$lib")
+  }
+  options.getOrElse(Nil)
+}
+
 lazy val root = (project in file("."))
   .aggregate(shared.jvm, shared.js, backend, frontend, e2e)
   .settings(
@@ -22,16 +54,18 @@ lazy val root = (project in file("."))
 lazy val e2e = (project in file("e2e"))
   .dependsOn(backend % "test->test;test->compile")
   .settings(
-    name        := "e2e",
+    name         := "e2e",
     libraryDependencies ++= Seq(
       "org.scalatest"          %% "scalatest"        % "3.2.19" % Test,
       "org.seleniumhq.selenium" % "selenium-java"    % "4.27.0" % Test,
       "io.github.bonigarcia"    % "webdrivermanager" % "5.9.2"  % Test,
     ),
-    Test / fork := true,
+    Test / fork  := true,
     Test / javaOptions ++= Seq(
       s"-Duser.dir=${baseDirectory.value.getAbsolutePath}",
     ),
+    sqliteNative := sqliteNativeOptions((Test / dependencyClasspath).value.map(_.data), target.value),
+    Test / javaOptions ++= sqliteNative.value,
   )
 
 lazy val shared = crossProject(JSPlatform, JVMPlatform)
@@ -82,6 +116,15 @@ lazy val backend = (project in file("backend"))
       "org.wiremock"                   % "wiremock-standalone"           % "3.9.1"  % Test,
     ),
     Compile / run / fork := true,
+    sqliteNative         := sqliteNativeOptions((Test / dependencyClasspath).value.map(_.data), target.value),
+    Compile / run / javaOptions ++= sqliteNative.value,
+    // The backend tests run inside the JVM of sbt, so the same two settings go in as system properties, before the first test opens a database.
+    Test / testOptions += Tests.Setup { () =>
+      sqliteNative.value.foreach { option =>
+        val Array(key, value) = option.stripPrefix("-D").split("=", 2)
+        if (sys.props.get(key).isEmpty) sys.props(key) = value
+      }
+    },
   )
 
 lazy val frontend = (project in file("frontend"))

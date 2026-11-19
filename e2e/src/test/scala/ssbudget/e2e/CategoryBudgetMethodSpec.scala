@@ -26,7 +26,13 @@ class CategoryBudgetMethodSpec extends E2ESpec {
     */
   private def openSettings(): Unit = {
     openTransactions()
-    row.click()
+    // The table is drawn again when the summaries arrive, so a row that was found a moment before can be gone at the click. The step is retried,
+    // and it clicks only while the strip is closed: a second click would close it again.
+    eventually {
+      if row.findElements(By.xpath("./following-sibling::tr[1][contains(@class,'budget-settings')]")).isEmpty then row.click()
+      settings
+    }
+    ()
   }
 
   /** The strip itself — the row right under the category's, which only exists while it's open. */

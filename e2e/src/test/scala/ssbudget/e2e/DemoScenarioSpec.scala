@@ -193,7 +193,11 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     val y    = rect.getY + rect.getHeight / 2
     showClickAt(x.toInt, y.toInt)
     Thread.sleep(150)
-    element.click()
+    // A page that still loads can move the element under the pointer. Then the click goes through the page itself.
+    try element.click()
+    catch {
+      case _: org.openqa.selenium.ElementClickInterceptedException => js.executeScript("arguments[0].click()", element)
+    }
     Thread.sleep(shortPause)
   }
 

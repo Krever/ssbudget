@@ -56,9 +56,9 @@ class DatabaseSpec extends E2ESpec {
 
     val dataCard   = findCardByH5("Data")
     val exportLink = dataCard.findElement(By.xpath(".//a[contains(.,'Export Database')]"))
-    // The link is low on a long page. Bring it to the middle of the window first: at the edge, another element can take the click.
-    driver.asInstanceOf[JavascriptExecutor].executeScript("arguments[0].scrollIntoView({block: 'center'})", exportLink)
-    exportLink.click()
+    // The click goes through the page itself. The cards above the link load after the page, so the link moves while a pointer click is aimed
+    // at it, and the click then lands on another element.
+    driver.asInstanceOf[JavascriptExecutor].executeScript("arguments[0].click()", exportLink)
 
     // Wait for download to complete (check for .db file)
     var downloadedFile: Option[File] = None
@@ -93,9 +93,9 @@ class DatabaseSpec extends E2ESpec {
 
     val dataCard   = findCardByH5("Data")
     val exportLink = dataCard.findElement(By.xpath(".//a[contains(.,'Export Database')]"))
-    // The link is low on a long page. Bring it to the middle of the window first: at the edge, another element can take the click.
-    driver.asInstanceOf[JavascriptExecutor].executeScript("arguments[0].scrollIntoView({block: 'center'})", exportLink)
-    exportLink.click()
+    // The click goes through the page itself. The cards above the link load after the page, so the link moves while a pointer click is aimed
+    // at it, and the click then lands on another element.
+    driver.asInstanceOf[JavascriptExecutor].executeScript("arguments[0].click()", exportLink)
 
     // Wait for download
     var backupFile: Option[File] = None
