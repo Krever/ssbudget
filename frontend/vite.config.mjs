@@ -38,12 +38,14 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 3000,
     https,
+    // `changeOrigin: false` keeps the Host header of the page. The backend accepts a write only when it comes from the page it serves
+    // (the Origin of the request is its Host; see Hardening.scala), and the short form of a proxy entry would replace the Host.
     proxy: {
-      '/api': 'http://localhost:8080',
+      '/api': { target: 'http://localhost:8080', changeOrigin: false },
       // Metabase, reached only through the backend's session-gated proxy (see AnalyticsProxyRoutes).
-      '/metabase': 'http://localhost:8080',
+      '/metabase': { target: 'http://localhost:8080', changeOrigin: false },
       // The MCP endpoint, so that the command the Settings page gives also works against the dev server.
-      '/mcp': 'http://localhost:8080'
+      '/mcp': { target: 'http://localhost:8080', changeOrigin: false }
     }
   },
   build: {

@@ -98,6 +98,8 @@ object ServerBuilder {
       // Background-job runner lives on an app-scoped supervisor so import/sync work outlives the HTTP request.
       supervisor      <- Supervisor[IO]
       sessionService   = SessionService(repos.sessions)
+      // Sessions that have ended are of no use, and each one is a token in every backup. They go at each start and at each login.
+      _               <- Resource.eval(sessionService.cleanupExpiredSessions().void)
       // Analytics is optional: without SSBUDGET_METABASE_URL this bundle is inert and the app is unchanged.
       analytics       <- Analytics.resource(dbPath, sttpBackend, repos.analyticsState, supervisor, sessionService, testMode)
       // Any job left Running by a previous process was interrupted by the restart — mark it Failed so the UI doesn't show a phantom in-progress run.
@@ -153,7 +155,10 @@ object ServerBuilder {
 
         // Static routes answer only GET/HEAD on non-API paths (see StaticRoutes.make), so they can go before the API routes.
         // MCP goes before the static routes: their SPA fallback would answer `GET /mcp` with index.html.
-        val allRoutes = mcpRoutes <+> analytics.routes <+> staticRoutes <+> healthRoute <+> authRoutes <+> snapshotting(dataRoutes)
+        // The app's own routes get all the defences of [[Hardening]]. The analytics proxy keeps the answer headers of Metabase, and takes only
+        // the same-site rule. MCP has its own rules (it refuses every request that names an origin).
+        val ownRoutes = Hardening(defaultRpOrigins)(staticRoutes <+> healthRoute <+> authRoutes <+> snapshotting(dataRoutes))
+        val allRoutes = mcpRoutes <+> Hardening.sameSiteWrites(defaultRpOrigins)(analytics.routes) <+> ownRoutes
 
         EmberServerBuilder
           .default[IO]

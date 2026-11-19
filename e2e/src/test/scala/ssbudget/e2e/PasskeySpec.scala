@@ -190,7 +190,9 @@ class PasskeySpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with 
 
     // Find and click the Delete button for this passkey
     val passkeyItem = driver.findElement(By.xpath("//*[contains(text(),'Passkey To Delete')]/ancestor::li"))
-    passkeyItem.findElement(By.xpath(".//button[text()='Delete']")).click()
+    // A delete takes two clicks: the first one arms the button.
+    passkeyItem.findElement(By.xpath(".//button[contains(.,'Delete')]")).click()
+    passkeyItem.findElement(By.xpath(".//button[contains(.,'Sure?')]")).click()
 
     // Wait for success message
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.className("alert-success"), "Passkey deleted"))

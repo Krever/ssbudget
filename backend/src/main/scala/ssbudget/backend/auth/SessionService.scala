@@ -10,11 +10,15 @@ trait SessionService {
   def validateSession(token: String): IO[Option[Session]]
   def invalidateSession(token: String): IO[Unit]
   def cleanupExpiredSessions(): IO[Int]
+
+  /** End every session but the one with this token: for a password change, after which an old login must not work any more. */
+  def invalidateOthers(keep: Option[String]): IO[Unit]
 }
 
 object SessionService {
   private val SessionDuration: Duration = Duration.ofDays(30)
   private val TokenLength: Int          = 32
+  private val LastUsedStep: Duration    = Duration.ofMinutes(1)
 
   def apply(sessionRepository: SessionRepository): SessionService =
     new SessionServiceImpl(sessionRepository)
@@ -35,7 +39,11 @@ object SessionService {
         sessionOpt  <- sessionRepository.findByToken(token)
         now          = Instant.now()
         validSession = sessionOpt.filter(s => s.expiresAt.isAfter(now))
-        _           <- validSession.fold(IO.unit)(s => sessionRepository.updateLastUsed(s.token, now))
+        // "Last used" is written one time in a minute at most: with a write on every request, each page load would queue behind the one
+        // database connection for nothing.
+        _           <- validSession
+                         .filter(s => Duration.between(s.lastUsedAt, now).compareTo(LastUsedStep) > 0)
+                         .fold(IO.unit)(s => sessionRepository.updateLastUsed(s.token, now))
       } yield validSession
     }
 
@@ -46,6 +54,8 @@ object SessionService {
     override def cleanupExpiredSessions(): IO[Int] = {
       sessionRepository.deleteExpired(Instant.now())
     }
+
+    override def invalidateOthers(keep: Option[String]): IO[Unit] = sessionRepository.deleteAllExcept(keep).void
 
   }
 }

@@ -16,8 +16,10 @@ export default defineConfig({
     port: frontendPort,
     strictPort: true,
     host: '127.0.0.1',
+    // `changeOrigin: false` keeps the Host header of the page: the backend accepts a write only when its Origin is its Host
+    // (see Hardening.scala), and the short form of a proxy entry would replace the Host.
     proxy: {
-      '/api': backendUrl
+      '/api': { target: backendUrl, changeOrigin: false }
     }
   }
 })

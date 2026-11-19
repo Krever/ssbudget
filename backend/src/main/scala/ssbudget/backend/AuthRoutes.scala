@@ -107,7 +107,7 @@ object AuthRoutes {
 
     // Setup endpoint - creates password and returns session cookie
     val setupRoute = interpreter.toRoutes(
-      AuthEndpoints.setup.serverLogic(req => setupPassword(authConfigRepo, passwordService, sessionService, req)),
+      AuthEndpoints.setup.serverLogic(req => setupPassword(authConfigRepo, passkeyRepo, passwordService, sessionService, req)),
     )
 
     // Login endpoint - validates password and returns session cookie
@@ -132,8 +132,9 @@ object AuthRoutes {
     // Set or replace the password (authenticated, plus an IdentityProof)
     val changePasswordRoute = interpreter.toRoutes(
       AuthEndpoints.changePassword
-        .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
-        .serverLogic(_ => req => changePassword(authConfigRepo, passwordService, webAuthnService, req)),
+        // The logic gets the token of this session: a password change ends every other session, and keeps this one.
+        .serverSecurityLogic(token => validateSession(sessionService, token, testMode).map(_.map(_ => token)))
+        .serverLogic(token => req => changePassword(authConfigRepo, passwordService, webAuthnService, sessionService, token, req)),
     )
 
     // Passkey registration start (authenticated)
@@ -253,17 +254,30 @@ object AuthRoutes {
     }
   }
 
+  /** The shortest password that setup and a password change accept. */
+  val minPasswordLength = 8
+
+  /** The first-time setup: it makes the password and logs in, with no proof of identity, because nobody has one yet. So it is open only while the
+    * instance has no owner at all: no password AND no passkey. An instance that lost its password row but has passkeys has an owner, and a stranger
+    * must not be able to take it with this call.
+    */
   private def setupPassword(
       authConfigRepo: AuthConfigRepository,
+      passkeyRepo: PasskeyCredentialRepository,
       passwordService: PasswordService,
       sessionService: SessionService,
       req: SetupRequest,
   ): IO[Either[String, CookieValueWithMeta]] = {
     for {
       configOpt <- authConfigRepo.get
+      passkeys  <- passkeyRepo.count
       result    <- configOpt match {
                      case Some(config) if config.passwordHash.isDefined =>
                        IO.pure(Left("Password already configured"))
+                     case _ if passkeys > 0                             =>
+                       IO.pure(Left("This instance has an owner already. Log in with a passkey."))
+                     case _ if req.password.length < minPasswordLength  =>
+                       IO.pure(Left(s"The password must have $minPasswordLength characters or more"))
                      case _                                             =>
                        for {
                          hash    <- passwordService.hash(req.password)
@@ -285,7 +299,9 @@ object AuthRoutes {
         case Some(seconds) => IO.pure(Left(s"Too many failed attempts. Try again in $seconds s."))
         case None          =>
           checkPassword(authConfigRepo, passwordService, req.password).flatMap {
-            case Some(true)  => IO(loginThrottle.succeeded()) *> sessionService.createSession().map(s => Right(sessionCookie(s.token)))
+            case Some(true)  =>
+              IO(loginThrottle.succeeded()) *> sessionService.cleanupExpiredSessions() *>
+                sessionService.createSession().map(s => Right(sessionCookie(s.token)))
             case Some(false) => IO.realTimeInstant.map(loginThrottle.failed).as(Left("Invalid password"))
             case None        => IO.pure(Left("Authentication not configured"))
           }
@@ -308,13 +324,16 @@ object AuthRoutes {
       authConfigRepo: AuthConfigRepository,
       passwordService: PasswordService,
       webAuthnService: WebAuthnService,
+      sessionService: SessionService,
+      currentToken: Option[String],
       req: ChangePasswordRequest,
   ): IO[Either[String, Unit]] = {
-    if req.newPassword.isEmpty then {
-      IO.pure(Left("New password is required"))
+    if req.newPassword.length < minPasswordLength then {
+      IO.pure(Left(s"The password must have $minPasswordLength characters or more"))
     } else {
       confirmIdentity(authConfigRepo, passwordService, webAuthnService, req.proof).flatMap {
-        _.traverse(_ => passwordService.hash(req.newPassword).flatMap(authConfigRepo.upsert))
+        // A password is changed when the old one may be known to another person. So every other login ends; this one stays.
+        _.traverse(_ => passwordService.hash(req.newPassword).flatMap(authConfigRepo.upsert) *> sessionService.invalidateOthers(currentToken))
       }
     }
   }

@@ -270,6 +270,10 @@ One owner, no user accounts.
 - **Session**: a random token in an HttpOnly cookie, 30 days, `SameSite=Lax`, `Secure` when the configured origins are https.
 - **Identity proof**: an action with lasting effect (a password change, a new MCP token) needs the password or a passkey again,
   not only the session (`IdentityProof`).
+- **Every route of the app** goes through `Hardening`: a write is accepted only from the app's own page (the `Origin` of the request is
+  its `Host`, or a configured origin), a body has a size limit, and each answer has the content policy and the other browser headers.
+  The Vite proxies keep the `Host` header for this (`changeOrigin: false`). A new inline `<script>` or a script from another host would
+  be blocked by the policy.
 - **Test mode** (`SSBUDGET_TEST_MODE=1`) turns the login off. It is for local runs and the e2e tests only: the app refuses to start
   in it when `SSBUDGET_RP_ID` is not `localhost`.
 

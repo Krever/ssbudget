@@ -20,6 +20,9 @@ trait SessionRepository {
   def updateLastUsed(token: String, lastUsedAt: Instant): IO[Unit]
   def delete(token: String): IO[Unit]
   def deleteExpired(now: Instant): IO[Int]
+
+  /** Delete every session but the one with this token (with None: every session). */
+  def deleteAllExcept(token: Option[String]): IO[Int]
 }
 
 class SessionRepositoryImpl(xa: Transactor[IO]) extends SessionRepository {
@@ -54,4 +57,11 @@ class SessionRepositoryImpl(xa: Transactor[IO]) extends SessionRepository {
       DELETE FROM sessions WHERE expires_at < $now
     """.update.run.transact(xa)
   }
+
+  override def deleteAllExcept(token: Option[String]): IO[Int] =
+    token
+      .fold(sql"DELETE FROM sessions")(keep => sql"DELETE FROM sessions WHERE token <> $keep")
+      .update
+      .run
+      .transact(xa)
 }

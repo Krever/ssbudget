@@ -162,10 +162,10 @@ object SettingsPage {
                               }
                               .getOrElse(emptyNode),
                           ),
-                          button(
-                            cls := "btn btn-outline-danger btn-sm",
+                          Loading.confirmActionButton(
                             "Delete",
-                            onClick --> { _ => deletePasskey(key.credentialId) },
+                            () => Future.successful(deletePasskey(key.credentialId)),
+                            hint = "Removes this passkey: it cannot log in any more",
                           ),
                         )
                       },
