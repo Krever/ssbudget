@@ -55,7 +55,7 @@ class DatabaseSpec extends E2ESpec {
     waitFor.until(_ => driver.findElement(By.tagName("h2")).getText.contains("Settings"))
 
     val dataCard   = findCardByH5("Data")
-    val exportLink = dataCard.findElement(By.xpath(".//a[contains(.,'Export Database')]"))
+    val exportLink = dataCard.findElement(By.xpath(".//button[contains(.,'Export Database')]"))
     // The click goes through the page itself. The cards above the link load after the page, so the link moves while a pointer click is aimed
     // at it, and the click then lands on another element.
     driver.asInstanceOf[JavascriptExecutor].executeScript("arguments[0].click()", exportLink)
@@ -92,7 +92,7 @@ class DatabaseSpec extends E2ESpec {
     waitFor.until(_ => driver.findElement(By.tagName("h2")).getText.contains("Settings"))
 
     val dataCard   = findCardByH5("Data")
-    val exportLink = dataCard.findElement(By.xpath(".//a[contains(.,'Export Database')]"))
+    val exportLink = dataCard.findElement(By.xpath(".//button[contains(.,'Export Database')]"))
     // The click goes through the page itself. The cards above the link load after the page, so the link moves while a pointer click is aimed
     // at it, and the click then lands on another element.
     driver.asInstanceOf[JavascriptExecutor].executeScript("arguments[0].click()", exportLink)

@@ -5,7 +5,7 @@ import org.scalajs.dom
 import ssbudget.frontend.auth.AuthState
 import ssbudget.frontend.components.{Layout, LoadingState}
 import ssbudget.frontend.pages.{LoginPage, SetupPage}
-import ssbudget.frontend.services.{AnalyticsState, ApiClient, DataService}
+import ssbudget.frontend.services.{AnalyticsState, ApiClient, DataService, Notices}
 import ssbudget.frontend.util.MoneyFormatter
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -18,6 +18,18 @@ object Main {
 
   def main(args: Array[String]): Unit = {
     val container = dom.document.getElementById("app")
+
+    // A request that the server refuses for a dead session (it expired, or it was ended from another device) brings the login back. Before,
+    // the page stayed and showed old figures, and no button did anything. The data is loaded again after the login.
+    ApiClient.onSessionEnded = () =>
+      if AuthState.current.now() == AuthState.LoggedIn && dataState.now() != LoadingState.Loading then {
+        dataState.set(LoadingState.Loading)
+        Notices.clear()
+        AuthState.refreshStatus(apiClient).foreach { _ =>
+          // The status says "logged in" after all: start again from a clean page.
+          if AuthState.current.now() == AuthState.LoggedIn then dom.window.location.reload()
+        }
+      }
 
     // First check auth state
     val _ = AuthState.initialize(apiClient)
@@ -47,6 +59,8 @@ object Main {
             case Success(_)  =>
               // Initialize MoneyFormatter with currency data
               MoneyFormatter.init(DataService.instance.primaryCurrency, DataService.instance.exchangeRates)
+              // A new start (the first load, or a login after the session ended): what failed before is not news any more.
+              Notices.clear()
               dataState.set(LoadingState.Loaded(()))
             case Failure(ex) =>
               dom.console.error(s"Failed to initialize: ${ex.getMessage}")

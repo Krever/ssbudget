@@ -2,6 +2,7 @@ package ssbudget.frontend.services
 
 import org.scalajs.dom
 import sttp.client3.*
+import sttp.model.{Method, StatusCode, Uri}
 import sttp.tapir.DecodeResult
 import sttp.tapir.client.sttp.SttpClientInterpreter
 import ssbudget.shared.api.*
@@ -22,227 +23,233 @@ class ApiClient(implicit ec: ExecutionContext) {
   object auth {
     def status(): Future[AuthStatus] = {
       val request = interpreter.toRequest(AuthEndpoints.client.status, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def setup(password: String): Future[Unit] = {
       val request = interpreter.toRequest(AuthEndpoints.client.setup, Some(baseUri))
-      backend.send(request(SetupRequest(password))).map(handleResponse)
+      send(request(SetupRequest(password))).map(handleResponse)
     }
 
     def login(password: String): Future[Unit] = {
       val request = interpreter.toRequest(AuthEndpoints.client.login, Some(baseUri))
-      backend.send(request(LoginRequest(password))).map(handleResponse)
+      send(request(LoginRequest(password))).map(handleResponse)
     }
 
     def logout(): Future[Unit] = {
       val request = interpreter.toRequest(AuthEndpoints.client.logout, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def verifyPasskeyStart(): Future[PasskeyAuthenticationOptions] = {
       val request = interpreter.toRequest(AuthEndpoints.client.verifyPasskeyStart, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
+    }
+
+    /** Proves the identity of the owner again in this session, for the actions that need more than the session. */
+    def confirmIdentity(proof: IdentityProof): Future[Unit] = {
+      val request = interpreter.toRequest(AuthEndpoints.client.confirmIdentity, Some(baseUri))
+      send(request(proof)).map(handleResponse)
     }
 
     def changePassword(req: ChangePasswordRequest): Future[Unit] = {
       val request = interpreter.toRequest(AuthEndpoints.client.changePassword, Some(baseUri))
-      backend.send(request(req)).map(handleResponse)
+      send(request(req)).map(handleResponse)
     }
 
     def listPasskeys(): Future[List[PasskeyInfo]] = {
       val request = interpreter.toRequest(AuthEndpoints.client.listPasskeys, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def deletePasskey(credentialId: String): Future[Unit] = {
       val request = interpreter.toRequest(AuthEndpoints.client.deletePasskey, Some(baseUri))
-      backend.send(request(credentialId)).map(handleResponse)
+      send(request(credentialId)).map(handleResponse)
     }
 
     def listMcpTokens(): Future[List[McpTokenInfo]] = {
       val request = interpreter.toRequest(AuthEndpoints.client.listMcpTokens, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def createMcpToken(req: CreateMcpTokenRequest): Future[CreatedMcpToken] = {
       val request = interpreter.toRequest(AuthEndpoints.client.createMcpToken, Some(baseUri))
-      backend.send(request(req)).map(handleResponse)
+      send(request(req)).map(handleResponse)
     }
 
     def revokeMcpToken(id: String): Future[Unit] = {
       val request = interpreter.toRequest(AuthEndpoints.client.revokeMcpToken, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
+      send(request(id)).map(handleResponse)
     }
 
     def registerPasskeyStart(displayName: Option[String]): Future[PasskeyRegistrationOptions] = {
       val request = interpreter.toRequest(AuthEndpoints.client.registerPasskeyStart, Some(baseUri))
-      backend.send(request(PasskeyRegisterStartRequest(displayName))).map(handleResponse)
+      send(request(PasskeyRegisterStartRequest(displayName))).map(handleResponse)
     }
 
     def registerPasskeyFinish(response: PasskeyRegistrationResponse): Future[Unit] = {
       val request = interpreter.toRequest(AuthEndpoints.client.registerPasskeyFinish, Some(baseUri))
-      backend.send(request(response)).map(handleResponse)
+      send(request(response)).map(handleResponse)
     }
 
     def loginPasskeyStart(): Future[PasskeyAuthenticationOptions] = {
       val request = interpreter.toRequest(AuthEndpoints.client.loginPasskeyStart, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def loginPasskeyFinish(response: PasskeyAuthenticationResponse): Future[Unit] = {
       val request = interpreter.toRequest(AuthEndpoints.client.loginPasskeyFinish, Some(baseUri))
-      backend.send(request(response)).map(handleResponse)
+      send(request(response)).map(handleResponse)
     }
   }
 
   object accounts {
     def list(): Future[List[Account]] = {
       val request = interpreter.toRequest(Endpoints.client.accounts.list, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def create(dto: CreateAccount): Future[Account] = {
       val request = interpreter.toRequest(Endpoints.client.accounts.create, Some(baseUri))
-      backend.send(request(dto)).map(handleResponse)
+      send(request(dto)).map(handleResponse)
     }
 
     def update(id: AccountId, dto: UpdateAccount): Future[Account] = {
       val request = interpreter.toRequest(Endpoints.client.accounts.update, Some(baseUri))
-      backend.send(request((id, dto))).map(handleResponse)
+      send(request((id, dto))).map(handleResponse)
     }
 
     def updateBalance(id: AccountId, dto: UpdateAccountBalance): Future[Account] = {
       val request = interpreter.toRequest(Endpoints.client.accounts.updateBalance, Some(baseUri))
-      backend.send(request((id, dto))).map(handleResponse)
+      send(request((id, dto))).map(handleResponse)
     }
 
     def delete(id: AccountId): Future[Unit] = {
       val request = interpreter.toRequest(Endpoints.client.accounts.delete, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
+      send(request(id)).map(handleResponse)
     }
   }
 
   object savings {
     def periodBaselines(): Future[List[AccountPeriodBaseline]] = {
       val request = interpreter.toRequest(Endpoints.client.savings.periodBaselines, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
   }
 
   object periods {
     def list(): Future[List[Period]] = {
       val request = interpreter.toRequest(Endpoints.client.periods.list, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def startNew(asOf: Option[LocalDate]): Future[Period] = {
       val request = interpreter.toRequest(Endpoints.client.periods.startNew, Some(baseUri))
-      backend.send(request(asOf)).map(handleResponse)
+      send(request(asOf)).map(handleResponse)
     }
 
     def setExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Period] = {
       val request = interpreter.toRequest(Endpoints.client.periods.setExpectedEnd, Some(baseUri))
-      backend.send(request((id, SetPeriodExpectedEndRequest(expectedEnd)))).map(handleResponse)
+      send(request((id, SetPeriodExpectedEndRequest(expectedEnd)))).map(handleResponse)
     }
 
     def setPlannedSaving(id: PeriodId, plannedSavingCents: Long): Future[Period] = {
       val request = interpreter.toRequest(Endpoints.client.periods.setPlannedSaving, Some(baseUri))
-      backend.send(request((id, SetPeriodPlannedSavingRequest(plannedSavingCents)))).map(handleResponse)
+      send(request((id, SetPeriodPlannedSavingRequest(plannedSavingCents)))).map(handleResponse)
     }
 
     def summaries(limit: Option[Int] = None): Future[List[PeriodSummary]] = {
       val request = interpreter.toRequest(Endpoints.client.periods.summaries, Some(baseUri))
-      backend.send(request(limit)).map(handleResponse)
+      send(request(limit)).map(handleResponse)
     }
 
     def freeMoneyHistory(): Future[FreeMoneyHistory] = {
       val request = interpreter.toRequest(Endpoints.client.periods.freeMoneyHistory, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
   }
 
   object banking {
     def listAspsps(country: Option[String]): Future[List[Aspsp]] = {
       val request = interpreter.toRequest(Endpoints.client.banking.listAspsps, Some(baseUri))
-      backend.send(request(country)).map(handleResponse)
+      send(request(country)).map(handleResponse)
     }
 
     def connect(req: ConnectBankRequest): Future[ConnectBankResponse] = {
       val request = interpreter.toRequest(Endpoints.client.banking.connect, Some(baseUri))
-      backend.send(request(req)).map(handleResponse)
+      send(request(req)).map(handleResponse)
     }
 
     def callback(code: String, state: String): Future[BankConnectionView] = {
       val request = interpreter.toRequest(Endpoints.client.banking.callback, Some(baseUri))
-      backend.send(request(BankCallbackRequest(code, state))).map(handleResponse)
+      send(request(BankCallbackRequest(code, state))).map(handleResponse)
     }
 
     def connections(): Future[List[BankConnectionView]] = {
       val request = interpreter.toRequest(Endpoints.client.banking.connections, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def disconnect(id: BankConnectionId): Future[Unit] = {
       val request = interpreter.toRequest(Endpoints.client.banking.disconnect, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
+      send(request(id)).map(handleResponse)
     }
 
     def linkAccount(linkId: BankAccountLinkId, req: LinkAccountRequest): Future[List[BankConnectionView]] = {
       val request = interpreter.toRequest(Endpoints.client.banking.linkAccount, Some(baseUri))
-      backend.send(request((linkId, req))).map(handleResponse)
+      send(request((linkId, req))).map(handleResponse)
     }
 
     def sync(id: BankConnectionId): Future[List[BankConnectionView]] = {
       val request = interpreter.toRequest(Endpoints.client.banking.sync, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
+      send(request(id)).map(handleResponse)
     }
 
     def syncAll(): Future[ImportJob] = {
       val request = interpreter.toRequest(Endpoints.client.banking.syncAll, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def listCardGroups(): Future[List[CardGroup]] = {
       val request = interpreter.toRequest(Endpoints.client.banking.listCardGroups, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def createCardGroup(dto: CreateCardGroup): Future[CardGroup] = {
       val request = interpreter.toRequest(Endpoints.client.banking.createCardGroup, Some(baseUri))
-      backend.send(request(dto)).map(handleResponse)
+      send(request(dto)).map(handleResponse)
     }
 
     def deleteCardGroup(id: CardGroupId): Future[Unit] = {
       val request = interpreter.toRequest(Endpoints.client.banking.deleteCardGroup, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
+      send(request(id)).map(handleResponse)
     }
 
     def linkCardGroup(id: CardGroupId, req: LinkCardGroupRequest): Future[List[CardGroup]] = {
       val request = interpreter.toRequest(Endpoints.client.banking.linkCardGroup, Some(baseUri))
-      backend.send(request((id, req))).map(handleResponse)
+      send(request((id, req))).map(handleResponse)
     }
 
     def updateCardGroupLimit(id: CardGroupId, req: UpdateCardGroupLimit): Future[List[CardGroup]] = {
       val request = interpreter.toRequest(Endpoints.client.banking.updateCardGroupLimit, Some(baseUri))
-      backend.send(request((id, req))).map(handleResponse)
+      send(request((id, req))).map(handleResponse)
     }
 
     def importTransactions(id: BankConnectionId, req: ImportTransactionsRequest): Future[ImportJob] = {
       val request = interpreter.toRequest(Endpoints.client.banking.importTransactions, Some(baseUri))
-      backend.send(request((id, req))).map(handleResponse)
+      send(request((id, req))).map(handleResponse)
     }
   }
 
   object jobs {
     def list(): Future[List[ImportJob]] = {
       val request = interpreter.toRequest(Endpoints.client.jobs.list, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def get(id: ImportJobId): Future[ImportJob] = {
       val request = interpreter.toRequest(Endpoints.client.jobs.get, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
+      send(request(id)).map(handleResponse)
     }
   }
 
@@ -258,157 +265,196 @@ class ApiClient(implicit ec: ExecutionContext) {
         q: Option[String],
     ): Future[TransactionListResponse] = {
       val request = interpreter.toRequest(Endpoints.client.transactions.list, Some(baseUri))
-      backend.send(request((accountUid, month, category, Some(hideInternal), Some(sort), Some(asc), limit, q))).map(handleResponse)
+      send(request((accountUid, month, category, Some(hideInternal), Some(sort), Some(asc), limit, q))).map(handleResponse)
     }
 
     def months(): Future[List[String]] = {
       val request = interpreter.toRequest(Endpoints.client.transactions.months, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def setCategory(id: BankTransactionId, req: SetCategoryRequest): Future[BankTransaction] = {
       val request = interpreter.toRequest(Endpoints.client.transactions.setCategory, Some(baseUri))
-      backend.send(request((id, req))).map(handleResponse)
+      send(request((id, req))).map(handleResponse)
     }
 
     def setNote(id: BankTransactionId, req: SetNoteRequest): Future[BankTransaction] = {
       val request = interpreter.toRequest(Endpoints.client.transactions.setNote, Some(baseUri))
-      backend.send(request((id, req))).map(handleResponse)
+      send(request((id, req))).map(handleResponse)
     }
   }
 
   object categories {
     def list(): Future[List[Category]] = {
       val request = interpreter.toRequest(Endpoints.client.categories.list, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def summaries(): Future[List[CategorySummary]] = {
       val request = interpreter.toRequest(Endpoints.client.categories.summaries, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def create(dto: CreateCategory): Future[Category] = {
       val request = interpreter.toRequest(Endpoints.client.categories.create, Some(baseUri))
-      backend.send(request(dto)).map(handleResponse)
+      send(request(dto)).map(handleResponse)
     }
 
     def update(id: CategoryId, dto: UpdateCategory): Future[Category] = {
       val request = interpreter.toRequest(Endpoints.client.categories.update, Some(baseUri))
-      backend.send(request((id, dto))).map(handleResponse)
+      send(request((id, dto))).map(handleResponse)
     }
 
     def delete(id: CategoryId): Future[Unit] = {
       val request = interpreter.toRequest(Endpoints.client.categories.delete, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
+      send(request(id)).map(handleResponse)
     }
 
     def setOverride(id: CategoryId, dto: SetCategoryOverrideRequest): Future[List[CategorySummary]] = {
       val request = interpreter.toRequest(Endpoints.client.categories.setOverride, Some(baseUri))
-      backend.send(request((id, dto))).map(handleResponse)
+      send(request((id, dto))).map(handleResponse)
     }
 
     def clearOverride(id: CategoryId): Future[List[CategorySummary]] = {
       val request = interpreter.toRequest(Endpoints.client.categories.clearOverride, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
+      send(request(id)).map(handleResponse)
     }
   }
 
   object rules {
     def list(): Future[List[ClassificationRule]] = {
       val request = interpreter.toRequest(Endpoints.client.rules.list, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def create(dto: CreateRuleRequest): Future[ClassificationRule] = {
       val request = interpreter.toRequest(Endpoints.client.rules.create, Some(baseUri))
-      backend.send(request(dto)).map(handleResponse)
+      send(request(dto)).map(handleResponse)
     }
 
     def update(id: ClassificationRuleId, dto: UpdateRuleRequest): Future[ClassificationRule] = {
       val request = interpreter.toRequest(Endpoints.client.rules.update, Some(baseUri))
-      backend.send(request((id, dto))).map(handleResponse)
+      send(request((id, dto))).map(handleResponse)
     }
 
     def delete(id: ClassificationRuleId): Future[Unit] = {
       val request = interpreter.toRequest(Endpoints.client.rules.delete, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
+      send(request(id)).map(handleResponse)
     }
 
     def reorder(orderedIds: List[ClassificationRuleId]): Future[List[ClassificationRule]] = {
       val request = interpreter.toRequest(Endpoints.client.rules.reorder, Some(baseUri))
-      backend.send(request(ReorderRulesRequest(orderedIds))).map(handleResponse)
+      send(request(ReorderRulesRequest(orderedIds))).map(handleResponse)
     }
 
     def apply(): Future[ApplyRulesResult] = {
       val request = interpreter.toRequest(Endpoints.client.rules.apply, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def preview(criteria: List[RuleCriterion]): Future[RulePreviewResponse] = {
       val request = interpreter.toRequest(Endpoints.client.rules.preview, Some(baseUri))
-      backend.send(request(RulePreviewRequest(criteria))).map(handleResponse)
+      send(request(RulePreviewRequest(criteria))).map(handleResponse)
     }
 
     def exportRules(): Future[RulesExport] = {
       val request = interpreter.toRequest(Endpoints.client.rules.exportRules, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def importRules(req: ImportRulesRequest): Future[ImportRulesResult] = {
       val request = interpreter.toRequest(Endpoints.client.rules.importRules, Some(baseUri))
-      backend.send(request(req)).map(handleResponse)
+      send(request(req)).map(handleResponse)
     }
   }
 
   object analytics {
     def config(): Future[AnalyticsConfig] = {
       val request = interpreter.toRequest(Endpoints.client.analytics.config, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
+    }
+  }
+
+  object warnings {
+    def list(): Future[List[DataWarning]] = {
+      val request = interpreter.toRequest(Endpoints.client.warnings.list, Some(baseUri))
+      send(request(())).map(handleResponse)
     }
   }
 
   object exchangeRates {
     def getAll(): Future[List[ExchangeRate]] = {
       val request = interpreter.toRequest(Endpoints.client.exchangeRates.getAll, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
   }
 
   object currencies {
     def getSettings(): Future[CurrencySettingsResponse] = {
       val request = interpreter.toRequest(Endpoints.client.currencies.getSettings, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
 
     def enable(code: String): Future[CurrencySetting] = {
       val request = interpreter.toRequest(Endpoints.client.currencies.enable, Some(baseUri))
-      backend.send(request(EnableCurrencyRequest(code))).map(handleResponse)
+      send(request(EnableCurrencyRequest(code))).map(handleResponse)
     }
 
     def disable(code: String): Future[Unit] = {
       val request = interpreter.toRequest(Endpoints.client.currencies.disable, Some(baseUri))
-      backend.send(request(code)).map(handleResponse)
+      send(request(code)).map(handleResponse)
     }
 
     def setPrimary(code: String): Future[Unit] = {
       val request = interpreter.toRequest(Endpoints.client.currencies.setPrimary, Some(baseUri))
-      backend.send(request(SetPrimaryCurrencyRequest(code))).map(handleResponse)
+      send(request(SetPrimaryCurrencyRequest(code))).map(handleResponse)
     }
 
     def refreshRates(): Future[ExchangeRatesResponse] = {
       val request = interpreter.toRequest(Endpoints.client.currencies.refreshRates, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      send(request(())).map(handleResponse)
     }
   }
 
-  private def handleResponse[T](response: Response[DecodeResult[Either[String, T]]]): T = {
-    response.body match {
-      case DecodeResult.Value(Right(value)) => value
-      case DecodeResult.Value(Left(error))  => throw ApiException(error)
-      case failure: DecodeResult.Failure    => throw ApiException(s"Decode failure: $failure")
+  // The auth endpoints answer to a form (a login, a password change) that shows its own error.
+  private def reported(method: Method, uri: Uri): Boolean = method != Method.GET && !uri.path.startsWith(List("api", "auth"))
+
+  /** Sends a request. A write that gets no answer (no network, the server is down) is told to the user: without this the page showed the typed value
+    * as if it was stored.
+    */
+  private def send[T](request: Request[T, Any]): Future[Response[T]] =
+    backend.send(request).recoverWith { case ex =>
+      // The failure carries the same text that is shown, so a caller that reports it too does not make a second line.
+      val message = s"No answer from the server (${ex.getMessage})."
+      if reported(request.method, request.uri) then Notices.failed(message)
+      Future.failed(ApiException(message))
     }
+
+  private def handleResponse[T](response: Response[DecodeResult[Either[String, T]]]): T = {
+    val (method, uri)                     = (response.request.method, response.request.uri)
+    def refused(message: String): Nothing = {
+      // Every failed write is shown (see [[Notices]]). A failed read is left to the page, which shows it in place.
+      if reported(method, uri) then Notices.failed(message)
+      throw ApiException(message)
+    }
+    if response.code == StatusCode.Unauthorized && !uri.path.startsWith(List("api", "auth")) then {
+      ApiClient.onSessionEnded()
+      throw ApiException("The session ended. Log in again.")
+    } else
+      response.body match {
+        case DecodeResult.Value(Right(value)) => value
+        case DecodeResult.Value(Left(error))  => refused(error)
+        case failure: DecodeResult.Failure    => refused(s"The answer of the server could not be read: $failure")
+      }
   }
+}
+
+object ApiClient {
+
+  /** Called when the server says that the session is not valid any more. The app sets it to go back to the login. It is one hook for every client
+    * object: the app has more than one (`Main` and `DataService` each make their own).
+    */
+  var onSessionEnded: () => Unit = () => ()
 }
 
 case class ApiException(message: String) extends Exception(message)

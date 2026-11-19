@@ -40,7 +40,7 @@ class TransactionImportServiceSpec extends RepositorySpec {
     }
 
   private def ebTx(ref: Option[String], cents: Long, bookedAt: Instant, name: String = "Shop", remittance: String = "note"): EbTransaction =
-    EbTransaction(ref, cents, "PLN", "booked", Some(bookedAt), Some(name), None, Some(remittance), None, Json.obj())
+    EbTransaction(ref, Some(cents), "PLN", "booked", Some(bookedAt), Some(name), None, Some(remittance), None, Json.obj())
 
   /** Fresh service + repos with an active connection "c-1" and one Unlinked link for "uid-1". */
   private def setup(fake: EnableBankingApi): IO[(TransactionImportService, Repositories)] = {
@@ -84,6 +84,26 @@ class TransactionImportServiceSpec extends RepositorySpec {
     } yield {
       res.map(_.totalImported) shouldBe Right(3)
       stored.size shouldBe 3
+    }
+  }
+
+  "leaves out a pending entry and an entry with no amount or date, and says so for the second kind" in {
+    val good     = ebTx(Some("r1"), -1000, now)
+    val pending  = ebTx(None, -500, now).copy(status = "pending")
+    val noAmount = ebTx(Some("r3"), 0, now).copy(amountCents = None)
+    val noDate   = ebTx(Some("r4"), -700, now).copy(bookedAt = None)
+    val fake     = new PagingFakeEb(Map("uid-1" -> paged(List(List(good, pending, noAmount, noDate)))))
+    for {
+      (svc, repos) <- setup(fake)
+      res          <- svc.importTransactions(BankConnectionId("c-1"), ImportTransactionsRequest(None))
+      again        <- svc.importTransactions(BankConnectionId("c-1"), ImportTransactionsRequest(None))
+      stored       <- repos.bankTransactions.list(Some("uid-1"), None, None)
+    } yield {
+      // Only the booked entry with an amount and a date is stored. A second import adds nothing: no invented date, so no new row.
+      stored.map(_.amountCents) shouldBe List(-1000L)
+      res.map(_.totalImported) shouldBe Right(1)
+      again.map(_.totalImported) shouldBe Right(0)
+      res.toOption.get.accounts.head.error.get should include("2 entries with no readable amount or date")
     }
   }
 

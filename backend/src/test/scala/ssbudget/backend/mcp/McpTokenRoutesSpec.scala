@@ -29,7 +29,7 @@ class McpTokenRoutesSpec extends RepositorySpec {
       session  <- sessions.createSession()
       routes    =
         AuthRoutes.make(repos.authConfig, repos.passkeyCredentials, passwords, sessions, webAuthn, new McpTokenService(repos.mcpTokens), testMode)
-    } yield (repos, routes.orNotFound, session.token)
+    } yield (repos, routes.orNotFound, session)
   }
 
   private def withSession(req: Request[IO], session: String): Request[IO] = req.addCookie(AuthEndpoints.SessionCookieName, session)

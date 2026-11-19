@@ -277,15 +277,31 @@ One owner, no user accounts.
   (`LoginThrottle`: 5 free failures, then a lock that doubles).
 - **Passkeys (WebAuthn)**: registered in Settings after the first login, as a second way in. Library:
   [Yubico java-webauthn-server](https://github.com/Yubico/java-webauthn-server).
-- **Session**: a random token in an HttpOnly cookie, 30 days, `SameSite=Lax`, `Secure` when the configured origins are https.
-- **Identity proof**: an action with lasting effect (a password change, a new MCP token) needs the password or a passkey again,
-  not only the session (`IdentityProof`).
+- **Session**: a random token in an HttpOnly cookie, 30 days, `SameSite=Lax`, `Secure` when the configured origins are https. The
+  `sessions` table holds only the SHA-256 digest of the token (`SessionService`), so a copy of the database holds no working login.
+  A request with no valid session gets status 401 (every other error is 400, with a text); the client then goes back to the login.
+- **Identity proof**: an action with lasting effect needs the password or a passkey again, not only the session (`IdentityProof`).
+  A password change and a new MCP token carry the proof in the request. Database export, database import, and adding or deleting a
+  passkey need a RECENT proof on the session (`AuthRoutes.validateConfirmed`, 10 minutes, `sessions.confirmed_at`): a login counts,
+  and after that `POST /api/auth/confirm`. The Settings page asks for it in a dialog when it is needed.
 - **Every route of the app** goes through `Hardening`: a write is accepted only from the app's own page (the `Origin` of the request is
   its `Host`, or a configured origin), a body has a size limit, and each answer has the content policy and the other browser headers.
   The Vite proxies keep the `Host` header for this (`changeOrigin: false`). A new inline `<script>` or a script from another host would
   be blocked by the policy.
 - **Test mode** (`SSBUDGET_TEST_MODE=1`) turns the login off. It is for local runs and the e2e tests only: the app refuses to start
   in it when `SSBUDGET_RP_ID` is not `localhost`.
+
+## Errors and warnings in the UI
+
+`NoticeStrip` (in the layout, above every page) shows two things. A failed write: `ApiClient` reports EVERY write that the server
+refuses or does not answer to `Notices`, so a page does not have to. A failed read stays with the page. And the data warnings of
+`GET /api/warnings` (`DataHealth`): faults that make a figure wrong, today a currency in use with no exchange rate (it counts 1 to 1).
+
+## Bank entries
+
+An entry of the bank is stored only when it is booked and has an amount and a date that can be read (`TransactionImportService`).
+A pending entry is skipped: the bank sends it again when it is booked. An entry with no amount or no date is left out and the
+sync reports it. Nothing is invented. The currency of an account cannot change after it has a bank link or a balance history.
 
 ## Sharing the summary
 

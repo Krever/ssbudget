@@ -44,6 +44,7 @@ object TapirSchemas {
   given Schema[SnapshotSource]      = Schema.derivedEnumeration[SnapshotSource].defaultStringBased
   given Schema[DailyBudgetSnapshot] = Schema.derived[DailyBudgetSnapshot]
   given Schema[ExchangeRate]        = Schema.derived[ExchangeRate]
+  given Schema[DataWarning]         = Schema.derived[DataWarning]
   given Schema[Money]               = Schema.derived[Money]
   given Schema[BankConnection]      = Schema.derived[BankConnection]
   given Schema[BankAccountLink]     = Schema.derived[BankAccountLink]

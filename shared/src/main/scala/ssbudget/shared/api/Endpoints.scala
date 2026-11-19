@@ -26,39 +26,39 @@ object Endpoints {
       secureEndpoint.get
         .in("accounts")
         .out(jsonBody[List[Account]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val create: Secured[CreateAccount, Account] =
       secureEndpoint.post
         .in("accounts")
         .in(jsonBody[CreateAccount])
         .out(jsonBody[Account])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val update: Secured[(AccountId, UpdateAccount), Account] =
       secureEndpoint.put
         .in("accounts" / path[AccountId]("id"))
         .in(jsonBody[UpdateAccount])
         .out(jsonBody[Account])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val updateBalance: Secured[(AccountId, UpdateAccountBalance), Account] =
       secureEndpoint.put
         .in("accounts" / path[AccountId]("id") / "balance")
         .in(jsonBody[UpdateAccountBalance])
         .out(jsonBody[Account])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val delete: Secured[AccountId, Unit] =
       secureEndpoint.delete
         .in("accounts" / path[AccountId]("id"))
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
   }
 
   object savings {
     // Balance at the current period's start per savings account (see AccountPeriodBaseline); accounts with no recorded history are omitted.
     val periodBaselines: Secured[Unit, List[AccountPeriodBaseline]] =
-      secureEndpoint.get.in("savings" / "period-baselines").out(jsonBody[List[AccountPeriodBaseline]]).errorOut(stringBody)
+      secureEndpoint.get.in("savings" / "period-baselines").out(jsonBody[List[AccountPeriodBaseline]]).errorOut(AuthEndpoints.apiError)
   }
 
   object periods {
@@ -66,7 +66,7 @@ object Endpoints {
       secureEndpoint.get
         .in("periods")
         .out(jsonBody[List[Period]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     /** Close the open period and start the next one. `asOf` is the day the new period starts; without it, it starts now. */
     val startNew: Secured[Option[LocalDate], Period] =
@@ -74,7 +74,7 @@ object Endpoints {
         .in("periods" / "start")
         .in(query[Option[LocalDate]]("asOf"))
         .out(jsonBody[Period])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     /** Correct a period's expected end. Returns the updated period so the client can just replace its copy. */
     val setExpectedEnd: Secured[(PeriodId, SetPeriodExpectedEndRequest), Period] =
@@ -82,7 +82,7 @@ object Endpoints {
         .in("periods" / path[PeriodId]("id") / "expected-end")
         .in(jsonBody[SetPeriodExpectedEndRequest])
         .out(jsonBody[Period])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     /** Set how much a period plans to move to savings. Returns the updated period. */
     val setPlannedSaving: Secured[(PeriodId, SetPeriodPlannedSavingRequest), Period] =
@@ -90,7 +90,7 @@ object Endpoints {
         .in("periods" / path[PeriodId]("id") / "planned-saving")
         .in(jsonBody[SetPeriodPlannedSavingRequest])
         .out(jsonBody[Period])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     /** Per-period retrospective, newest first. `limit` caps how many periods are summarized (each costs a few aggregate queries). */
     val summaries: Secured[Option[Int], List[PeriodSummary]] =
@@ -98,14 +98,14 @@ object Endpoints {
         .in("periods" / "summaries")
         .in(query[Option[Int]]("limit"))
         .out(jsonBody[List[PeriodSummary]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     /** The daily free-money terms of every recorded day, oldest first. The client groups them by period and draws the trend. */
     val freeMoneyHistory: Secured[Unit, FreeMoneyHistory] =
       secureEndpoint.get
         .in("periods" / "free-money-history")
         .out(jsonBody[FreeMoneyHistory])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
   }
 
   object banking {
@@ -114,75 +114,75 @@ object Endpoints {
         .in("banking" / "aspsps")
         .in(query[Option[String]]("country"))
         .out(jsonBody[List[Aspsp]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val connect: Secured[ConnectBankRequest, ConnectBankResponse] =
       secureEndpoint.post
         .in("banking" / "connect")
         .in(jsonBody[ConnectBankRequest])
         .out(jsonBody[ConnectBankResponse])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val callback: Secured[BankCallbackRequest, BankConnectionView] =
       secureEndpoint.post
         .in("banking" / "callback")
         .in(jsonBody[BankCallbackRequest])
         .out(jsonBody[BankConnectionView])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val connections: Secured[Unit, List[BankConnectionView]] =
       secureEndpoint.get
         .in("banking" / "connections")
         .out(jsonBody[List[BankConnectionView]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val disconnect: Secured[BankConnectionId, Unit] =
       secureEndpoint.delete
         .in("banking" / "connections" / path[BankConnectionId]("id"))
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val linkAccount: Secured[(BankAccountLinkId, LinkAccountRequest), List[BankConnectionView]] =
       secureEndpoint.post
         .in("banking" / "links" / path[BankAccountLinkId]("linkId") / "account")
         .in(jsonBody[LinkAccountRequest])
         .out(jsonBody[List[BankConnectionView]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val sync: Secured[BankConnectionId, List[BankConnectionView]] =
       secureEndpoint.post
         .in("banking" / "connections" / path[BankConnectionId]("id") / "sync")
         .out(jsonBody[List[BankConnectionView]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     /** Kick off a background "sync balances + import transactions across all connections" run; returns the tracked job immediately. */
     val syncAll: Secured[Unit, ImportJob] =
       secureEndpoint.post
         .in("banking" / "sync-all")
         .out(jsonBody[ImportJob])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val listCardGroups: Secured[Unit, List[CardGroup]] =
-      secureEndpoint.get.in("banking" / "card-groups").out(jsonBody[List[CardGroup]]).errorOut(stringBody)
+      secureEndpoint.get.in("banking" / "card-groups").out(jsonBody[List[CardGroup]]).errorOut(AuthEndpoints.apiError)
 
     val createCardGroup: Secured[CreateCardGroup, CardGroup] =
-      secureEndpoint.post.in("banking" / "card-groups").in(jsonBody[CreateCardGroup]).out(jsonBody[CardGroup]).errorOut(stringBody)
+      secureEndpoint.post.in("banking" / "card-groups").in(jsonBody[CreateCardGroup]).out(jsonBody[CardGroup]).errorOut(AuthEndpoints.apiError)
 
     val deleteCardGroup: Secured[CardGroupId, Unit] =
-      secureEndpoint.delete.in("banking" / "card-groups" / path[CardGroupId]("id")).errorOut(stringBody)
+      secureEndpoint.delete.in("banking" / "card-groups" / path[CardGroupId]("id")).errorOut(AuthEndpoints.apiError)
 
     val linkCardGroup: Secured[(CardGroupId, LinkCardGroupRequest), List[CardGroup]] =
       secureEndpoint.post
         .in("banking" / "card-groups" / path[CardGroupId]("id") / "account")
         .in(jsonBody[LinkCardGroupRequest])
         .out(jsonBody[List[CardGroup]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val updateCardGroupLimit: Secured[(CardGroupId, UpdateCardGroupLimit), List[CardGroup]] =
       secureEndpoint.put
         .in("banking" / "card-groups" / path[CardGroupId]("id") / "limit")
         .in(jsonBody[UpdateCardGroupLimit])
         .out(jsonBody[List[CardGroup]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     // Kicks off a background import and returns the tracked job immediately (Running). Poll `jobs.get` for progress/result.
     val importTransactions: Secured[(BankConnectionId, ImportTransactionsRequest), ImportJob] =
@@ -190,15 +190,15 @@ object Endpoints {
         .in("banking" / "connections" / path[BankConnectionId]("id") / "import-transactions")
         .in(jsonBody[ImportTransactionsRequest])
         .out(jsonBody[ImportJob])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
   }
 
   object jobs {
     val list: Secured[Unit, List[ImportJob]] =
-      secureEndpoint.get.in("jobs").out(jsonBody[List[ImportJob]]).errorOut(stringBody)
+      secureEndpoint.get.in("jobs").out(jsonBody[List[ImportJob]]).errorOut(AuthEndpoints.apiError)
 
     val get: Secured[ImportJobId, ImportJob] =
-      secureEndpoint.get.in("jobs" / path[ImportJobId]("id")).out(jsonBody[ImportJob]).errorOut(stringBody)
+      secureEndpoint.get.in("jobs" / path[ImportJobId]("id")).out(jsonBody[ImportJob]).errorOut(AuthEndpoints.apiError)
   }
 
   object transactions {
@@ -219,44 +219,48 @@ object Endpoints {
         .in(query[Option[Int]]("limit"))
         .in(query[Option[String]]("q"))
         .out(jsonBody[TransactionListResponse])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val months: Secured[Unit, List[String]] =
       secureEndpoint.get
         .in("transactions" / "months")
         .out(jsonBody[List[String]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val setCategory: Secured[(BankTransactionId, SetCategoryRequest), BankTransaction] =
       secureEndpoint.post
         .in("transactions" / path[BankTransactionId]("id") / "category")
         .in(jsonBody[SetCategoryRequest])
         .out(jsonBody[BankTransaction])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val setNote: Secured[(BankTransactionId, SetNoteRequest), BankTransaction] =
       secureEndpoint.post
         .in("transactions" / path[BankTransactionId]("id") / "note")
         .in(jsonBody[SetNoteRequest])
         .out(jsonBody[BankTransaction])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
   }
 
   object categories {
     val list: Secured[Unit, List[Category]] =
-      secureEndpoint.get.in("categories").out(jsonBody[List[Category]]).errorOut(stringBody)
+      secureEndpoint.get.in("categories").out(jsonBody[List[Category]]).errorOut(AuthEndpoints.apiError)
 
     val summaries: Secured[Unit, List[CategorySummary]] =
-      secureEndpoint.get.in("categories" / "summaries").out(jsonBody[List[CategorySummary]]).errorOut(stringBody)
+      secureEndpoint.get.in("categories" / "summaries").out(jsonBody[List[CategorySummary]]).errorOut(AuthEndpoints.apiError)
 
     val create: Secured[CreateCategory, Category] =
-      secureEndpoint.post.in("categories").in(jsonBody[CreateCategory]).out(jsonBody[Category]).errorOut(stringBody)
+      secureEndpoint.post.in("categories").in(jsonBody[CreateCategory]).out(jsonBody[Category]).errorOut(AuthEndpoints.apiError)
 
     val update: Secured[(CategoryId, UpdateCategory), Category] =
-      secureEndpoint.put.in("categories" / path[CategoryId]("id")).in(jsonBody[UpdateCategory]).out(jsonBody[Category]).errorOut(stringBody)
+      secureEndpoint.put
+        .in("categories" / path[CategoryId]("id"))
+        .in(jsonBody[UpdateCategory])
+        .out(jsonBody[Category])
+        .errorOut(AuthEndpoints.apiError)
 
     val delete: Secured[CategoryId, Unit] =
-      secureEndpoint.delete.in("categories" / path[CategoryId]("id")).errorOut(stringBody)
+      secureEndpoint.delete.in("categories" / path[CategoryId]("id")).errorOut(AuthEndpoints.apiError)
 
     // Manual remaining-amount override for the current period; both variants return the refreshed summaries so the client can just replace its state.
     val setOverride: Secured[(CategoryId, SetCategoryOverrideRequest), List[CategorySummary]] =
@@ -264,43 +268,50 @@ object Endpoints {
         .in("categories" / path[CategoryId]("id") / "override")
         .in(jsonBody[SetCategoryOverrideRequest])
         .out(jsonBody[List[CategorySummary]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val clearOverride: Secured[CategoryId, List[CategorySummary]] =
-      secureEndpoint.delete.in("categories" / path[CategoryId]("id") / "override").out(jsonBody[List[CategorySummary]]).errorOut(stringBody)
+      secureEndpoint.delete
+        .in("categories" / path[CategoryId]("id") / "override")
+        .out(jsonBody[List[CategorySummary]])
+        .errorOut(AuthEndpoints.apiError)
   }
 
   object rules {
     val list: Secured[Unit, List[ClassificationRule]] =
-      secureEndpoint.get.in("rules").out(jsonBody[List[ClassificationRule]]).errorOut(stringBody)
+      secureEndpoint.get.in("rules").out(jsonBody[List[ClassificationRule]]).errorOut(AuthEndpoints.apiError)
 
     val create: Secured[CreateRuleRequest, ClassificationRule] =
-      secureEndpoint.post.in("rules").in(jsonBody[CreateRuleRequest]).out(jsonBody[ClassificationRule]).errorOut(stringBody)
+      secureEndpoint.post.in("rules").in(jsonBody[CreateRuleRequest]).out(jsonBody[ClassificationRule]).errorOut(AuthEndpoints.apiError)
 
     val update: Secured[(ClassificationRuleId, UpdateRuleRequest), ClassificationRule] =
       secureEndpoint.put
         .in("rules" / path[ClassificationRuleId]("id"))
         .in(jsonBody[UpdateRuleRequest])
         .out(jsonBody[ClassificationRule])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val delete: Secured[ClassificationRuleId, Unit] =
-      secureEndpoint.delete.in("rules" / path[ClassificationRuleId]("id")).errorOut(stringBody)
+      secureEndpoint.delete.in("rules" / path[ClassificationRuleId]("id")).errorOut(AuthEndpoints.apiError)
 
     val reorder: Secured[ReorderRulesRequest, List[ClassificationRule]] =
-      secureEndpoint.post.in("rules" / "reorder").in(jsonBody[ReorderRulesRequest]).out(jsonBody[List[ClassificationRule]]).errorOut(stringBody)
+      secureEndpoint.post
+        .in("rules" / "reorder")
+        .in(jsonBody[ReorderRulesRequest])
+        .out(jsonBody[List[ClassificationRule]])
+        .errorOut(AuthEndpoints.apiError)
 
     val apply: Secured[Unit, ApplyRulesResult] =
-      secureEndpoint.post.in("rules" / "apply").out(jsonBody[ApplyRulesResult]).errorOut(stringBody)
+      secureEndpoint.post.in("rules" / "apply").out(jsonBody[ApplyRulesResult]).errorOut(AuthEndpoints.apiError)
 
     val preview: Secured[RulePreviewRequest, RulePreviewResponse] =
-      secureEndpoint.post.in("rules" / "preview").in(jsonBody[RulePreviewRequest]).out(jsonBody[RulePreviewResponse]).errorOut(stringBody)
+      secureEndpoint.post.in("rules" / "preview").in(jsonBody[RulePreviewRequest]).out(jsonBody[RulePreviewResponse]).errorOut(AuthEndpoints.apiError)
 
     val exportRules: Secured[Unit, RulesExport] =
-      secureEndpoint.get.in("rules" / "export").out(jsonBody[RulesExport]).errorOut(stringBody)
+      secureEndpoint.get.in("rules" / "export").out(jsonBody[RulesExport]).errorOut(AuthEndpoints.apiError)
 
     val importRules: Secured[ImportRulesRequest, ImportRulesResult] =
-      secureEndpoint.post.in("rules" / "import").in(jsonBody[ImportRulesRequest]).out(jsonBody[ImportRulesResult]).errorOut(stringBody)
+      secureEndpoint.post.in("rules" / "import").in(jsonBody[ImportRulesRequest]).out(jsonBody[ImportRulesResult]).errorOut(AuthEndpoints.apiError)
   }
 
   object analytics {
@@ -309,7 +320,7 @@ object Endpoints {
       secureEndpoint.get
         .in("analytics" / "config")
         .out(jsonBody[AnalyticsConfig])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
   }
 
   object exchangeRates {
@@ -317,7 +328,15 @@ object Endpoints {
       secureEndpoint.get
         .in("exchange-rates")
         .out(jsonBody[List[ExchangeRate]])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
+  }
+
+  object warnings {
+    val list: Secured[Unit, List[DataWarning]] =
+      secureEndpoint.get
+        .in("warnings")
+        .out(jsonBody[List[DataWarning]])
+        .errorOut(AuthEndpoints.apiError)
   }
 
   object currencies {
@@ -325,31 +344,31 @@ object Endpoints {
       secureEndpoint.get
         .in("currencies")
         .out(jsonBody[CurrencySettingsResponse])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val enable: Secured[EnableCurrencyRequest, CurrencySetting] =
       secureEndpoint.post
         .in("currencies")
         .in(jsonBody[EnableCurrencyRequest])
         .out(jsonBody[CurrencySetting])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val disable: Secured[String, Unit] =
       secureEndpoint.delete
         .in("currencies" / path[String]("code"))
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val setPrimary: Secured[SetPrimaryCurrencyRequest, Unit] =
       secureEndpoint.post
         .in("currencies" / "primary")
         .in(jsonBody[SetPrimaryCurrencyRequest])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val refreshRates: Secured[Unit, ExchangeRatesResponse] =
       secureEndpoint.post
         .in("currencies" / "refresh-rates")
         .out(jsonBody[ExchangeRatesResponse])
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
   }
 
   object test {
@@ -357,7 +376,7 @@ object Endpoints {
     val reset: Secured[Unit, Unit] =
       secureEndpoint.post
         .in("test" / "reset")
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
   }
 
   object database {
@@ -366,14 +385,14 @@ object Endpoints {
         .in("database" / "export")
         .out(header[String]("Content-Disposition"))
         .out(byteArrayBody)
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
 
     val `import`: Secured[Array[Byte], String] =
       secureEndpoint.post
         .in("database" / "import")
         .in(byteArrayBody)
         .out(stringBody)
-        .errorOut(stringBody)
+        .errorOut(AuthEndpoints.apiError)
   }
 
   val all: List[AnyEndpoint] = List(
@@ -388,6 +407,7 @@ object Endpoints {
     periods.setPlannedSaving,
     savings.periodBaselines,
     exchangeRates.getAll,
+    warnings.list,
     currencies.getSettings,
     currencies.enable,
     currencies.disable,
@@ -441,64 +461,64 @@ object Endpoints {
   object client {
     object accounts {
       val list: Client[Unit, List[Account]] =
-        baseEndpoint.get.in("accounts").out(jsonBody[List[Account]]).errorOut(stringBody)
+        baseEndpoint.get.in("accounts").out(jsonBody[List[Account]]).errorOut(AuthEndpoints.apiError)
 
       val create: Client[CreateAccount, Account] =
-        baseEndpoint.post.in("accounts").in(jsonBody[CreateAccount]).out(jsonBody[Account]).errorOut(stringBody)
+        baseEndpoint.post.in("accounts").in(jsonBody[CreateAccount]).out(jsonBody[Account]).errorOut(AuthEndpoints.apiError)
 
       val update: Client[(AccountId, UpdateAccount), Account] =
         baseEndpoint.put
           .in("accounts" / path[AccountId]("id"))
           .in(jsonBody[UpdateAccount])
           .out(jsonBody[Account])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val updateBalance: Client[(AccountId, UpdateAccountBalance), Account] =
         baseEndpoint.put
           .in("accounts" / path[AccountId]("id") / "balance")
           .in(jsonBody[UpdateAccountBalance])
           .out(jsonBody[Account])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val delete: Client[AccountId, Unit] =
-        baseEndpoint.delete.in("accounts" / path[AccountId]("id")).errorOut(stringBody)
+        baseEndpoint.delete.in("accounts" / path[AccountId]("id")).errorOut(AuthEndpoints.apiError)
     }
 
     object savings {
       val periodBaselines: Client[Unit, List[AccountPeriodBaseline]] =
-        baseEndpoint.get.in("savings" / "period-baselines").out(jsonBody[List[AccountPeriodBaseline]]).errorOut(stringBody)
+        baseEndpoint.get.in("savings" / "period-baselines").out(jsonBody[List[AccountPeriodBaseline]]).errorOut(AuthEndpoints.apiError)
     }
 
     object periods {
       val list: Client[Unit, List[Period]] =
-        baseEndpoint.get.in("periods").out(jsonBody[List[Period]]).errorOut(stringBody)
+        baseEndpoint.get.in("periods").out(jsonBody[List[Period]]).errorOut(AuthEndpoints.apiError)
 
       val startNew: Client[Option[LocalDate], Period] =
-        baseEndpoint.post.in("periods" / "start").in(query[Option[LocalDate]]("asOf")).out(jsonBody[Period]).errorOut(stringBody)
+        baseEndpoint.post.in("periods" / "start").in(query[Option[LocalDate]]("asOf")).out(jsonBody[Period]).errorOut(AuthEndpoints.apiError)
 
       val setExpectedEnd: Client[(PeriodId, SetPeriodExpectedEndRequest), Period] =
         baseEndpoint.put
           .in("periods" / path[PeriodId]("id") / "expected-end")
           .in(jsonBody[SetPeriodExpectedEndRequest])
           .out(jsonBody[Period])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val setPlannedSaving: Client[(PeriodId, SetPeriodPlannedSavingRequest), Period] =
         baseEndpoint.put
           .in("periods" / path[PeriodId]("id") / "planned-saving")
           .in(jsonBody[SetPeriodPlannedSavingRequest])
           .out(jsonBody[Period])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val summaries: Client[Option[Int], List[PeriodSummary]] =
         baseEndpoint.get
           .in("periods" / "summaries")
           .in(query[Option[Int]]("limit"))
           .out(jsonBody[List[PeriodSummary]])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val freeMoneyHistory: Client[Unit, FreeMoneyHistory] =
-        baseEndpoint.get.in("periods" / "free-money-history").out(jsonBody[FreeMoneyHistory]).errorOut(stringBody)
+        baseEndpoint.get.in("periods" / "free-money-history").out(jsonBody[FreeMoneyHistory]).errorOut(AuthEndpoints.apiError)
     }
 
     object banking {
@@ -507,76 +527,84 @@ object Endpoints {
           .in("banking" / "aspsps")
           .in(query[Option[String]]("country"))
           .out(jsonBody[List[Aspsp]])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val connect: Client[ConnectBankRequest, ConnectBankResponse] =
-        baseEndpoint.post.in("banking" / "connect").in(jsonBody[ConnectBankRequest]).out(jsonBody[ConnectBankResponse]).errorOut(stringBody)
+        baseEndpoint.post
+          .in("banking" / "connect")
+          .in(jsonBody[ConnectBankRequest])
+          .out(jsonBody[ConnectBankResponse])
+          .errorOut(AuthEndpoints.apiError)
 
       val callback: Client[BankCallbackRequest, BankConnectionView] =
-        baseEndpoint.post.in("banking" / "callback").in(jsonBody[BankCallbackRequest]).out(jsonBody[BankConnectionView]).errorOut(stringBody)
+        baseEndpoint.post
+          .in("banking" / "callback")
+          .in(jsonBody[BankCallbackRequest])
+          .out(jsonBody[BankConnectionView])
+          .errorOut(AuthEndpoints.apiError)
 
       val connections: Client[Unit, List[BankConnectionView]] =
-        baseEndpoint.get.in("banking" / "connections").out(jsonBody[List[BankConnectionView]]).errorOut(stringBody)
+        baseEndpoint.get.in("banking" / "connections").out(jsonBody[List[BankConnectionView]]).errorOut(AuthEndpoints.apiError)
 
       val disconnect: Client[BankConnectionId, Unit] =
-        baseEndpoint.delete.in("banking" / "connections" / path[BankConnectionId]("id")).errorOut(stringBody)
+        baseEndpoint.delete.in("banking" / "connections" / path[BankConnectionId]("id")).errorOut(AuthEndpoints.apiError)
 
       val linkAccount: Client[(BankAccountLinkId, LinkAccountRequest), List[BankConnectionView]] =
         baseEndpoint.post
           .in("banking" / "links" / path[BankAccountLinkId]("linkId") / "account")
           .in(jsonBody[LinkAccountRequest])
           .out(jsonBody[List[BankConnectionView]])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val sync: Client[BankConnectionId, List[BankConnectionView]] =
         baseEndpoint.post
           .in("banking" / "connections" / path[BankConnectionId]("id") / "sync")
           .out(jsonBody[List[BankConnectionView]])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val syncAll: Client[Unit, ImportJob] =
         baseEndpoint.post
           .in("banking" / "sync-all")
           .out(jsonBody[ImportJob])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val listCardGroups: Client[Unit, List[CardGroup]] =
-        baseEndpoint.get.in("banking" / "card-groups").out(jsonBody[List[CardGroup]]).errorOut(stringBody)
+        baseEndpoint.get.in("banking" / "card-groups").out(jsonBody[List[CardGroup]]).errorOut(AuthEndpoints.apiError)
 
       val createCardGroup: Client[CreateCardGroup, CardGroup] =
-        baseEndpoint.post.in("banking" / "card-groups").in(jsonBody[CreateCardGroup]).out(jsonBody[CardGroup]).errorOut(stringBody)
+        baseEndpoint.post.in("banking" / "card-groups").in(jsonBody[CreateCardGroup]).out(jsonBody[CardGroup]).errorOut(AuthEndpoints.apiError)
 
       val deleteCardGroup: Client[CardGroupId, Unit] =
-        baseEndpoint.delete.in("banking" / "card-groups" / path[CardGroupId]("id")).errorOut(stringBody)
+        baseEndpoint.delete.in("banking" / "card-groups" / path[CardGroupId]("id")).errorOut(AuthEndpoints.apiError)
 
       val updateCardGroupLimit: Client[(CardGroupId, UpdateCardGroupLimit), List[CardGroup]] =
         baseEndpoint.put
           .in("banking" / "card-groups" / path[CardGroupId]("id") / "limit")
           .in(jsonBody[UpdateCardGroupLimit])
           .out(jsonBody[List[CardGroup]])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val linkCardGroup: Client[(CardGroupId, LinkCardGroupRequest), List[CardGroup]] =
         baseEndpoint.post
           .in("banking" / "card-groups" / path[CardGroupId]("id") / "account")
           .in(jsonBody[LinkCardGroupRequest])
           .out(jsonBody[List[CardGroup]])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val importTransactions: Client[(BankConnectionId, ImportTransactionsRequest), ImportJob] =
         baseEndpoint.post
           .in("banking" / "connections" / path[BankConnectionId]("id") / "import-transactions")
           .in(jsonBody[ImportTransactionsRequest])
           .out(jsonBody[ImportJob])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
     }
 
     object jobs {
       val list: Client[Unit, List[ImportJob]] =
-        baseEndpoint.get.in("jobs").out(jsonBody[List[ImportJob]]).errorOut(stringBody)
+        baseEndpoint.get.in("jobs").out(jsonBody[List[ImportJob]]).errorOut(AuthEndpoints.apiError)
 
       val get: Client[ImportJobId, ImportJob] =
-        baseEndpoint.get.in("jobs" / path[ImportJobId]("id")).out(jsonBody[ImportJob]).errorOut(stringBody)
+        baseEndpoint.get.in("jobs" / path[ImportJobId]("id")).out(jsonBody[ImportJob]).errorOut(AuthEndpoints.apiError)
     }
 
     object transactions {
@@ -595,84 +623,95 @@ object Endpoints {
           .in(query[Option[Int]]("limit"))
           .in(query[Option[String]]("q"))
           .out(jsonBody[TransactionListResponse])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val months: Client[Unit, List[String]] =
-        baseEndpoint.get.in("transactions" / "months").out(jsonBody[List[String]]).errorOut(stringBody)
+        baseEndpoint.get.in("transactions" / "months").out(jsonBody[List[String]]).errorOut(AuthEndpoints.apiError)
 
       val setCategory: Client[(BankTransactionId, SetCategoryRequest), BankTransaction] =
         baseEndpoint.post
           .in("transactions" / path[BankTransactionId]("id") / "category")
           .in(jsonBody[SetCategoryRequest])
           .out(jsonBody[BankTransaction])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val setNote: Client[(BankTransactionId, SetNoteRequest), BankTransaction] =
         baseEndpoint.post
           .in("transactions" / path[BankTransactionId]("id") / "note")
           .in(jsonBody[SetNoteRequest])
           .out(jsonBody[BankTransaction])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
     }
 
     object categories {
       val list: Client[Unit, List[Category]] =
-        baseEndpoint.get.in("categories").out(jsonBody[List[Category]]).errorOut(stringBody)
+        baseEndpoint.get.in("categories").out(jsonBody[List[Category]]).errorOut(AuthEndpoints.apiError)
 
       val summaries: Client[Unit, List[CategorySummary]] =
-        baseEndpoint.get.in("categories" / "summaries").out(jsonBody[List[CategorySummary]]).errorOut(stringBody)
+        baseEndpoint.get.in("categories" / "summaries").out(jsonBody[List[CategorySummary]]).errorOut(AuthEndpoints.apiError)
 
       val create: Client[CreateCategory, Category] =
-        baseEndpoint.post.in("categories").in(jsonBody[CreateCategory]).out(jsonBody[Category]).errorOut(stringBody)
+        baseEndpoint.post.in("categories").in(jsonBody[CreateCategory]).out(jsonBody[Category]).errorOut(AuthEndpoints.apiError)
 
       val update: Client[(CategoryId, UpdateCategory), Category] =
-        baseEndpoint.put.in("categories" / path[CategoryId]("id")).in(jsonBody[UpdateCategory]).out(jsonBody[Category]).errorOut(stringBody)
+        baseEndpoint.put
+          .in("categories" / path[CategoryId]("id"))
+          .in(jsonBody[UpdateCategory])
+          .out(jsonBody[Category])
+          .errorOut(AuthEndpoints.apiError)
 
       val delete: Client[CategoryId, Unit] =
-        baseEndpoint.delete.in("categories" / path[CategoryId]("id")).errorOut(stringBody)
+        baseEndpoint.delete.in("categories" / path[CategoryId]("id")).errorOut(AuthEndpoints.apiError)
 
       val setOverride: Client[(CategoryId, SetCategoryOverrideRequest), List[CategorySummary]] =
         baseEndpoint.put
           .in("categories" / path[CategoryId]("id") / "override")
           .in(jsonBody[SetCategoryOverrideRequest])
           .out(jsonBody[List[CategorySummary]])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val clearOverride: Client[CategoryId, List[CategorySummary]] =
-        baseEndpoint.delete.in("categories" / path[CategoryId]("id") / "override").out(jsonBody[List[CategorySummary]]).errorOut(stringBody)
+        baseEndpoint.delete
+          .in("categories" / path[CategoryId]("id") / "override")
+          .out(jsonBody[List[CategorySummary]])
+          .errorOut(AuthEndpoints.apiError)
     }
 
     object rules {
       val list: Client[Unit, List[ClassificationRule]] =
-        baseEndpoint.get.in("rules").out(jsonBody[List[ClassificationRule]]).errorOut(stringBody)
+        baseEndpoint.get.in("rules").out(jsonBody[List[ClassificationRule]]).errorOut(AuthEndpoints.apiError)
 
       val create: Client[CreateRuleRequest, ClassificationRule] =
-        baseEndpoint.post.in("rules").in(jsonBody[CreateRuleRequest]).out(jsonBody[ClassificationRule]).errorOut(stringBody)
+        baseEndpoint.post.in("rules").in(jsonBody[CreateRuleRequest]).out(jsonBody[ClassificationRule]).errorOut(AuthEndpoints.apiError)
 
       val update: Client[(ClassificationRuleId, UpdateRuleRequest), ClassificationRule] =
         baseEndpoint.put
           .in("rules" / path[ClassificationRuleId]("id"))
           .in(jsonBody[UpdateRuleRequest])
           .out(jsonBody[ClassificationRule])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val delete: Client[ClassificationRuleId, Unit] =
-        baseEndpoint.delete.in("rules" / path[ClassificationRuleId]("id")).errorOut(stringBody)
+        baseEndpoint.delete.in("rules" / path[ClassificationRuleId]("id")).errorOut(AuthEndpoints.apiError)
 
       val reorder: Client[ReorderRulesRequest, List[ClassificationRule]] =
-        baseEndpoint.post.in("rules" / "reorder").in(jsonBody[ReorderRulesRequest]).out(jsonBody[List[ClassificationRule]]).errorOut(stringBody)
+        baseEndpoint.post
+          .in("rules" / "reorder")
+          .in(jsonBody[ReorderRulesRequest])
+          .out(jsonBody[List[ClassificationRule]])
+          .errorOut(AuthEndpoints.apiError)
 
       val apply: Client[Unit, ApplyRulesResult] =
-        baseEndpoint.post.in("rules" / "apply").out(jsonBody[ApplyRulesResult]).errorOut(stringBody)
+        baseEndpoint.post.in("rules" / "apply").out(jsonBody[ApplyRulesResult]).errorOut(AuthEndpoints.apiError)
 
       val preview: Client[RulePreviewRequest, RulePreviewResponse] =
-        baseEndpoint.post.in("rules" / "preview").in(jsonBody[RulePreviewRequest]).out(jsonBody[RulePreviewResponse]).errorOut(stringBody)
+        baseEndpoint.post.in("rules" / "preview").in(jsonBody[RulePreviewRequest]).out(jsonBody[RulePreviewResponse]).errorOut(AuthEndpoints.apiError)
 
       val exportRules: Client[Unit, RulesExport] =
-        baseEndpoint.get.in("rules" / "export").out(jsonBody[RulesExport]).errorOut(stringBody)
+        baseEndpoint.get.in("rules" / "export").out(jsonBody[RulesExport]).errorOut(AuthEndpoints.apiError)
 
       val importRules: Client[ImportRulesRequest, ImportRulesResult] =
-        baseEndpoint.post.in("rules" / "import").in(jsonBody[ImportRulesRequest]).out(jsonBody[ImportRulesResult]).errorOut(stringBody)
+        baseEndpoint.post.in("rules" / "import").in(jsonBody[ImportRulesRequest]).out(jsonBody[ImportRulesResult]).errorOut(AuthEndpoints.apiError)
     }
 
     object analytics {
@@ -680,29 +719,34 @@ object Endpoints {
         baseEndpoint.get
           .in("analytics" / "config")
           .out(jsonBody[AnalyticsConfig])
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
     }
 
     object exchangeRates {
       val getAll: Client[Unit, List[ExchangeRate]] =
-        baseEndpoint.get.in("exchange-rates").out(jsonBody[List[ExchangeRate]]).errorOut(stringBody)
+        baseEndpoint.get.in("exchange-rates").out(jsonBody[List[ExchangeRate]]).errorOut(AuthEndpoints.apiError)
+    }
+
+    object warnings {
+      val list: Client[Unit, List[DataWarning]] =
+        baseEndpoint.get.in("warnings").out(jsonBody[List[DataWarning]]).errorOut(AuthEndpoints.apiError)
     }
 
     object currencies {
       val getSettings: Client[Unit, CurrencySettingsResponse] =
-        baseEndpoint.get.in("currencies").out(jsonBody[CurrencySettingsResponse]).errorOut(stringBody)
+        baseEndpoint.get.in("currencies").out(jsonBody[CurrencySettingsResponse]).errorOut(AuthEndpoints.apiError)
 
       val enable: Client[EnableCurrencyRequest, CurrencySetting] =
-        baseEndpoint.post.in("currencies").in(jsonBody[EnableCurrencyRequest]).out(jsonBody[CurrencySetting]).errorOut(stringBody)
+        baseEndpoint.post.in("currencies").in(jsonBody[EnableCurrencyRequest]).out(jsonBody[CurrencySetting]).errorOut(AuthEndpoints.apiError)
 
       val disable: Client[String, Unit] =
-        baseEndpoint.delete.in("currencies" / path[String]("code")).errorOut(stringBody)
+        baseEndpoint.delete.in("currencies" / path[String]("code")).errorOut(AuthEndpoints.apiError)
 
       val setPrimary: Client[SetPrimaryCurrencyRequest, Unit] =
-        baseEndpoint.post.in("currencies" / "primary").in(jsonBody[SetPrimaryCurrencyRequest]).errorOut(stringBody)
+        baseEndpoint.post.in("currencies" / "primary").in(jsonBody[SetPrimaryCurrencyRequest]).errorOut(AuthEndpoints.apiError)
 
       val refreshRates: Client[Unit, ExchangeRatesResponse] =
-        baseEndpoint.post.in("currencies" / "refresh-rates").out(jsonBody[ExchangeRatesResponse]).errorOut(stringBody)
+        baseEndpoint.post.in("currencies" / "refresh-rates").out(jsonBody[ExchangeRatesResponse]).errorOut(AuthEndpoints.apiError)
     }
 
     object database {
@@ -711,14 +755,14 @@ object Endpoints {
           .in("database" / "export")
           .out(header[String]("Content-Disposition"))
           .out(byteArrayBody)
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
 
       val `import`: Client[Array[Byte], String] =
         baseEndpoint.post
           .in("database" / "import")
           .in(byteArrayBody)
           .out(stringBody)
-          .errorOut(stringBody)
+          .errorOut(AuthEndpoints.apiError)
     }
   }
 }

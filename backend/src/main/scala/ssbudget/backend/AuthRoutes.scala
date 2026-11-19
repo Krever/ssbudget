@@ -129,6 +129,19 @@ object AuthRoutes {
         .serverLogic(_ => _ => errorsAsLeft(webAuthnService.startVerification())),
     )
 
+    // A new proof of identity for this session (authenticated, plus an IdentityProof)
+    val confirmIdentityRoute = interpreter.toRoutes(
+      AuthEndpoints.confirmIdentity
+        .serverSecurityLogic(token => validateSession(sessionService, token, testMode).map(_.map(_ => token)))
+        .serverLogic(token =>
+          proof =>
+            confirmIdentity(authConfigRepo, passwordService, webAuthnService, proof).flatMap {
+              case Left(err) => IO.pure(Left(err))
+              case Right(_)  => token.fold(IO.unit)(sessionService.confirm).as(Right(()))
+            },
+        ),
+    )
+
     // Set or replace the password (authenticated, plus an IdentityProof)
     val changePasswordRoute = interpreter.toRoutes(
       AuthEndpoints.changePassword
@@ -140,14 +153,14 @@ object AuthRoutes {
     // Passkey registration start (authenticated)
     val registerPasskeyStartRoute = interpreter.toRoutes(
       AuthEndpoints.registerPasskeyStart
-        .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
+        .serverSecurityLogic(token => validateConfirmed(sessionService, token, testMode))
         .serverLogic(_ => req => startPasskeyRegistration(webAuthnService, req)),
     )
 
     // Passkey registration finish (authenticated)
     val registerPasskeyFinishRoute = interpreter.toRoutes(
       AuthEndpoints.registerPasskeyFinish
-        .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
+        .serverSecurityLogic(token => validateConfirmed(sessionService, token, testMode))
         .serverLogic(_ => req => finishPasskeyRegistration(webAuthnService, req)),
     )
 
@@ -171,7 +184,7 @@ object AuthRoutes {
     // Delete passkey (authenticated)
     val deletePasskeyRoute = interpreter.toRoutes(
       AuthEndpoints.deletePasskey
-        .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
+        .serverSecurityLogic(token => validateConfirmed(sessionService, token, testMode))
         .serverLogic(_ => credId => deletePasskey(passkeyRepo, credId)),
     )
 
@@ -180,6 +193,7 @@ object AuthRoutes {
       loginRoute <+>
       logoutRoute <+>
       verifyPasskeyStartRoute <+>
+      confirmIdentityRoute <+>
       changePasswordRoute <+>
       registerPasskeyStartRoute <+>
       registerPasskeyFinishRoute <+>
@@ -204,12 +218,25 @@ object AuthRoutes {
         case Some(token) =>
           sessionService.validateSession(token).map {
             case Some(_) => Right(())
-            case None    => Left("Unauthorized")
+            case None    => Left(AuthEndpoints.Unauthorized)
           }
-        case None        => IO.pure(Left("Unauthorized"))
+        case None        => IO.pure(Left(AuthEndpoints.Unauthorized))
       }
     }
   }
+
+  /** As [[validateSession]], and the owner must have proved their identity a short time ago (a login, or `AuthEndpoints.confirmIdentity`).
+    *
+    * For the actions with a lasting effect that a found-open session must not be able to do: to take all the data (export), to replace it (import),
+    * and to add or remove a way in (passkeys). Test mode has no session and no login, so it has nothing to confirm.
+    */
+  def validateConfirmed(sessionService: SessionService, tokenOpt: Option[String], testMode: Boolean): IO[Either[String, Unit]] =
+    validateSession(sessionService, tokenOpt, testMode).flatMap {
+      case Left(error)           => IO.pure(Left(error))
+      case Right(()) if testMode => IO.pure(Right(()))
+      case Right(())             =>
+        tokenOpt.fold(IO.pure(false))(sessionService.recentlyConfirmed).map(Either.cond(_, (), AuthEndpoints.NeedsConfirmation))
+    }
 
   /** Checks if session token is valid, returns boolean for status endpoint.
     *
@@ -219,18 +246,18 @@ object AuthRoutes {
       sessionService: SessionService,
       tokenOpt: Option[String],
       testMode: Boolean,
-  ): IO[Either[String, Boolean]] = {
+  ): IO[Either[String, (Boolean, Boolean)]] = {
     if testMode then {
-      // In test mode, always return logged in
-      IO.pure(Right(true))
+      // In test mode, always return logged in, with nothing to confirm
+      IO.pure(Right((true, true)))
     } else {
       tokenOpt match {
         case Some(token) =>
-          sessionService.validateSession(token).map {
-            case Some(_) => Right(true)
-            case None    => Right(false)
+          sessionService.recentlyConfirmed(token).flatMap {
+            case true  => IO.pure(Right((true, true)))
+            case false => sessionService.validateSession(token).map(s => Right((s.isDefined, false)))
           }
-        case None        => IO.pure(Right(false))
+        case None        => IO.pure(Right((false, false)))
       }
     }
   }
@@ -238,19 +265,20 @@ object AuthRoutes {
   private def getAuthStatus(
       authConfigRepo: AuthConfigRepository,
       passkeyRepo: PasskeyCredentialRepository,
-      loggedIn: Boolean,
+      login: (Boolean, Boolean),
       testMode: Boolean,
   ): IO[Either[String, AuthStatus]] = {
+    val (loggedIn, recentlyConfirmed) = login
     // In test mode, return configured=true and loggedIn=true to bypass auth UI
     if testMode then {
-      IO.pure(Right(AuthStatus(configured = true, passkeyCount = 0, loggedIn = true, hasPassword = false)))
+      IO.pure(Right(AuthStatus(configured = true, passkeyCount = 0, loggedIn = true, hasPassword = false, recentlyConfirmed = true)))
     } else {
       for {
         configOpt    <- authConfigRepo.get
         passkeyCount <- passkeyRepo.count
         hasPassword   = configOpt.exists(_.passwordHash.isDefined)
         configured    = hasPassword || passkeyCount > 0
-      } yield Right(AuthStatus(configured, passkeyCount, loggedIn, hasPassword))
+      } yield Right(AuthStatus(configured, passkeyCount, loggedIn, hasPassword, recentlyConfirmed))
     }
   }
 
@@ -283,7 +311,7 @@ object AuthRoutes {
                          hash    <- passwordService.hash(req.password)
                          _       <- authConfigRepo.upsert(hash)
                          session <- sessionService.createSession()
-                       } yield Right(sessionCookie(session.token))
+                       } yield Right(sessionCookie(session))
                    }
     } yield result
   }
@@ -301,7 +329,7 @@ object AuthRoutes {
           checkPassword(authConfigRepo, passwordService, req.password).flatMap {
             case Some(true)  =>
               IO(loginThrottle.succeeded()) *> sessionService.cleanupExpiredSessions() *>
-                sessionService.createSession().map(s => Right(sessionCookie(s.token)))
+                sessionService.createSession().map(token => Right(sessionCookie(token)))
             case Some(false) => IO.realTimeInstant.map(loginThrottle.failed).as(Left("Invalid password"))
             case None        => IO.pure(Left("Authentication not configured"))
           }
@@ -402,7 +430,7 @@ object AuthRoutes {
       req: PasskeyAuthenticationResponse,
   ): IO[Either[String, CookieValueWithMeta]] = {
     webAuthnService.finishAuthentication(req).attempt.flatMap {
-      case Right(_)    => sessionService.createSession().map(s => Right(sessionCookie(s.token)))
+      case Right(_)    => sessionService.createSession().map(token => Right(sessionCookie(token)))
       case Left(error) => IO.pure(Left(error.getMessage))
     }
   }

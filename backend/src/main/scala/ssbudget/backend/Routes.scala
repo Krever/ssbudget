@@ -15,7 +15,7 @@ import ssbudget.backend.db.{Database, Repositories}
 import ssbudget.backend.db.repository.{TransactionFilter, TransactionSearchRow}
 import ssbudget.backend.search.TransactionSearch
 import ssbudget.backend.service.BudgetQueries.*
-import ssbudget.backend.service.{BudgetSnapshotService, CategorySummaryService, CurrencyService, PeriodService}
+import ssbudget.backend.service.{BudgetSnapshotService, CategorySummaryService, CurrencyService, DataHealth, PeriodService}
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 import ssbudget.shared.rules.RuleMatcher
@@ -56,6 +56,10 @@ object Routes {
     def route[I, O](ep: Endpoint[Option[String], I, String, O, Any])(h: I => Result[O]): ServerEndpoint[Any, IO] =
       ep.serverSecurityLogic(validateSession).serverLogic(_ => h)
 
+    /** A route that needs a recent proof of identity too (see `AuthRoutes.validateConfirmed`). */
+    def confirmedRoute[I, O](ep: Endpoint[Option[String], I, String, O, Any])(h: I => Result[O]): ServerEndpoint[Any, IO] =
+      ep.serverSecurityLogic(token => AuthRoutes.validateConfirmed(sessionService, token, testMode)).serverLogic(_ => h)
+
     val routes = List(
       // Accounts (spending + savings, unified)
       route(Endpoints.accounts.list)(_ => repos.accounts.findAll.map(Right(_))),
@@ -74,6 +78,7 @@ object Routes {
       route(Endpoints.savings.periodBaselines)(_ => periods.baselines.map(Right(_))),
       // Exchange rates (all rates to primary currency)
       route(Endpoints.exchangeRates.getAll)(_ => getAllExchangeRates(repos)),
+      route(Endpoints.warnings.list)(_ => DataHealth.warnings(repos).map(Right(_))),
       // Currency settings
       route(Endpoints.currencies.getSettings)(_ => currencyService.getSettings().map(Right(_))),
       route(Endpoints.currencies.enable)(dto => currencyService.enableCurrency(dto.code)),
@@ -128,8 +133,9 @@ object Routes {
       // Analytics (Metabase-backed; reports itself disabled when the deployment ships without it)
       route(Endpoints.analytics.config)(_ => analyticsService.status.map(Right(_))),
       // Database import/export
-      route(Endpoints.database.download)(_ => exportDatabase(xa, dbPath)),
-      route(Endpoints.database.`import`)(bytes => importDatabase(xa, dbPath, bytes)),
+      // The export is all the data and the import replaces it: the session alone is not sufficient for either.
+      confirmedRoute(Endpoints.database.download)(_ => exportDatabase(xa, dbPath)),
+      confirmedRoute(Endpoints.database.`import`)(bytes => importDatabase(xa, dbPath, bytes)),
     ) ++ (if testMode then List(route(Endpoints.test.reset)(_ => resetDatabase)) else Nil)
 
     interpreter.toRoutes(routes)
@@ -157,7 +163,19 @@ object Routes {
                            val updated = existing.copy(name = dto.name, currency = dto.currency, role = role)
                            // Only an investment account has transfer categories.
                            val unlink  = IO.whenA(role != AccountRole.Investment)(repos.categories.clearTransferAccount(id))
-                           (repos.accounts.update(updated) *> unlink).as(Right(updated))
+                           val save    = (repos.accounts.update(updated) *> unlink).as(Right(updated))
+                           if dto.currency == existing.currency then save
+                           else {
+                             // The recorded balances and the bank entries of the account are amounts in its currency. A new currency would
+                             // give them a new meaning with no conversion. It is thus possible only while the account is still empty.
+                             (repos.balanceSnapshots.findByAccount(id), repos.bankConnections.findLinkByAccount(id)).flatMapN { (history, link) =>
+                               if link.isDefined then IO.pure(Left("The currency cannot change: the account is linked to a bank account"))
+                               else if existing.balanceCents != 0 || history.exists(_.amount != 0) then IO.pure(
+                                 Left("The currency cannot change: the account has a balance history in its currency. Add a new account."),
+                               )
+                               else save
+                             }
+                           }
                          }
                        case None           => IO.pure(Left(s"Account not found: ${id.value}"))
                      }
@@ -212,20 +230,12 @@ object Routes {
   /** The test-mode reset endpoint. It answers and changes nothing: the e2e servers start each run on a new database. */
   private def resetDatabase: Result[Unit] = IO.pure(Right(()))
 
-  private def getAllExchangeRates(repos: Repositories): Result[List[ExchangeRate]] = {
-    // Get latest exchange rates for all enabled currencies to the primary currency
+  /** The newest rate of each currency to the primary currency. */
+  private def getAllExchangeRates(repos: Repositories): Result[List[ExchangeRate]] =
     for {
       primaryOpt <- repos.currencySettings.findPrimary
-      enabled    <- repos.currencySettings.findAll
-      primary     = primaryOpt.map(_.code).getOrElse(Currency.PLN)
-      // For each non-primary enabled currency, get latest rate to primary
-      rates      <- enabled
-                      .filterNot(_.code == primary)
-                      .traverse { setting =>
-                        repos.exchangeRates.findLatest(setting.code, primary)
-                      }
-    } yield Right(rates.flatten)
-  }
+      rates      <- repos.exchangeRates.findLatestTo(primaryOpt.map(_.code).getOrElse(Currency.PLN))
+    } yield Right(rates)
 
   /** Accepts either a full ISO instant or a bare `yyyy-MM-dd` date (interpreted at UTC start-of-day). */
   /** Cap the number of rows shipped to the browser; the response carries the true total so the UI can prompt the user to narrow filters. */

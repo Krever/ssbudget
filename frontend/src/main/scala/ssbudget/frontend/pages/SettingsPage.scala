@@ -34,6 +34,17 @@ object SettingsPage {
     // None until loaded; a password field is only offered once a password exists
     val hasPasswordVar     = Var(Option.empty[Boolean])
     val canUsePasskey      = passkeysVar.signal.map(_.nonEmpty && WebAuthnFacade.isSupported)
+    // An action that waits for a proof of identity (see `sensitive`); the dialog shows while there is one.
+    val waitingVar         = Var(Option.empty[() => Unit])
+
+    /** Runs an action that the server allows only with a recent proof of identity: export, import, and a passkey change. When the session has such a
+      * proof (the login was a short time ago) the action runs at once. If not, the dialog asks for the password or a passkey first.
+      */
+    def sensitive(action: () => Unit): Unit =
+      apiClient.auth.status().onComplete {
+        case Success(status) if status.recentlyConfirmed => action()
+        case _                                           => waitingVar.set(Some(action))
+      }
 
     def loadPasskeys(): Unit = {
       loadingVar.set(true)
@@ -164,7 +175,7 @@ object SettingsPage {
                           ),
                           Loading.confirmActionButton(
                             "Delete",
-                            () => Future.successful(deletePasskey(key.credentialId)),
+                            () => Future.successful(sensitive(() => deletePasskey(key.credentialId))),
                             hint = "Removes this passkey: it cannot log in any more",
                           ),
                         )
@@ -192,7 +203,7 @@ object SettingsPage {
                         cls         := "btn btn-primary",
                         disabled <-- addingPasskeyVar.signal,
                         "Add Passkey",
-                        onClick --> { _ => addPasskey() },
+                        onClick --> { _ => sensitive(() => addPasskey()) },
                       ),
                     ),
                   )
@@ -218,7 +229,8 @@ object SettingsPage {
       currenciesCard(errorVar, successVar, addCurrencyCodeVar, refreshingRatesVar),
 
       // Data section (import/export)
-      dataCard(errorVar, successVar),
+      dataCard(errorVar, successVar, sensitive),
+      confirmIdentityDialog(apiClient, waitingVar, hasPasswordVar.signal, canUsePasskey),
 
       // Account section
       div(
@@ -642,9 +654,95 @@ object SettingsPage {
     )
   }
 
+  /** The dialog that asks who is there, while a sensitive action waits (see `sensitive` in `apply`). The password or a passkey is sent to the server,
+    * which then allows such actions for a short time; the waiting action runs after that.
+    */
+  private def confirmIdentityDialog(
+      apiClient: ApiClient,
+      waitingVar: Var[Option[() => Unit]],
+      hasPassword: Signal[Option[Boolean]],
+      canUsePasskey: Signal[Boolean],
+  ): HtmlElement = {
+    val passwordVar = Var("")
+    val busyVar     = Var(false)
+    val errorVar    = Var(Option.empty[String])
+
+    def close(): Unit = {
+      passwordVar.set("")
+      errorVar.set(None)
+      waitingVar.set(None)
+    }
+
+    def confirmWith(password: String): Unit = {
+      busyVar.set(true)
+      errorVar.set(None)
+      identityProof(apiClient, password).flatMap(apiClient.auth.confirmIdentity).onComplete { result =>
+        busyVar.set(false)
+        result match {
+          case Success(_)  =>
+            val action = waitingVar.now()
+            close()
+            action.foreach(_())
+          case Failure(ex) => errorVar.set(Some(ex.getMessage))
+        }
+      }
+    }
+
+    div(
+      child.maybe <-- waitingVar.signal.map(_.map { _ =>
+        div(
+          cls                          := "modal d-block",
+          styleAttr                    := "background: rgba(0, 0, 0, 0.4)",
+          dataAttr("confirm-identity") := "open",
+          div(
+            cls := "modal-dialog modal-dialog-centered modal-sm",
+            div(
+              cls := "modal-content",
+              div(cls := "modal-header py-2", h6(cls := "modal-title", "Confirm it is you")),
+              div(
+                cls   := "modal-body",
+                p(cls := "small text-muted", "This action needs your password or a passkey again. The proof is then good for some minutes."),
+                child.maybe <-- hasPassword.map(_.filter(identity).map { _ =>
+                  form(
+                    onSubmit.preventDefault --> { _ => if passwordVar.now().nonEmpty then confirmWith(passwordVar.now()) },
+                    div(
+                      cls := "input-group mb-2",
+                      passwordInput("Current password", "current-password", passwordVar).amend(onMountFocus),
+                      button(
+                        tpe := "submit",
+                        cls := "btn btn-primary",
+                        disabled <-- busyVar.signal.combineWith(passwordVar.signal).map { case (busy, password) => busy || password.isEmpty },
+                        "Confirm",
+                      ),
+                    ),
+                  )
+                }),
+                child.maybe <-- canUsePasskey.map(Option.when(_) {
+                  button(
+                    tpe := "button",
+                    cls := "btn btn-outline-primary btn-sm",
+                    disabled <-- busyVar.signal,
+                    "Use a passkey",
+                    onClick --> { _ => confirmWith("") },
+                  )
+                }),
+                child.maybe <-- errorVar.signal.map(_.map(error => div(cls := "text-danger small mt-2", error))),
+              ),
+              div(
+                cls   := "modal-footer py-1",
+                button(tpe := "button", cls := "btn btn-outline-secondary btn-sm", "Cancel", onClick --> { _ => close() }),
+              ),
+            ),
+          ),
+        )
+      }),
+    )
+  }
+
   private def dataCard(
       errorVar: Var[Option[String]],
       successVar: Var[Option[String]],
+      sensitive: (() => Unit) => Unit,
   ): HtmlElement = {
     val importingVar = Var(false)
     val fileInputRef = Var(Option.empty[HTMLInputElement])
@@ -657,7 +755,8 @@ object SettingsPage {
       val files = input.files
       if files.length > 0 then {
         val file = files(0)
-        uploadFile(file)
+        // The file is chosen first and the proof is asked for after: a file dialog opens only from a click.
+        sensitive(() => uploadFile(file))
         // Reset the input so the same file can be selected again
         input.value = ""
       }
@@ -709,15 +808,17 @@ object SettingsPage {
         p(cls := "text-muted small", "Export or import your database for backup and restore purposes."),
         div(
           cls := "d-flex gap-2",
-          a(
-            cls      := "btn btn-outline-primary",
-            href     := "/api/database/export",
-            download := "ssbudget_backup.db",
+          button(
+            tpe                := "button",
+            cls                := "btn btn-outline-primary",
+            dataAttr("action") := "export-database",
             i(cls := "bi bi-download me-2"),
             "Export Database",
+            // The answer is a file to save (it comes with "attachment"), so the page stays.
+            onClick --> { _ => sensitive(() => dom.window.location.assign("/api/database/export")) },
           ),
           button(
-            cls      := "btn btn-outline-warning",
+            cls                := "btn btn-outline-warning",
             disabled <-- importingVar.signal,
             onClick --> { _ => triggerFileInput() },
             child <-- importingVar.signal.map { importing =>
@@ -735,9 +836,9 @@ object SettingsPage {
             },
           ),
           input(
-            tpe      := "file",
-            accept   := ".db,.sqlite,.sqlite3",
-            cls      := "d-none",
+            tpe                := "file",
+            accept             := ".db,.sqlite,.sqlite3",
+            cls                := "d-none",
             onMountCallback { ctx =>
               fileInputRef.set(Some(ctx.thisNode.ref))
             },

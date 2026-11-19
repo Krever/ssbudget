@@ -143,10 +143,12 @@ object EnableBankingClient {
 
   final case class EbAccountDetails(name: Option[String], product: Option[String], iban: Option[String], currency: Option[String])
 
-  /** One transaction, best-effort extracted. `amountCents` is signed (debit negative). `raw` is the untouched payload so nothing is ever lost. */
+  /** One transaction, best-effort extracted. `amountCents` is signed (debit negative), and None when the bank sent no amount that can be read: the
+    * parser does not invent a value. `raw` is the untouched payload so nothing is ever lost.
+    */
   final case class EbTransaction(
       entryReference: Option[String],
-      amountCents: Long,
+      amountCents: Option[Long],
       currency: String,
       status: String, // "booked" | "pending"
       bookedAt: Option[Instant],
@@ -260,11 +262,11 @@ object EnableBankingClient {
       .get[Json]("amount")
       .toOption
       .flatMap(a => a.asString.orElse(a.asNumber.map(_.toString)))
-    val rawCents                                      = amountStr.flatMap(s => Try((BigDecimal(s) * 100).setScale(0, BigDecimal.RoundingMode.HALF_UP).toLongExact).toOption).getOrElse(0L)
+    val rawCents                                      = amountStr.flatMap(s => Try((BigDecimal(s) * 100).setScale(0, BigDecimal.RoundingMode.HALF_UP).toLongExact).toOption)
     val indicator                                     = c.get[String]("credit_debit_indicator").toOption
     val signed                                        = indicator match {
-      case Some("DBIT") => -math.abs(rawCents)
-      case Some("CRDT") => math.abs(rawCents)
+      case Some("DBIT") => rawCents.map(c => -math.abs(c))
+      case Some("CRDT") => rawCents.map(math.abs)
       case _            => rawCents // fall back to whatever sign the amount carried
     }
     val currency                                      = c.downField("transaction_amount").get[String]("currency").toOption.getOrElse("")

@@ -10,6 +10,9 @@ final case class AuthStatus(
     passkeyCount: Int,
     loggedIn: Boolean,
     hasPassword: Boolean,
+    // The owner proved their identity in this session a short time ago, so an action that needs a proof (export, import, a passkey change) will
+    // pass. When false, the client asks for the password or a passkey first (`AuthEndpoints.confirmIdentity`).
+    recentlyConfirmed: Boolean = false,
 ) derives Codec.AsObject
 
 // Password setup request (initial setup only)

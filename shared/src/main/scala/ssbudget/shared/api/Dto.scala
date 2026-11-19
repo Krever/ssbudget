@@ -45,3 +45,6 @@ final case class ExchangeRatesResponse(
     baseCurrency: String,
     fetchedAt: java.time.Instant,
 ) derives Codec.AsObject
+
+/** A fault in the data that makes a figure wrong (a currency with no exchange rate). `code` names the kind; `message` is the text for the user. */
+final case class DataWarning(code: String, message: String) derives Codec.AsObject

@@ -122,6 +122,9 @@ trait BankTransactionRepository {
     */
   def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]]
 
+  /** Each currency that has a bank entry. */
+  def currenciesInUse: IO[List[Currency]]
+
   /** The non-internal money in and out from `from` on, for each (day, bank account, currency, category). It is the one read behind the period
     * reports: the figures of every period are sums of these rows over the days of the period, so a page of periods costs one query and not a set of
     * queries for each period.
@@ -322,6 +325,9 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
             AND t.booked_at >= $from""" ++ upper ++
       fr"GROUP BY c.transfer_account_id, t.currency").query[(AccountId, Currency, Long)].to[List].transact(xa)
   }
+
+  override def currenciesInUse: IO[List[Currency]] =
+    sql"SELECT DISTINCT currency FROM bank_transactions".query[Currency].to[List].transact(xa)
 
   override def dailyFlowsSince(from: Instant): IO[List[DailyFlow]] =
     sql"""SELECT substr(booked_at, 1, 10) AS d, eb_account_uid, currency, category_id,

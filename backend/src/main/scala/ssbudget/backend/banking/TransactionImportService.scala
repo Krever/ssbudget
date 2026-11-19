@@ -1,6 +1,6 @@
 package ssbudget.backend.banking
 
-import cats.effect.IO
+import cats.effect.{IO, Ref}
 import cats.implicits.*
 import org.slf4j.LoggerFactory
 import ssbudget.backend.banking.EnableBankingClient.EbTransaction
@@ -20,6 +20,11 @@ import java.util.UUID
   *
   * Idempotent: every transaction is deduped by `(ebAccountUid, dedupKey)`, so overlapping/repeated runs never create duplicates.
   */
+/** What became of one entry of the bank. */
+private enum Outcome {
+  case Imported, Known, Pending, Unreadable
+}
+
 class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBankingApi], ruleEngine: RuleEngineService) {
 
   private val log = LoggerFactory.getLogger(classOf[TransactionImportService])
@@ -77,17 +82,22 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
       now: Instant,
   ): IO[AccountImportResult] =
     for {
-      dateFrom <- monthsBack match {
-                    case Some(n) => IO.pure(today.minusMonths(n.toLong))
-                    case None    =>
-                      repos.bankTransactions.latestBookedAt(link.ebAccountUid).map {
-                        case Some(last) => LocalDate.ofInstant(last, ZoneOffset.UTC).minusDays(overlapDays)
-                        case None       => today.minusDays(defaultInitialDays)
-                      }
-                  }
-      _        <- IO(log.info(s"[import] ${link.ebAccountUid}: fetching $dateFrom..$today"))
-      result   <- importPages(client, connId, link, dateFrom, today, None, now, page = 0, imported = 0, skipped = 0)
-      _        <- IO(log.info(s"[import] ${link.ebAccountUid}: imported ${result.imported}, skipped ${result.skipped}"))
+      dateFrom   <- monthsBack match {
+                      case Some(n) => IO.pure(today.minusMonths(n.toLong))
+                      case None    =>
+                        repos.bankTransactions.latestBookedAt(link.ebAccountUid).map {
+                          case Some(last) => LocalDate.ofInstant(last, ZoneOffset.UTC).minusDays(overlapDays)
+                          case None       => today.minusDays(defaultInitialDays)
+                        }
+                    }
+      _          <- IO(log.info(s"[import] ${link.ebAccountUid}: fetching $dateFrom..$today"))
+      unreadable <- IO.ref(0)
+      fetched    <- importPages(client, connId, link, dateFrom, today, None, now, page = 0, imported = 0, skipped = 0, unreadable)
+      leftOut    <- unreadable.get
+      // An entry that was left out is a fault that the user must see: the figures of the account miss it.
+      note        = Option.when(leftOut > 0)(s"$leftOut entr${if leftOut == 1 then "y" else "ies"} with no readable amount or date left out")
+      result      = fetched.copy(error = (fetched.error.toList ++ note.toList).reduceOption(_ + "; " + _))
+      _          <- IO(log.info(s"[import] ${link.ebAccountUid}: imported ${result.imported}, skipped ${result.skipped}"))
     } yield result
 
   /** Pages arrive newest first, so a fetch that stops early keeps the newest transactions and loses the older ones. The next incremental import
@@ -114,6 +124,7 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
       page: Int,
       imported: Int,
       skipped: Int,
+      unreadableSeen: Ref[IO, Int],
   ): IO[AccountImportResult] =
     if page >= maxPages then IO(log.warn(s"[import] ${link.ebAccountUid}: hit $maxPages-page cap, stopping"))
       .as(incomplete(link, from, page, imported, skipped, s"reached the limit of $maxPages pages"))
@@ -128,41 +139,58 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
           for {
             _          <- IO(log.info(s"[import] ${link.ebAccountUid}: page ${page + 1} → ${page0.transactions.size} tx"))
             inserted   <- page0.transactions.traverse(t => insertOne(connId, link, t, now))
-            newImported = imported + inserted.count(identity)
-            newSkipped  = skipped + inserted.count(!_)
+            newImported = imported + inserted.count(_ == Outcome.Imported)
+            // A pending entry comes again as a booked one, so it is skipped as a known entry is.
+            newSkipped  = skipped + inserted.count(o => o == Outcome.Known || o == Outcome.Pending)
+            unreadable  = inserted.count(_ == Outcome.Unreadable)
+            _          <- IO.whenA(unreadable > 0)(unreadableSeen.update(_ + unreadable))
             result     <- page0.continuationKey match {
-                            case Some(key) => importPages(client, connId, link, from, to, Some(key), now, page + 1, newImported, newSkipped)
+                            case Some(key) =>
+                              importPages(client, connId, link, from, to, Some(key), now, page + 1, newImported, newSkipped, unreadableSeen)
                             case None      => IO.pure(AccountImportResult(link.ebAccountUid, newImported, newSkipped))
                           }
           } yield result
       }
 
-  private def insertOne(connId: BankConnectionId, link: BankAccountLink, t: EbTransaction, now: Instant): IO[Boolean] = {
-    val bookedAt = t.bookedAt.getOrElse(now)
-    val currency = if t.currency.nonEmpty then Currency(t.currency) else link.currency.getOrElse(Currency.PLN)
-    val dedupKey = t.entryReference.getOrElse(syntheticKey(link.ebAccountUid, bookedAt, t.amountCents, t.counterpartyName, t.remittance))
-    val tx       = BankTransaction(
-      BankTransactionId(UUID.randomUUID().toString),
-      connId,
-      link.ebAccountUid,
-      t.entryReference,
-      dedupKey,
-      t.amountCents,
-      currency,
-      if t.status == "pending" then TransactionStatus.Pending else TransactionStatus.Booked,
-      bookedAt,
-      t.counterpartyName,
-      t.counterpartyAccount,
-      t.remittance,
-      t.bankTransactionCode,
-      categoryId = None,
-      rawJson = t.raw.noSpaces,
-      importedAt = now,
-      internal = false,     // set by markInternalTransfers after the import completes
-      categorySource = None, // set by the rule engine after the import completes
-    )
-    repos.bankTransactions.insertNew(tx)
-  }
+  /** Stores one entry of the bank, when it can be used.
+    *
+    * Two kinds of entry are left out. A pending entry is not final: its amount can change, and the bank sends it again as a booked entry, often with
+    * another reference, so to store both would count the money two times. An entry with no amount or no date that can be read has no honest value: an
+    * invented zero or an invented "today" would be a wrong figure, and a new date on each import would also make a new row each time. Both kinds are
+    * counted, so a sync says that it left something out.
+    */
+  private def insertOne(connId: BankConnectionId, link: BankAccountLink, t: EbTransaction, now: Instant): IO[Outcome] =
+    (t.amountCents, t.bookedAt) match {
+      case _ if t.status == "pending"          => IO.pure(Outcome.Pending)
+      case (Some(amountCents), Some(bookedAt)) =>
+        // A bank that names no currency for an entry means the currency of the account.
+        val currency = if t.currency.nonEmpty then Currency(t.currency) else link.currency.getOrElse(Currency.PLN)
+        val dedupKey = t.entryReference.getOrElse(syntheticKey(link.ebAccountUid, bookedAt, amountCents, t.counterpartyName, t.remittance))
+        val tx       = BankTransaction(
+          BankTransactionId(UUID.randomUUID().toString),
+          connId,
+          link.ebAccountUid,
+          t.entryReference,
+          dedupKey,
+          amountCents,
+          currency,
+          TransactionStatus.Booked,
+          bookedAt,
+          t.counterpartyName,
+          t.counterpartyAccount,
+          t.remittance,
+          t.bankTransactionCode,
+          categoryId = None,
+          rawJson = t.raw.noSpaces,
+          importedAt = now,
+          internal = false,     // set by markInternalTransfers after the import completes
+          categorySource = None, // set by the rule engine after the import completes
+        )
+        repos.bankTransactions.insertNew(tx).map(if _ then Outcome.Imported else Outcome.Known)
+      case _                                   =>
+        IO(log.warn(s"[import] ${link.ebAccountUid}: an entry with no readable amount or date was left out: ${t.raw.noSpaces.take(300)}"))
+          .as(Outcome.Unreadable)
+    }
 
   /** Stable dedup key when the bank gives no `entry_reference`: hash of the salient fields. */
   private def syntheticKey(uid: String, bookedAt: Instant, amountCents: Long, name: Option[String], remittance: Option[String]): String = {

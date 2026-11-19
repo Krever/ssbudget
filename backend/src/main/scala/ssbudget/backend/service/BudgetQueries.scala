@@ -23,11 +23,12 @@ object BudgetQueries {
   def primaryConverter(repos: Repositories): IO[(Currency, (Long, Currency) => Long)] =
     for {
       primaryOpt <- repos.currencySettings.findPrimary
-      enabled    <- repos.currencySettings.findAll
       primary     = primaryOpt.map(_.code).getOrElse(Currency.PLN)
-      rateList   <- enabled.filterNot(_.code == primary).traverse(s => repos.exchangeRates.findLatest(s.code, primary))
+      // The rate of every currency that has one, not only of the enabled currencies: a bank entry can be in any currency.
+      rateList   <- repos.exchangeRates.findLatestTo(primary)
     } yield {
-      val rates                                       = rateList.flatten.map(r => r.fromCurrency -> r).toMap
+      val rates                                       = rateList.map(r => r.fromCurrency -> r).toMap
+      // With no rate the amount counts 1 to 1. That is a wrong figure; `DataHealth.warnings` tells the user of each such currency.
       def toPrimary(cents: Long, cur: Currency): Long =
         if cur == primary then cents else rates.get(cur).map(_.convert(Money(cents, cur)).amountCents).getOrElse(cents)
       (primary, toPrimary)

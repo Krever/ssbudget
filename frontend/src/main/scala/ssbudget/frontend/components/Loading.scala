@@ -2,6 +2,7 @@ package ssbudget.frontend.components
 
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom
+import ssbudget.frontend.services.Notices
 
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -44,7 +45,7 @@ object Loading {
           loading.set(false)
           result match {
             case Failure(ex) =>
-              dom.console.error(s"Action failed: ${ex.getMessage}")
+              Notices.failed(ex.getMessage)
             case Success(_)  => // success, nothing to do
           }
         }
@@ -69,7 +70,7 @@ object Loading {
           loading.set(false)
           result match {
             case Failure(ex) =>
-              dom.console.error(s"Action failed: ${ex.getMessage}")
+              Notices.failed(ex.getMessage)
             case Success(_)  => // success
           }
         }
@@ -138,7 +139,7 @@ object Loading {
           action().onComplete { result =>
             loading.set(false)
             result match {
-              case Failure(ex) => dom.console.error(s"Action failed: ${ex.getMessage}")
+              case Failure(ex) => Notices.failed(ex.getMessage)
               case Success(_)  => // success
             }
           }

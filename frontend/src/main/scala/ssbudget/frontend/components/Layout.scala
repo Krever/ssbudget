@@ -11,6 +11,7 @@ object Layout {
     div(
       NavBar(apiClient),
       BankRenewalBanner(apiClient),
+      NoticeStrip(apiClient),
       div(
         cls       := "main-content mx-auto pb-4",
         styleAttr := "max-width: 1600px",

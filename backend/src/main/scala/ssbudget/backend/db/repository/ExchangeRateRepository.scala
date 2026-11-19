@@ -10,6 +10,9 @@ trait ExchangeRateRepository {
   def create(rate: ExchangeRate): IO[Unit]
   def findLatest(from: Currency, to: Currency): IO[Option[ExchangeRate]]
   def findAll: IO[List[ExchangeRate]]
+
+  /** The newest rate from each currency to `to`. */
+  def findLatestTo(to: Currency): IO[List[ExchangeRate]]
 }
 
 class ExchangeRateRepositoryImpl(xa: Transactor[IO]) extends ExchangeRateRepository {
@@ -36,4 +39,13 @@ class ExchangeRateRepositoryImpl(xa: Transactor[IO]) extends ExchangeRateReposit
       FROM exchange_rates ORDER BY fetched_at DESC
     """.query[ExchangeRate].to[List].transact(xa)
   }
+
+  override def findLatestTo(to: Currency): IO[List[ExchangeRate]] =
+    sql"""
+      SELECT r.from_currency, r.to_currency, r.rate, r.fetched_at
+      FROM exchange_rates r
+      WHERE r.to_currency = $to
+        AND r.fetched_at = (SELECT MAX(n.fetched_at) FROM exchange_rates n WHERE n.from_currency = r.from_currency AND n.to_currency = r.to_currency)
+      GROUP BY r.from_currency
+    """.query[ExchangeRate].to[List].transact(xa)
 }
