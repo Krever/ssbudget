@@ -29,7 +29,9 @@ class CategoryBudgetMethodSpec extends E2ESpec {
     // The table is drawn again when the summaries arrive, so a row that was found a moment before can be gone at the click. The step is retried,
     // and it clicks only while the strip is closed: a second click would close it again.
     eventually {
-      if row.findElements(By.xpath("./following-sibling::tr[1][contains(@class,'budget-settings')]")).isEmpty then row.click()
+      // Without the implicit wait: "the strip is not there" is the usual answer here, and with the wait it would take the full timeout.
+      val closed = withoutImplicitWait(row.findElements(By.xpath("./following-sibling::tr[1][contains(@class,'budget-settings')]")).isEmpty)
+      if closed then row.click()
       settings
     }
     ()

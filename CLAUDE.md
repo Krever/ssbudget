@@ -322,7 +322,7 @@ set (GitHub Actions sets it; locally use `SBT_TPOLECAT_CI=1 sbt Test/compile`) a
 warnings: remove an unused import, and write `val _ = expr` when a result is dropped on purpose. Test code compiles without the two
 options that report unused values, because a ScalaTest test is a list of assertions.
 
-**Tests to run for a change:** `sbt backend/test` (about 30 s) and `sbt e2e/test` (about 6 min, Chrome). Do not run two sbt commands
+**Tests to run for a change:** `sbt backend/test` (about 30 s) and `sbt e2e/test` (about 4 min, Chrome). Do not run two sbt commands
 at once in one checkout.
 
 **circe codecs**: Use `derives Codec.AsObject` for case classes. Only use manual `Encoder`/`Decoder` for:

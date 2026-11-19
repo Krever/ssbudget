@@ -19,9 +19,11 @@ import scala.jdk.CollectionConverters.*
   *   - Authentication flow
   *   - Deliberate pacing between actions
   *
-  * Run with: sbt "e2e/testOnly ssbudget.e2e.DemoScenarioSpec"
+  * As a test it runs with the other specs, with no pauses.
   *
-  * For headed mode (visible browser): E2E_HEADED=true sbt "e2e/testOnly ssbudget.e2e.DemoScenarioSpec"
+  * For a recording, with the pauses: E2E_DEMO_PACE=1 sbt "e2e/testOnly ssbudget.e2e.DemoScenarioSpec"
+  *
+  * For headed mode (visible browser, also paced): E2E_HEADED=true sbt "e2e/testOnly ssbudget.e2e.DemoScenarioSpec"
   */
 class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 
@@ -30,6 +32,14 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   private var js: JavascriptExecutor = uninitialized
 
   protected def baseUrl: String = AuthTestServers.frontendUrl
+
+  /** A recording needs time for the eye; a test run needs none. The pauses are real only for a recording: a visible browser (`E2E_HEADED`), a browser
+    * that a person records (`E2E_REMOTE_BROWSER`), or `E2E_DEMO_PACE` set. In a plain test run each pause is zero, so the scenario is a fast test of
+    * the whole workflow. A step must thus never depend on a pause: where the page needs time, the step waits for a condition.
+    */
+  private val recording: Boolean = List("E2E_HEADED", "E2E_REMOTE_BROWSER", "E2E_DEMO_PACE").exists(sys.env.contains)
+
+  private def rest(ms: Int): Unit = if recording then Thread.sleep(ms.toLong)
 
   // Timing constants for demo (adjust for speed)
   private val shortPause  = 500
@@ -174,7 +184,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       document.body.appendChild(banner);
     """,
     )
-    Thread.sleep(phasePause)
+    rest(phasePause)
     js.executeScript("""
       const banner = document.querySelector('.demo-phase-banner');
       if (banner) {
@@ -182,7 +192,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
         setTimeout(() => banner.remove(), 300);
       }
     """)
-    Thread.sleep(350)
+    rest(350)
   }
 
   /** Click with visual indicator */
@@ -191,36 +201,52 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     val x    = rect.getX + rect.getWidth / 2
     val y    = rect.getY + rect.getHeight / 2
     showClickAt(x.toInt, y.toInt)
-    Thread.sleep(150)
+    rest(150)
     // A page that still loads can move the element under the pointer. Then the click goes through the page itself.
     try element.click()
     catch {
       case _: org.openqa.selenium.ElementClickInterceptedException => js.executeScript("arguments[0].click()", element)
     }
-    Thread.sleep(shortPause)
+    rest(shortPause)
   }
 
-  /** Click button by text with visual indicator */
-  private def demoClickButton(parent: WebElement, buttonText: String): Unit = {
-    val btn = parent.findElement(By.xpath(s".//button[contains(.,'$buttonText')]"))
-    demoClick(btn)
+  /** Wait until the page shows what the step did. An element that the page drew again in the meantime counts as "not yet". */
+  private def await(condition: => Boolean): Unit = {
+    waitFor.until(_ => scala.util.Try(condition).getOrElse(false))
+    ()
+  }
+
+  /** How many elements in `parent` match the selector, counted by the page. `findElements` is not used for this: with the implicit wait of this
+    * driver it waits the full timeout before it answers "none".
+    */
+  private def countIn(parent: WebElement, css: String): Long =
+    js.executeScript("return arguments[0].querySelectorAll(arguments[1]).length", parent, css).asInstanceOf[Long]
+
+  /** Click button by text with visual indicator. The card is found again on each attempt: a page that still loads draws its cards again, and a button
+    * that was found a moment before is then gone.
+    */
+  private def demoClickButton(parent: => WebElement, buttonText: String): Unit = {
+    await {
+      demoClick(parent.findElement(By.xpath(s".//button[contains(.,'$buttonText')]")))
+      true
+    }
   }
 
   /** Type text slowly for visibility */
   private def typeSlowly(element: WebElement, text: String): Unit = {
     text.foreach { char =>
       element.sendKeys(char.toString)
-      Thread.sleep(25)
+      rest(25)
     }
   }
 
-  private def pause(ms: Int = mediumPause): Unit = Thread.sleep(ms)
+  private def pause(ms: Int = mediumPause): Unit = rest(ms)
 
   // ============ Page Helpers ============
 
   private def waitForPage(title: String): Unit = {
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h4"), title))
-    Thread.sleep(300)
+    rest(300)
   }
 
   private def findCard(headerText: String): WebElement =
@@ -246,7 +272,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     // Give time to start recording if using remote browser
     if isRemoteBrowser then {
       println("[Demo] Page loaded - start your recording now! (3 seconds...)")
-      Thread.sleep(3000)
+      rest(3000)
     } else {
       pause()
     }
@@ -290,9 +316,12 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     injectDemoStyles()
     pause()
 
-    val periodCard = findCardByDiv("Current Period")
+    // The card says one of two things after it has loaded.
+    def periodCard = findCardByDiv("Current Period")
+    await(periodCard.getText.contains("No active period") || periodCard.getText.contains("Started"))
     if periodCard.getText.contains("No active period") then {
       demoClickButton(periodCard, "Start New Period")
+      await(periodCard.getText.contains("Started"))
       pause(longPause)
     }
 
@@ -307,7 +336,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     injectDemoStyles()
     pause()
 
-    val currenciesCard = findCardByH5("Currencies")
+    def currenciesCard = findCardByH5("Currencies")
 
     // Add USD currency
     val currencyInput = currenciesCard.findElement(By.cssSelector("input[type='text']"))
@@ -315,6 +344,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     typeSlowly(currencyInput, "USD")
     pause(shortPause)
     demoClickButton(currenciesCard, "Add Currency")
+    await(findCardByH5("Currencies").getText.contains("USD"))
     pause()
 
     // Refresh exchange rates
@@ -339,7 +369,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause()
 
     // Add main bank account (PLN)
-    val bankCard = findCard("Bank Accounts")
+    def bankCard = findCard("Bank Accounts")
     demoClickButton(bankCard, "+ Add")
     pause(shortPause)
 
@@ -349,6 +379,8 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     typeSlowly(bankNameInput, "Main Account")
     pause(shortPause)
     demoClickButton(bankAddRow, "Add")
+    // The new account is in the table, and the row for adding is closed, before the next account is added.
+    await(bankCard.getText.contains("Main Account") && countIn(bankCard, "tbody tr.table-primary") == 0)
     pause()
 
     // Add EUR account
@@ -364,6 +396,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     eurSelect.findElement(By.xpath(".//option[text()='EUR']")).click()
     pause(shortPause)
     demoClickButton(eurAddRow, "Add")
+    await(bankCard.getText.contains("Euro Savings") && countIn(bankCard, "tbody tr.table-primary") == 0)
     pause()
 
     showPhase("💰 Adding Savings Accounts")
@@ -379,6 +412,10 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       typeSlowly(nameInput, name)
       pause(shortPause)
       demoClickButton(addRow, "Add")
+      await {
+        val card = findCard("Savings & Investments")
+        card.getText.contains(name) && countIn(card, "tbody tr.table-success") == 0
+      }
       pause()
     }
 
@@ -396,8 +433,12 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     injectDemoStyles()
     pause()
 
-    val accountsCard = findCard("Accounts")
+    def accountsCard = findCard("Accounts")
+    // The accounts are in the card before the edit starts: the edit takes the balances that are loaded at that moment. The two new accounts
+    // have no money yet, so the ledger folds them into one line; the count on the group row says that they are loaded.
+    await(accountsCard.getText.contains("2 accounts"))
     demoClickButton(accountsCard, "Edit Balances")
+    await(countIn(accountsCard, "input[type='number']") >= 2)
     pause()
 
     val balanceInputs = accountsCard.findElements(By.cssSelector("input[type='number']")).asScala.toList
@@ -419,6 +460,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause(shortPause)
 
     demoClickButton(accountsCard, "Save All")
+    await(countIn(accountsCard, "input[type='number']") == 0 && accountsCard.getText.contains("12,500.00"))
     pause(longPause)
 
     // Copy summary
@@ -456,7 +498,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     // Give time to stop recording if using remote browser
     if isRemoteBrowser then {
       println("[Demo] Demo complete - stop your recording now! (3 seconds...)")
-      Thread.sleep(3000)
+      rest(3000)
     }
 
     println("\n" + "=" * 50)

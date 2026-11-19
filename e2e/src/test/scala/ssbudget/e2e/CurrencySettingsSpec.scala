@@ -109,7 +109,7 @@ class CurrencySettingsSpec extends E2ESpec {
 
     // The old primary (PLN) should no longer have the primary badge in its row
     val plnRow = updatedCard.findElement(By.xpath(".//tr[contains(.,'PLN')]"))
-    plnRow.findElements(By.xpath(".//span[contains(@class,'text-bg-primary')]")).asScala.size shouldBe 0
+    withoutImplicitWait(plnRow.findElements(By.xpath(".//span[contains(@class,'text-bg-primary')]")).asScala.size shouldBe 0)
 
     // Restore PLN as primary for other tests
     click(plnRow, "Set Primary")

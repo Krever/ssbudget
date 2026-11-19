@@ -25,12 +25,12 @@ class DashboardSpec extends E2ESpec {
     driver.get(baseUrl)
     waitForPage("Dashboard")
 
-    val card  = findCard("Accounts")
-    click(card, "Edit Balances")
-    val input = card.findElements(By.cssSelector("input[type='number']")).asScala.head
+    // The card is found again for each step: it is drawn again when the data of the page arrives.
+    click(findCard("Accounts"), "Edit Balances")
+    val input = findCard("Accounts").findElement(By.cssSelector("input[type='number']"))
     input.clear()
     input.sendKeys("5000.00")
-    click(card, "Save All")
+    click(findCard("Accounts"), "Save All")
 
     eventually(findCard("Accounts").getText should include("5,000"))
   }

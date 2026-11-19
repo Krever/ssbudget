@@ -75,6 +75,8 @@ lazy val e2e = (project in file("e2e"))
     ),
     sqliteNative := sqliteNativeOptions((Test / dependencyClasspath).value.map(_.data), target.value),
     Test / javaOptions ++= sqliteNative.value,
+    // Show how long each test and suite takes: the browser tests are the slow part of a check, and this says where the time goes.
+    Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oD"),
   )
 
 lazy val shared = crossProject(JSPlatform, JVMPlatform)

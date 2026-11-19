@@ -33,18 +33,18 @@ class RuleInspectionSpec extends E2ESpec {
     ensurePeriodExists()
     seedRuleCategorized("Zabka E2E", "Zabka rule", "Convenience E2E")
 
-    val row   = txTable.findElement(By.xpath(".//tr[.//div[contains(text(),'Zabka E2E')]]"))
-    val badge = row.findElement(ruleBadge)
-
-    badge.getDomAttribute("title") should include("Zabka rule")
+    // The row is found inside the retried step: the table is drawn again when the categories arrive, and a row found before that is gone.
+    eventually {
+      val row = txTable.findElement(By.xpath(".//tr[.//div[contains(text(),'Zabka E2E')]]"))
+      row.findElement(ruleBadge).getDomAttribute("title") should include("Zabka rule")
+    }
   }
 
   it should "open that rule for inspection when the badge is clicked" in {
     ensurePeriodExists()
     seedRuleCategorized("Orlen E2E", "Fuel rule", "Fuel E2E")
 
-    val row = txTable.findElement(By.xpath(".//tr[.//div[contains(text(),'Orlen E2E')]]"))
-    row.findElement(ruleBadge).click()
+    eventually(txTable.findElement(By.xpath(".//tr[.//div[contains(text(),'Orlen E2E')]]")).findElement(ruleBadge).click())
 
     // The rules modal, populated with the rule behind this transaction rather than a blank new-rule form.
     val modal = ruleModal
@@ -72,7 +72,6 @@ class RuleInspectionSpec extends E2ESpec {
     driver.get(s"$baseUrl/transactions?category=all")
     waitForPage("Transactions")
 
-    val row = txTable.findElement(By.xpath(".//tr[.//div[contains(text(),'Manual Payee E2E')]]"))
-    assertAbsent(row, ruleBadge)
+    eventually(assertAbsent(txTable.findElement(By.xpath(".//tr[.//div[contains(text(),'Manual Payee E2E')]]")), ruleBadge))
   }
 }

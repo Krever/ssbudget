@@ -424,109 +424,133 @@ object DashboardPage {
       .combineWith(isEditingBalances.signal)
       .combineWith(showSmallAccounts.signal)
       .map { case (accounts, baselines, moved, rates, primary, isEditing, showSmall) =>
-        def inPrimary(cents: Long, currency: Currency): Long =
-          MoneyFormatter.convertToPrimary(Money(cents, currency), primary, rates).amountCents
-        def balance(a: Account): Long                        = inPrimary(a.balanceCents, a.currency)
-        // The change of the period, in the primary currency. No recorded balance at the period's start: no figure, which is not zero.
-        def change(a: Account): Option[Long]                 = baselines.get(a.id).map(b => inPrimary(a.balanceCents - b.amountCents, a.currency))
-        def of(role: AccountRole): List[Account]             = accounts.filter(_.role == role)
-
-        def groupRow(key: String, label: String, group: List[Account], groupChange: Option[Long]): HtmlElement =
-          tr(
-            cls                     := "ledger-group",
-            dataAttr("group-total") := key,
-            td(label, span(cls := "ledger-count", s"${group.size} ${if group.size == 1 then "account" else "accounts"}")),
-            td(cls := "ledger-num", groupChange.filter(_ != 0).map(signedSpan)),
-            td(cls := "ledger-num", MoneyFormatter.formatBare(group.map(balance).sum)),
-          )
-
-        def nameCell(a: Account): HtmlElement = td(a.name)
-
-        // A manual balance is typed in the account's own currency. A bank or card balance comes from a sync and stays as it is.
-        def balanceCell(a: Account): HtmlElement =
-          if isEditing && a.isManual then td(
-            div(
-              cls := "input-group input-group-sm",
-              input(
-                cls          := "form-control form-control-sm text-end",
-                tpe          := "number",
-                stepAttr     := "0.01",
-                defaultValue := InlineEdit.centsText(a.balanceCents),
-                // The one parsing rule of the app (exact decimals, comma or dot). Text that is not an amount leaves the account as it was.
-                onInput.mapToValue --> { v =>
-                  editedBalances.update(m => InlineEdit.parseCentsOpt(v).fold(m - a.id)(cents => m.updated(a.id, cents)))
-                },
-              ),
-              span(cls       := "input-group-text py-0", a.currency.code),
-            ),
-          )
-          else
-            td(
-              cls := s"ledger-num${if isEditing then " text-muted" else ""}",
-              MoneyFormatter.formatBare(balance(a)),
-              // The own currency of a foreign account: under the amount it explains.
-              Option.when(a.currency != primary)(span(cls := "ledger-sub", MoneyFormatter.formatSimple(a.balance))),
-            )
-
-        def accountRow(a: Account, changeCell: HtmlElement): HtmlElement =
-          tr(cls := (if isEditing && a.isManual then "table-info" else ""), nameCell(a), changeCell, balanceCell(a))
-
-        def changeCell(a: Account): HtmlElement = td(cls := "ledger-num", change(a).filter(_ != 0).map(signedSpan))
-
-        // Spending: no change figure. The balance change of a spending account is only the paycheck less the spend. Small balances fold into one line.
-        val spending                                                                = of(AccountRole.Spending)
-        val small                                                                   = spending.filter(a => math.abs(balance(a)) < smallBalanceCents)
-        val folded                                                                  = if small.size >= 2 && !isEditing && !showSmall then small else Nil
-        val limitText                                                               = MoneyFormatter.formatBare(smallBalanceCents)
-        def foldToggle(text: String, show: Boolean, sum: Option[Long]): HtmlElement =
-          tr(
-            td(button(tpe := "button", cls := "btn btn-link btn-sm p-0 text-muted", text, onClick --> { _ => showSmallAccounts.set(show) })),
-            td(),
-            td(cls := "ledger-num text-muted", sum.map(MoneyFormatter.formatBare)),
-          )
-        val spendingRows                                                            = groupRow("spending", "Spending", spending, None) ::
-          spending.filterNot(folded.contains).map(a => accountRow(a, td())) :::
-          (if folded.nonEmpty then List(foldToggle(s"${folded.size} more with less than $limitText", show = true, Some(folded.map(balance).sum)))
-           else if small.size >= 2 && showSmall && !isEditing then List(
-             foldToggle(s"fold the ${small.size} with less than $limitText", show = false, None),
-           )
-           else Nil)
-
-        val savings     = of(AccountRole.Savings)
-        val savingsRows = groupRow("savings", "Savings", savings, Some(savings.flatMap(change).sum)) :: savings.map(a => accountRow(a, changeCell(a)))
-
-        // Investments: the change of an account has two parts, and only "moved" is saving. The group shows only when there is such an account.
-        val investments    = of(AccountRole.Investment)
-        val investmentRows =
-          if investments.isEmpty then Nil
-          else {
-            groupRow("investments", "Investments", investments, Some(investments.flatMap(change).sum)) ::
-              investments.map { a =>
-                val cell = change(a) match {
-                  case None    => td()
-                  case Some(c) =>
-                    val movedIn = moved.getOrElse(a.id, 0L)
-                    td(
-                      cls := "ledger-num",
-                      Option.when(c != 0)(signedSpan(c)),
-                      span(
-                        cls   := "ledger-sub",
-                        title := "Deposits less withdrawals and payments, from the transactions of the account and of its transfer categories",
-                        s"moved ${MoneyFormatter.formatSigned(movedIn)}",
-                      ),
-                      span(
-                        cls   := "ledger-sub",
-                        title := "The change of value that is not a deposit, a withdrawal or a payment",
-                        s"market ${MoneyFormatter.formatSigned(c - movedIn)}",
-                      ),
-                    )
-                }
-                accountRow(a, cell)
-              }
-          }
-
-        spendingRows ::: savingsRows ::: investmentRows
+        // While the balances are edited, the rows stay as they are. A refresh of the data (it arrives a moment after each page load, and after a
+        // sync) would make new input fields, and what was typed would be lost. Only a change of the list of accounts makes new rows.
+        val editKey = Option.when(isEditing)(accounts.map(_.id))
+        editRows.filter(_ => editKey.nonEmpty && editRowsKey == editKey).getOrElse {
+          val rows = ledgerRowsOf(accounts, baselines, moved, rates, primary, isEditing, showSmall)
+          editRowsKey = editKey
+          editRows = Option.when(isEditing)(rows)
+          rows
+        }
       }
+
+  // The rows of the open edit, and the accounts they were made for (see `ledgerRows`).
+  private var editRows: Option[List[HtmlElement]]  = None
+  private var editRowsKey: Option[List[AccountId]] = None
+
+  private def ledgerRowsOf(
+      accounts: List[Account],
+      baselines: Map[AccountId, Money],
+      moved: Map[AccountId, Long],
+      rates: Map[Currency, Double],
+      primary: Currency,
+      isEditing: Boolean,
+      showSmall: Boolean,
+  ): List[HtmlElement] = {
+    def inPrimary(cents: Long, currency: Currency): Long =
+      MoneyFormatter.convertToPrimary(Money(cents, currency), primary, rates).amountCents
+    def balance(a: Account): Long                        = inPrimary(a.balanceCents, a.currency)
+    // The change of the period, in the primary currency. No recorded balance at the period's start: no figure, which is not zero.
+    def change(a: Account): Option[Long]                 = baselines.get(a.id).map(b => inPrimary(a.balanceCents - b.amountCents, a.currency))
+    def of(role: AccountRole): List[Account]             = accounts.filter(_.role == role)
+
+    def groupRow(key: String, label: String, group: List[Account], groupChange: Option[Long]): HtmlElement =
+      tr(
+        cls                     := "ledger-group",
+        dataAttr("group-total") := key,
+        td(label, span(cls := "ledger-count", s"${group.size} ${if group.size == 1 then "account" else "accounts"}")),
+        td(cls := "ledger-num", groupChange.filter(_ != 0).map(signedSpan)),
+        td(cls := "ledger-num", MoneyFormatter.formatBare(group.map(balance).sum)),
+      )
+
+    def nameCell(a: Account): HtmlElement = td(a.name)
+
+    // A manual balance is typed in the account's own currency. A bank or card balance comes from a sync and stays as it is.
+    def balanceCell(a: Account): HtmlElement =
+      if isEditing && a.isManual then td(
+        div(
+          cls := "input-group input-group-sm",
+          input(
+            cls          := "form-control form-control-sm text-end",
+            tpe          := "number",
+            stepAttr     := "0.01",
+            defaultValue := InlineEdit.centsText(a.balanceCents),
+            // The one parsing rule of the app (exact decimals, comma or dot). Text that is not an amount leaves the account as it was.
+            onInput.mapToValue --> { v =>
+              editedBalances.update(m => InlineEdit.parseCentsOpt(v).fold(m - a.id)(cents => m.updated(a.id, cents)))
+            },
+          ),
+          span(cls       := "input-group-text py-0", a.currency.code),
+        ),
+      )
+      else
+        td(
+          cls := s"ledger-num${if isEditing then " text-muted" else ""}",
+          MoneyFormatter.formatBare(balance(a)),
+          // The own currency of a foreign account: under the amount it explains.
+          Option.when(a.currency != primary)(span(cls := "ledger-sub", MoneyFormatter.formatSimple(a.balance))),
+        )
+
+    def accountRow(a: Account, changeCell: HtmlElement): HtmlElement =
+      tr(cls := (if isEditing && a.isManual then "table-info" else ""), nameCell(a), changeCell, balanceCell(a))
+
+    def changeCell(a: Account): HtmlElement = td(cls := "ledger-num", change(a).filter(_ != 0).map(signedSpan))
+
+    // Spending: no change figure. The balance change of a spending account is only the paycheck less the spend. Small balances fold into one line.
+    val spending                                                                = of(AccountRole.Spending)
+    val small                                                                   = spending.filter(a => math.abs(balance(a)) < smallBalanceCents)
+    val folded                                                                  = if small.size >= 2 && !isEditing && !showSmall then small else Nil
+    val limitText                                                               = MoneyFormatter.formatBare(smallBalanceCents)
+    def foldToggle(text: String, show: Boolean, sum: Option[Long]): HtmlElement =
+      tr(
+        td(button(tpe := "button", cls := "btn btn-link btn-sm p-0 text-muted", text, onClick --> { _ => showSmallAccounts.set(show) })),
+        td(),
+        td(cls := "ledger-num text-muted", sum.map(MoneyFormatter.formatBare)),
+      )
+    val spendingRows                                                            = groupRow("spending", "Spending", spending, None) ::
+      spending.filterNot(folded.contains).map(a => accountRow(a, td())) :::
+      (if folded.nonEmpty then List(foldToggle(s"${folded.size} more with less than $limitText", show = true, Some(folded.map(balance).sum)))
+       else if small.size >= 2 && showSmall && !isEditing then List(
+         foldToggle(s"fold the ${small.size} with less than $limitText", show = false, None),
+       )
+       else Nil)
+
+    val savings     = of(AccountRole.Savings)
+    val savingsRows = groupRow("savings", "Savings", savings, Some(savings.flatMap(change).sum)) :: savings.map(a => accountRow(a, changeCell(a)))
+
+    // Investments: the change of an account has two parts, and only "moved" is saving. The group shows only when there is such an account.
+    val investments    = of(AccountRole.Investment)
+    val investmentRows =
+      if investments.isEmpty then Nil
+      else {
+        groupRow("investments", "Investments", investments, Some(investments.flatMap(change).sum)) ::
+          investments.map { a =>
+            val cell = change(a) match {
+              case None    => td()
+              case Some(c) =>
+                val movedIn = moved.getOrElse(a.id, 0L)
+                td(
+                  cls := "ledger-num",
+                  Option.when(c != 0)(signedSpan(c)),
+                  span(
+                    cls   := "ledger-sub",
+                    title := "Deposits less withdrawals and payments, from the transactions of the account and of its transfer categories",
+                    s"moved ${MoneyFormatter.formatSigned(movedIn)}",
+                  ),
+                  span(
+                    cls   := "ledger-sub",
+                    title := "The change of value that is not a deposit, a withdrawal or a payment",
+                    s"market ${MoneyFormatter.formatSigned(c - movedIn)}",
+                  ),
+                )
+            }
+            accountRow(a, cell)
+          }
+      }
+
+    spendingRows ::: savingsRows ::: investmentRows
+  }
 
   /** The line under the ledger: what the period did to the money that is not for spending, and the sum of all three groups. */
   private def ledgerSummary(): HtmlElement = {

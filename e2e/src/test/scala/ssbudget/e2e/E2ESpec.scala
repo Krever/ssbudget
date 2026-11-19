@@ -94,8 +94,11 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   protected def findCardByH5(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//h5[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
+  /** The rows of a table, as they are at this moment. An empty table is a normal answer, so there is no implicit wait: a caller that expects rows to
+    * arrive polls with `eventually`.
+    */
   protected def rows(parent: WebElement): List[WebElement] =
-    parent.findElements(By.cssSelector("tbody tr")).asScala.toList
+    withoutImplicitWait(parent.findElements(By.cssSelector("tbody tr")).asScala.toList)
 
   /** The transaction table on the Transactions page. Scoped by a header only it has — the categories card's table shares its CSS classes and comes
     * first in the DOM.
@@ -133,7 +136,10 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   protected def assertAbsent(parent: WebElement, locator: By): Unit =
     withoutImplicitWait(parent.findElements(locator).asScala shouldBe empty)
 
-  private def withoutImplicitWait[A](body: => A): A = {
+  /** Runs `body` with no implicit wait. For a question whose usual answer is "none": with the implicit wait, `findElements` waits the full timeout
+    * before it gives an empty list.
+    */
+  protected def withoutImplicitWait[A](body: => A): A = {
     driver.manage().timeouts().implicitlyWait(Duration.ZERO)
     try body
     finally driver.manage().timeouts().implicitlyWait(E2ESpec.implicitWait)
@@ -162,7 +168,8 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
 
   protected def clickIfExists(parent: WebElement, buttonText: String): Boolean = {
     // Use . instead of text() to match text in child elements (like spans)
-    val buttons = parent.findElements(By.xpath(s".//button[contains(.,'$buttonText')]")).asScala
+    // Without the implicit wait: "no such button" is a normal answer here, and with the wait it would take the full timeout.
+    val buttons = withoutImplicitWait(parent.findElements(By.xpath(s".//button[contains(.,'$buttonText')]")).asScala)
     if buttons.nonEmpty then {
       buttons.head.click()
       true
