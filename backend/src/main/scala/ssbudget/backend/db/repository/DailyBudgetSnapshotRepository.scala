@@ -56,6 +56,11 @@ trait DailyBudgetSnapshotRepository {
     * called for the days of the open period only: a closed period keeps its amounts.
     */
   def rederive(terms: List[DerivedTerms]): IO[Unit]
+
+  /** Give the rows from `fromDay` on to `period`, with their days remaining counted to its expected end. For a period that starts on an earlier day
+    * than the day it is created: those days were recorded for the period before it. Their other terms are computed again by the next pass.
+    */
+  def moveToPeriod(fromDay: LocalDate, period: Period): IO[Unit]
 }
 
 class DailyBudgetSnapshotRepositoryImpl(xa: Transactor[IO]) extends DailyBudgetSnapshotRepository {
@@ -119,6 +124,12 @@ class DailyBudgetSnapshotRepositoryImpl(xa: Transactor[IO]) extends DailyBudgetS
       }
       .transact(xa)
       .unlessA(terms.isEmpty)
+
+  override def moveToPeriod(fromDay: LocalDate, period: Period): IO[Unit] =
+    sql"""UPDATE daily_budget_snapshots
+          SET period_id = ${period.id},
+              days_remaining = CAST(julianday(${period.expectedEnd}) - julianday(on_date) AS INTEGER)
+          WHERE on_date >= $fromDay""".update.run.transact(xa).void
 
   private val columns = Fragment.const(s"SELECT $SelectList FROM daily_budget_snapshots")
 }

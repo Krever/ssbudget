@@ -17,7 +17,8 @@ class CategoryBudgetOverrideRepositorySpec extends RepositorySpec {
     val cats    = new CategoryRepositoryImpl(xa)
     for {
       _ <- periods.create(Period(period1, at, LocalDate.parse("2024-02-25"), None))
-      _ <- periods.create(Period(period2, at, LocalDate.parse("2024-02-25"), None))
+      // Only one period can be open, so the second one of the fixture is a closed one.
+      _ <- periods.create(Period(period2, at.minusSeconds(86400L * 31), LocalDate.parse("2024-01-25"), Some(at)))
       _ <- cats.create(Category(catA, "Groceries", None))
       _ <- cats.create(Category(catB, "Rent", None))
     } yield ()

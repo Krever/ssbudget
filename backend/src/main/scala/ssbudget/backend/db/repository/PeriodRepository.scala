@@ -1,6 +1,7 @@
 package ssbudget.backend.db.repository
 
 import cats.effect.IO
+import cats.implicits.*
 import doobie.*
 import doobie.implicits.*
 import ssbudget.backend.db.DoobieMeta.given
@@ -16,6 +17,9 @@ trait PeriodRepository {
   def updateExpectedEnd(id: PeriodId, expectedEnd: LocalDate): IO[Unit]
   def updatePlannedSaving(id: PeriodId, plannedSavingCents: Long): IO[Unit]
   def close(id: PeriodId, endedAt: Instant): IO[Unit]
+
+  /** Close `closing` (when there is an open period) at `at`, and create `next`, in ONE transaction. */
+  def rollover(closing: Option[PeriodId], at: Instant, next: Period): IO[Unit]
   def delete(id: PeriodId): IO[Unit]
 }
 
@@ -62,6 +66,15 @@ class PeriodRepositoryImpl(xa: Transactor[IO]) extends PeriodRepository {
     sql"""
       UPDATE periods SET ended_at = $endedAt WHERE id = $id
     """.update.run.transact(xa).void
+  }
+
+  override def rollover(closing: Option[PeriodId], at: Instant, next: Period): IO[Unit] = {
+    val close  = closing.traverse_(id => sql"UPDATE periods SET ended_at = $at WHERE id = $id".update.run)
+    val create = sql"""
+      INSERT INTO periods (id, started_at, expected_end, ended_at, planned_saving_cents)
+      VALUES (${next.id}, ${next.startDate}, ${next.expectedEnd}, ${next.endDate}, ${next.plannedSavingCents})
+    """.update.run
+    (close *> create).transact(xa).void
   }
 
   override def delete(id: PeriodId): IO[Unit] = {

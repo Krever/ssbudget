@@ -136,9 +136,9 @@ class ApiClient(implicit ec: ExecutionContext) {
       backend.send(request(())).map(handleResponse)
     }
 
-    def startNew(): Future[Period] = {
+    def startNew(asOf: Option[LocalDate]): Future[Period] = {
       val request = interpreter.toRequest(Endpoints.client.periods.startNew, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
+      backend.send(request(asOf)).map(handleResponse)
     }
 
     def setExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Period] = {

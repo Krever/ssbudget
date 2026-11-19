@@ -27,7 +27,9 @@ class CategoryDrillDownSpec extends E2ESpec {
     openBudgetsCard()
     textShouldAppear(planEntry("Drilldown Groceries"), "▸")
 
-    planEntryName("Drilldown Groceries").click()
+    // The Plan card is drawn again when its data arrives: the entry is found again on each attempt.
+
+    eventually(planEntryName("Drilldown Groceries").click())
     eventually {
       val text = findCard("Plan").getText
       text should include("▾")
@@ -43,7 +45,8 @@ class CategoryDrillDownSpec extends E2ESpec {
     TransactionSeed.addCategory("Drilldown Empty", Some(CategoryBudgetType.Steady))
 
     openBudgetsCard()
-    planEntryName("Drilldown Empty").click()
+    // The Plan card is drawn again when its data arrives: the entry is found again on each attempt.
+    eventually(planEntryName("Drilldown Empty").click())
     textShouldAppear(findCard("Plan"), "No transactions this period")
   }
 
@@ -52,7 +55,8 @@ class CategoryDrillDownSpec extends E2ESpec {
     TransactionSeed.addCategory("Drilldown Rent", Some(CategoryBudgetType.Bill))
 
     val card = openBudgetsCard()
-    planEntryName("Drilldown Rent").click()
+    // The Plan card is drawn again when its data arrives: the entry is found again on each attempt.
+    eventually(planEntryName("Drilldown Rent").click())
     card.findElement(By.xpath(".//a[contains(text(),'open in Transactions')]")).click()
     waitForPage("Transactions")
 

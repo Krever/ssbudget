@@ -6,6 +6,8 @@ import ssbudget.shared.model.*
 import ssbudget.shared.api.TapirCodecs.given
 import ssbudget.shared.api.TapirSchemas.given
 
+import java.time.LocalDate
+
 object Endpoints {
 
   /** Secured endpoint type with optional session cookie, string error, and any effect. */
@@ -66,9 +68,11 @@ object Endpoints {
         .out(jsonBody[List[Period]])
         .errorOut(stringBody)
 
-    val startNew: Secured[Unit, Period] =
+    /** Close the open period and start the next one. `asOf` is the day the new period starts; without it, it starts now. */
+    val startNew: Secured[Option[LocalDate], Period] =
       secureEndpoint.post
         .in("periods" / "start")
+        .in(query[Option[LocalDate]]("asOf"))
         .out(jsonBody[Period])
         .errorOut(stringBody)
 
@@ -469,8 +473,8 @@ object Endpoints {
       val list: Client[Unit, List[Period]] =
         baseEndpoint.get.in("periods").out(jsonBody[List[Period]]).errorOut(stringBody)
 
-      val startNew: Client[Unit, Period] =
-        baseEndpoint.post.in("periods" / "start").out(jsonBody[Period]).errorOut(stringBody)
+      val startNew: Client[Option[LocalDate], Period] =
+        baseEndpoint.post.in("periods" / "start").in(query[Option[LocalDate]]("asOf")).out(jsonBody[Period]).errorOut(stringBody)
 
       val setExpectedEnd: Client[(PeriodId, SetPeriodExpectedEndRequest), Period] =
         baseEndpoint.put

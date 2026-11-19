@@ -32,6 +32,10 @@ pointer position maps to its data, and its text. `FreeMoneyChart` and `MonthlyHi
 
 ### Period
 - Starts when a paycheck arrives; closed by hand when the next one does
+- Closing a period and opening the next is one step, in one transaction (`PeriodService.startNew`); the database allows one open period
+  only. The step takes a day ("as of" on the Periods page): today means now, and an earlier day is for a paycheck that came some days
+  before the period is closed here. The new period then starts at the beginning of that day, and the daily records from that day on go
+  to the new period
 - Carries its own `expectedEnd` date. Nothing infers it from a payday — the app's only opinion is the date it PROPOSES when a
   period opens (`Period.defaultExpectedEnd`: the same day of the following month), and that is editable in place on the Periods
   page. Days left, day N and the progress bar all read that one date, so a paycheck landing early or late is a one-field fix

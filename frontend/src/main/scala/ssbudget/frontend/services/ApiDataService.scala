@@ -173,11 +173,12 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       periodsVar.update(DataService.upsertById(_, updated)(_.id))
     })
 
-  override def startNewPeriod(): Future[Unit] = {
-    replanned(client.periods.startNew().map { newPeriod =>
+  override def startNewPeriod(asOf: Option[LocalDate]): Future[Unit] = {
+    replanned(client.periods.startNew(asOf).map { newPeriod =>
+      // The period before ends at the instant the new one starts.
       periodsVar.update { ps =>
         ps.map { p =>
-          if p.endDate.isEmpty then p.copy(endDate = Some(Instant.now()))
+          if p.endDate.isEmpty then p.copy(endDate = Some(newPeriod.startDate))
           else p
         }
       }

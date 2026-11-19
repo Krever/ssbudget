@@ -47,12 +47,33 @@ object PeriodsPage {
         },
       ),
       // Closing a period rewrites the history below it, so the same action reloads the retrospective.
-      currentPeriodCard(() => dataService.startNewPeriod().map(_ => load())),
+      currentPeriodCard(asOf => dataService.startNewPeriod(asOf).map(_ => load())),
       periodHistoryCard(summaries.signal, dataService.freeMoneyHistory, expanded),
     )
   }
 
-  private def currentPeriodCard(startNew: () => Future[Unit]): HtmlElement =
+  private def currentPeriodCard(startNew: Option[LocalDate] => Future[Unit]): HtmlElement = {
+    // The day the next period starts. Today is "now". An earlier day is for a paycheck that came some days before the period is closed here.
+    val startDay                                                                       = Var(DataService.today)
+    def startDayInput(open: Option[Period]): HtmlElement                               =
+      input(
+        tpe          := "date",
+        cls          := "form-control form-control-sm py-0",
+        styleAttr    := "width: 9.5rem",
+        title        := "The day the new period starts. Today means now; an earlier day gives the days since then to the new period.",
+        defaultValue := DataService.today.toString,
+        maxAttr      := DataService.today.toString,
+        open.map(p => minAttr := p.startDay.plusDays(1).toString),
+        onChange.mapToValue --> { value => Try(LocalDate.parse(value)).foreach(startDay.set) },
+      )
+    def start(): Future[Unit]                                                          = startNew(Some(startDay.now()).filter(_ != DataService.today))
+    def startControl(label: String, btnCls: String, open: Option[Period]): HtmlElement =
+      div(
+        cls := "d-flex align-items-center gap-2",
+        span(cls := "text-muted small", "as of"),
+        startDayInput(open),
+        Loading.actionButton(label, () => start(), btnCls),
+      )
     div(
       cls := "card mb-3",
       div(cls := "card-header py-2", div("Current Period")),
@@ -71,7 +92,7 @@ object PeriodsPage {
                   stat("Days left", period.daysRemaining(DataService.today).toString),
                   stat("Day", period.dayOfPeriod(DataService.today).toString),
                 ),
-                Loading.actionButton("End Period & Start New", startNew, "btn btn-warning btn-sm"),
+                startControl("End Period & Start New", "btn btn-warning btn-sm", Some(period)),
               ),
               div(
                 cls       := "progress",
@@ -87,11 +108,12 @@ object PeriodsPage {
             div(
               cls := "d-flex justify-content-between align-items-center",
               span(cls := "text-muted", "No active period"),
-              Loading.actionButton("Start New Period", startNew, "btn btn-primary btn-sm"),
+              startControl("Start New Period", "btn btn-primary btn-sm", None),
             )
         },
       ),
     )
+  }
 
   /** The period's expected end, typed directly into the row.
     *

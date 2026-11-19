@@ -20,7 +20,9 @@ trait DataService {
 
   // Periods
   def periods: Signal[List[Period]]
-  def startNewPeriod(): Future[Unit]
+
+  /** Close the open period and start the next one. `asOf` is the day the new period starts; None is "now". */
+  def startNewPeriod(asOf: Option[LocalDate]): Future[Unit]
 
   /** Correct when the current period is expected to end. Everything the page shows about a period's length — days left, day N, the progress bar —
     * reads that one date, so this is the only control over any of them.
