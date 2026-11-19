@@ -81,6 +81,9 @@ class DashboardReconcileSpec extends AnyFreeSpec with Matchers with BeforeAndAft
     def markCurated: IO[Unit]                                = IO.unit
   }
 
+  /** The version of the dashboard spec that the app ships. The tests read it, so a new version of the spec does not change them. */
+  private val shipped: Int = MetabaseProvisioner.DashboardSpec.load.fold(e => sys.error(e), _.version)
+
   /** Runs just the dashboard step, with metadata stubbed to whatever placeholders the shipped spec asks for. */
   private def reconcile(state: FakeState): Unit =
     HttpClientFs2Backend
@@ -107,7 +110,7 @@ class DashboardReconcileSpec extends AnyFreeSpec with Matchers with BeforeAndAft
   "A dashboard already at the shipped version" - {
     "is left completely alone" in {
       liveDashboard()
-      val state = new FakeState(Some(7), Some(2), Some(42), Set("spent"))
+      val state = new FakeState(Some(7), Some(shipped), Some(42), Set("spent"))
       reconcile(state)
       wm.findAll(putRequestedFor(urlEqualTo("/api/dashboard/7"))) shouldBe empty
       wm.findAll(postRequestedFor(urlEqualTo("/api/dashboard/7/copy"))) shouldBe empty
@@ -125,7 +128,7 @@ class DashboardReconcileSpec extends AnyFreeSpec with Matchers with BeforeAndAft
       val written = dashcardsWritten()
       written.size should be > 1
       written.flatMap(_.hcursor.get[Int]("id").toOption) should not contain 100
-      state.version shouldBe Some(2)
+      state.version shouldBe Some(shipped)
       state.revision shouldBe Some(42)
     }
   }
@@ -148,7 +151,7 @@ class DashboardReconcileSpec extends AnyFreeSpec with Matchers with BeforeAndAft
       val added = written.filter(_.hcursor.get[Int]("id").exists(_ < 0))
       added should not be empty
       all(added.flatMap(_.hcursor.get[Int]("row").toOption)) should be >= 10
-      state.version shouldBe Some(2)
+      state.version shouldBe Some(shipped)
     }
 
     "bootstraps the card map by name when the dashboard predates keys" in {
@@ -176,7 +179,7 @@ class DashboardReconcileSpec extends AnyFreeSpec with Matchers with BeforeAndAft
 
       wm.findAll(putRequestedFor(urlEqualTo("/api/dashboard/7"))) shouldBe empty
       wm.findAll(postRequestedFor(urlEqualTo("/api/card"))) shouldBe empty
-      state.version shouldBe Some(2)
+      state.version shouldBe Some(shipped)
     }
   }
 }

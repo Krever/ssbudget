@@ -65,3 +65,6 @@ plugins/
 
 
 /.claude/
+
+# The commit stamp that build.sh writes for the image
+docker/VERSION

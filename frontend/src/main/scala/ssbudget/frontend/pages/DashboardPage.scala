@@ -601,17 +601,17 @@ object DashboardPage {
     given owner: OneTimeOwner = new OneTimeOwner(() => ())
 
     val balance       = dataService.bankAccountBalance.observe.now()
-    val availableNow  = dataService.availableNow.observe.now()
+    val stillToPay    = dataService.stillToPay.observe.now()
     val freeMoney     = dataService.freeMoney.observe.now()
     val dailyBudget   = dataService.dailyBudget.observe.now()
     val daysRemaining = dataService.daysRemainingInPeriod.observe.now()
 
     val dateStr = DateTimeFormatter.ofPattern("MMM d").format(Instant.now().atZone(ZoneOffset.UTC))
     s"""Budget Update ($dateStr)
-       |Balance: ${balance.formatted}
-       |Available: ${availableNow.formatted}
-       |Free: ${freeMoney.formatted}
-       |Daily: ${dailyBudget.formatted} ($daysRemaining days left)""".stripMargin
+       |Balance: ${MoneyFormatter.formatSimple(balance)}
+       |Still to pay: ${MoneyFormatter.formatSimple(stillToPay)}
+       |Free: ${MoneyFormatter.formatSimple(freeMoney)}
+       |Daily: ${MoneyFormatter.formatSimple(dailyBudget)} ($daysRemaining days left)""".stripMargin
   }
 
   private def copySummaryToClipboard(): Unit = {

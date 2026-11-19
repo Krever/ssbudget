@@ -22,6 +22,8 @@ RUN if [ "$WITH_ANALYTICS" = "true" ]; then \
 COPY backend/target/universal/stage/ ./
 COPY frontend/dist/ ./static/
 COPY docker/entrypoint.sh /opt/docker/entrypoint.sh
+# The commit this image was built from (written by ./build.sh); /api/health reports it.
+COPY docker/VERSION /opt/docker/VERSION
 
 ENV SSBUDGET_PORT=8080
 ENV SSBUDGET_DB_PATH=/data/ssbudget.db

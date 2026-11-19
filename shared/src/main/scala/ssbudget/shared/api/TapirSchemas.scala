@@ -7,10 +7,8 @@ import ssbudget.shared.model.*
 object TapirSchemas {
   // ID types - derive as string
   given Schema[AccountId]            = Schema.string.map[AccountId]((s: String) => Some(AccountId(s)))(_.value)
-  given Schema[ExpenseDefId]         = Schema.string.map[ExpenseDefId]((s: String) => Some(ExpenseDefId(s)))(_.value)
   given Schema[PeriodId]             = Schema.string.map[PeriodId]((s: String) => Some(PeriodId(s)))(_.value)
   given Schema[BalanceSnapshotId]    = Schema.string.map[BalanceSnapshotId]((s: String) => Some(BalanceSnapshotId(s)))(_.value)
-  given Schema[ExpenseRecordId]      = Schema.string.map[ExpenseRecordId]((s: String) => Some(ExpenseRecordId(s)))(_.value)
   given Schema[BankConnectionId]     = Schema.string.map[BankConnectionId]((s: String) => Some(BankConnectionId(s)))(_.value)
   given Schema[BankAccountLinkId]    = Schema.string.map[BankAccountLinkId]((s: String) => Some(BankAccountLinkId(s)))(_.value)
   given Schema[CardGroupId]          = Schema.string.map[CardGroupId]((s: String) => Some(CardGroupId(s)))(_.value)
@@ -21,7 +19,6 @@ object TapirSchemas {
 
   // Enums and value types
   given Schema[Currency]             = Schema.string.map[Currency]((s: String) => Some(Currency(s)))(_.code)
-  given Schema[BudgetItemType]       = Schema.derivedEnumeration[BudgetItemType].defaultStringBased
   given Schema[ConnectionStatus]     = Schema.derivedEnumeration[ConnectionStatus].defaultStringBased
   given Schema[AccountRole]          = Schema.derivedEnumeration[AccountRole].defaultStringBased
   given Schema[BalanceSource]        = Schema.derivedEnumeration[BalanceSource].defaultStringBased
@@ -41,29 +38,24 @@ object TapirSchemas {
   given Schema[ClassificationRule]   = Schema.derived[ClassificationRule]
 
   // Model types
-  given Schema[Account]              = Schema.derived[Account]
-  given Schema[BalanceSnapshot]      = Schema.derived[BalanceSnapshot]
-  given Schema[BudgetItemDefinition] = Schema.derived[BudgetItemDefinition]
-  given Schema[ExpenseRecord]        = Schema.derived[ExpenseRecord]
-  given Schema[Period]               = Schema.derived[Period]
-  given Schema[SnapshotSource]       = Schema.derivedEnumeration[SnapshotSource].defaultStringBased
-  given Schema[DailyBudgetSnapshot]  = Schema.derived[DailyBudgetSnapshot]
-  given Schema[ExchangeRate]         = Schema.derived[ExchangeRate]
-  given Schema[Money]                = Schema.derived[Money]
-  given Schema[BankConnection]       = Schema.derived[BankConnection]
-  given Schema[BankAccountLink]      = Schema.derived[BankAccountLink]
-  given Schema[CardGroup]            = Schema.derived[CardGroup]
-  given Schema[Category]             = Schema.derived[Category]
-  given Schema[BankTransaction]      = Schema.derived[BankTransaction]
+  given Schema[Account]             = Schema.derived[Account]
+  given Schema[BalanceSnapshot]     = Schema.derived[BalanceSnapshot]
+  given Schema[Period]              = Schema.derived[Period]
+  given Schema[SnapshotSource]      = Schema.derivedEnumeration[SnapshotSource].defaultStringBased
+  given Schema[DailyBudgetSnapshot] = Schema.derived[DailyBudgetSnapshot]
+  given Schema[ExchangeRate]        = Schema.derived[ExchangeRate]
+  given Schema[Money]               = Schema.derived[Money]
+  given Schema[BankConnection]      = Schema.derived[BankConnection]
+  given Schema[BankAccountLink]     = Schema.derived[BankAccountLink]
+  given Schema[CardGroup]           = Schema.derived[CardGroup]
+  given Schema[Category]            = Schema.derived[Category]
+  given Schema[BankTransaction]     = Schema.derived[BankTransaction]
 
   // DTO types
   given Schema[CreateAccount]         = Schema.derived[CreateAccount]
   given Schema[UpdateAccount]         = Schema.derived[UpdateAccount]
   given Schema[UpdateAccountBalance]  = Schema.derived[UpdateAccountBalance]
   given Schema[AccountPeriodBaseline] = Schema.derived[AccountPeriodBaseline]
-  given Schema[CreateBudgetItem]      = Schema.derived[CreateBudgetItem]
-  given Schema[UpdateBudgetItem]      = Schema.derived[UpdateBudgetItem]
-  given Schema[PayBudgetItem]         = Schema.derived[PayBudgetItem]
   given Schema[IdResponse]            = Schema.derived[IdResponse]
 
   // Banking DTOs

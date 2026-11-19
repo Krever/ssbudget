@@ -130,45 +130,6 @@ class ApiClient(implicit ec: ExecutionContext) {
     }
   }
 
-  object budgetItems {
-    def list(): Future[List[BudgetItemDefinition]] = {
-      val request = interpreter.toRequest(Endpoints.client.budgetItems.list, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
-    }
-
-    def create(dto: CreateBudgetItem): Future[BudgetItemDefinition] = {
-      val request = interpreter.toRequest(Endpoints.client.budgetItems.create, Some(baseUri))
-      backend.send(request(dto)).map(handleResponse)
-    }
-
-    def update(id: ExpenseDefId, dto: UpdateBudgetItem): Future[BudgetItemDefinition] = {
-      val request = interpreter.toRequest(Endpoints.client.budgetItems.update, Some(baseUri))
-      backend.send(request((id, dto))).map(handleResponse)
-    }
-
-    def delete(id: ExpenseDefId): Future[Unit] = {
-      val request = interpreter.toRequest(Endpoints.client.budgetItems.delete, Some(baseUri))
-      backend.send(request(id)).map(handleResponse)
-    }
-  }
-
-  object expenseRecords {
-    def listCurrent(): Future[List[ExpenseRecord]] = {
-      val request = interpreter.toRequest(Endpoints.client.expenseRecords.listCurrent, Some(baseUri))
-      backend.send(request(())).map(handleResponse)
-    }
-
-    def pay(expenseDefId: ExpenseDefId, dto: PayBudgetItem): Future[ExpenseRecord] = {
-      val request = interpreter.toRequest(Endpoints.client.expenseRecords.pay, Some(baseUri))
-      backend.send(request((expenseDefId, dto))).map(handleResponse)
-    }
-
-    def unpay(expenseDefId: ExpenseDefId): Future[ExpenseRecord] = {
-      val request = interpreter.toRequest(Endpoints.client.expenseRecords.unpay, Some(baseUri))
-      backend.send(request(expenseDefId)).map(handleResponse)
-    }
-  }
-
   object periods {
     def list(): Future[List[Period]] = {
       val request = interpreter.toRequest(Endpoints.client.periods.list, Some(baseUri))

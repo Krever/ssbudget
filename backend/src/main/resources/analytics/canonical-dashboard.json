@@ -1,13 +1,11 @@
 {
   "_comment": "Layout note: Metabase's dashboard grid is 24 columns wide. Cards must sum to 24 across a row or the dashboard renders with a large empty gutter on the right. Placeholders ({{db}}, {{table:x}}, {{field:x.y}}) are resolved against the live instance at seed time. Each card carries a stable `key`, so a later `version` can tell which cards a dashboard already has; bumping `version` is what delivers new ones (see MetabaseProvisioner.seedCanonicalDashboard). `filter_fields` re-points a dashboard filter at another column for cards that read a different table.",
-  "version": 2,
+  "version": 3,
   "name": "Household Spending",
   "description": "Shipped with SSBudget as a starting point. Edit it freely — it is created once and never overwritten.",
 
   "coercions": [
     { "table": "v_transactions",  "field": "booked_on",          "strategy": "Coercion/ISO8601->Date" },
-    { "table": "v_planned_items", "field": "period_start",       "strategy": "Coercion/ISO8601->Date" },
-    { "table": "v_planned_items", "field": "paid_on",            "strategy": "Coercion/ISO8601->Date" },
     { "table": "v_accounts",      "field": "balance_updated_at", "strategy": "Coercion/ISO8601->DateTime" },
     { "table": "v_daily_budget",  "field": "on_date",            "strategy": "Coercion/ISO8601->Date" }
   ],
@@ -208,15 +206,14 @@
       "display": "area",
       "visualization_settings": {
         "card.title": "What's committed",
-        "card.description": "What the plan still expected to leave the balance \u2014 hand-declared items and category budgets. The steps down in free money are these being paid off.",
+        "card.description": "What the plan still expected to leave the balance. The steps down in free money are these being paid off.",
         "graph.dimensions": ["on_date"],
-        "graph.metrics": ["sum", "sum_2"],
+        "graph.metrics": ["sum"],
         "graph.x_axis.title_text": "Day",
         "graph.y_axis.title_text": "Still to pay",
         "stackable.stack_type": "stacked",
         "series_settings": {
-          "sum": { "title": "Planned items" },
-          "sum_2": { "title": "Category budgets" }
+          "sum": { "title": "Still to pay" }
         }
       },
       "filter_fields": { "date_range": "{{field:v_daily_budget.on_date}}" },
@@ -225,10 +222,7 @@
         "type": "query",
         "query": {
           "source-table": "{{table:v_daily_budget}}",
-          "aggregation": [
-            ["sum", ["field", "{{field:v_daily_budget.planned_to_pay}}", null]],
-            ["sum", ["field", "{{field:v_daily_budget.budgets_to_spend}}", null]]
-          ],
+          "aggregation": [["sum", ["field", "{{field:v_daily_budget.still_to_pay}}", null]]],
           "breakout": [["field", "{{field:v_daily_budget.on_date}}", { "temporal-unit": "day" }]]
         }
       },

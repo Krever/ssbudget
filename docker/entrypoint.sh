@@ -104,6 +104,27 @@ else
   echo "▶ analytics disabled"
 fi
 
+# A copy of the database before the app starts, because the app migrates the schema at start. A migration that goes wrong is then one
+# `cp` away from the state before it. The SQLite backup command gives a consistent file also with a WAL beside the database. The copy must
+# never stop the start: a full disk or a damaged file is reported, and the app starts as before.
+backup_database() {
+  local db="${SSBUDGET_DB_PATH:-/data/ssbudget.db}"
+  local dir keep=5
+  dir="$(dirname "$db")/backups"
+  [[ -f "$db" ]] || return 0
+  mkdir -p "$dir"
+  local target="$dir/pre-start-$(date -u +%Y%m%dT%H%M%SZ).db"
+  if sqlite3 "$db" ".backup '$target'"; then
+    echo "▶ database copied to $target"
+    # Keep the newest $keep copies.
+    ls -1t "$dir"/pre-start-*.db 2>/dev/null | tail -n +$((keep + 1)) | xargs -r rm -f
+  else
+    echo "✗ could not copy the database to $target — starting without a copy" >&2
+    rm -f "$target"
+  fi
+}
+backup_database || true
+
 # The app is what the container exists for, so it runs in the foreground.
 bin/ssbudget &
 app_pid=$!

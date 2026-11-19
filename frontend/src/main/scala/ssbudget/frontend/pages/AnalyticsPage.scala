@@ -77,8 +77,8 @@ object AnalyticsPage {
         code("SSBUDGET_METABASE_PASSWORD"),
         " and ",
         code("SSBUDGET_METABASE_EMBED_SECRET"),
-        ". See ",
-        code("docs/metabase-analytics.md"),
+        ". See the Analytics section of ",
+        code("README.md"),
         ".",
       ),
     )

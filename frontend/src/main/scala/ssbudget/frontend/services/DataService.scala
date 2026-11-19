@@ -1,7 +1,6 @@
 package ssbudget.frontend.services
 
 import com.raquo.laminar.api.L.*
-import org.scalajs.dom
 import ssbudget.shared.api.{CategorySummary, TransactionListResponse}
 import ssbudget.shared.model.*
 
@@ -9,7 +8,7 @@ import java.time.{LocalDate, ZoneOffset}
 import scala.concurrent.Future
 
 trait DataService {
-  // Initialization (for API-backed implementations)
+  // Loads all data from the server.
   def initialize(): Future[Unit]
 
   // Accounts (spending + savings, unified)
@@ -18,19 +17,6 @@ trait DataService {
   def addAccount(name: String, currency: Currency): Future[Unit]
   def deleteAccount(accountId: AccountId): Future[Unit]
   def updateAccountBalance(accountId: AccountId, amountCents: Long): Future[Unit] // manual-source accounts only
-
-  // Budget items
-  def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long, currency: Currency): Future[Unit]
-  def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long, currency: Currency): Future[Unit]
-  def deleteBudgetItem(itemId: ExpenseDefId): Future[Unit]
-
-  /** Record a payment against a planned item this period. `amountCents` ADDS to what's already paid; `settle = true` closes the item, `false` leaves
-    * the remainder outstanding.
-    */
-  def payBudgetItem(itemId: ExpenseDefId, amountCents: Long, settle: Boolean): Future[Unit]
-
-  /** Undo all payment progress for the item this period. */
-  def resetBudgetItemPayment(itemId: ExpenseDefId): Future[Unit]
 
   // Periods
   def periods: Signal[List[Period]]
@@ -65,7 +51,7 @@ trait DataService {
   def setPrimaryCurrency(code: String): Future[Unit]
   def refreshExchangeRates(): Future[Unit]
 
-  // Savings accounts (role == Savings). Buckets with a balance only — intended saving is modelled as a planned expense.
+  // Savings accounts (role == Savings). Buckets with a balance only. Intended saving is one amount for each period (Period.plannedSavingCents).
   def savingsAccounts: Signal[List[Account]]
 
   // Investment accounts (role == Investment): money at market value. Not spendable and not part of the savings figures.
@@ -86,9 +72,6 @@ trait DataService {
 
   // Derived signals
   def currentPeriod: Signal[Option[Period]]
-  def plannedExpenses: Signal[List[BudgetItemDefinition]]
-  def plannedIncomes: Signal[List[BudgetItemDefinition]]
-  def currentPeriodRecords: Signal[List[ExpenseRecord]]
 
   // Category budgets (each category's monthly figure and period spend, computed server-side — see CategoryBudgetMethod)
   def categorySummaries: Signal[List[CategorySummary]]
@@ -127,22 +110,6 @@ trait DataService {
   /** 0..1 through the current period (for pace markers), against the same expected end as [[daysRemainingInPeriod]]. Pinned to 1 once overrun. */
   final def periodElapsedFraction: Signal[Double] =
     currentPeriod.map(_.fold(0.0)(_.elapsedFraction(DataService.today)))
-
-  /** Σ of what's still expected across `items`: per item, its estimate minus what's already been paid this period, zero once settled. Concrete on the
-    * trait so the real service and the mock can't disagree about the rule that drives free money.
-    */
-  private def remainingOn(items: Signal[List[BudgetItemDefinition]]): Signal[Money] =
-    items
-      .combineWith(currentPeriodRecords)
-      .combineWith(exchangeRates)
-      .combineWith(primaryCurrency)
-      .map { case (items, records, rates, primary) =>
-        val amounts = items.map { item =>
-          val record = records.find(_.expenseDefId == item.id)
-          Money(ExpenseRecord.remainingFor(record, item.estimateCents), item.currency)
-        }
-        DataService.sumInPrimary(amounts, rates, primary)
-      }
 
   /** Σ of the savings buckets, in the primary currency — the difference between [[bankAccountBalance]] (spendable) and [[totalBalance]]. */
   final def savingsBalance: Signal[Money] =
@@ -210,14 +177,8 @@ trait DataService {
       Money(change.amountCents + moved.amountCents, change.currency)
     }
 
-  /** Σ remaining per planned expense — what still has to come out of the balance before the next paycheck. */
-  final def unpaidPlannedExpenses: Signal[Money] = remainingOn(plannedExpenses)
-
-  /** Σ remaining per planned income — what is still expected to come in. */
-  final def pendingIncome: Signal[Money] = remainingOn(plannedIncomes)
-
   /** Signed remaining per category budget, in the primary currency: positive is still to be spent, negative is still expected to arrive (see
-    * [[CategorySummary.remainingCents]]). Concrete here so the real service and the mock can't disagree about what feeds free money.
+    * [[CategorySummary.remainingCents]]).
     */
   private def budgetRemainings: Signal[List[Money]] =
     categorySummaries
@@ -234,19 +195,11 @@ trait DataService {
         DataService.sumInPrimary(amounts.filter(m => select(m.amountCents)).map(m => Money(m.amountCents * sign, m.currency)), rates, primary)
       }
 
-  /** Σ of what category budgets still expect to SPEND (income budgets excluded), as a positive amount. */
-  final def categoryBudgetsToSpend: Signal[Money] = sumBudgets(_ > 0, 1)
+  /** Everything the plan still expects to leave the balance before the next paycheck: the sum over the expense budgets, as a positive amount. */
+  final def stillToPay: Signal[Money] = sumBudgets(_ > 0, 1)
 
-  /** Σ of what category budgets still expect to RECEIVE (income budgets only), as a positive amount. */
-  final def categoryBudgetsToReceive: Signal[Money] = sumBudgets(_ < 0, -1)
-
-  /** Everything the plan still expects to leave the balance before the next paycheck — hand-declared items and category budgets together. */
-  final def stillToPay: Signal[Money] =
-    unpaidPlannedExpenses.combineWith(categoryBudgetsToSpend).map { case (planned, budgets) => planned + budgets }
-
-  /** Everything the plan still expects to arrive before the next paycheck, from both kinds of entry. */
-  final def stillToReceive: Signal[Money] =
-    pendingIncome.combineWith(categoryBudgetsToReceive).map { case (planned, budgets) => planned + budgets }
+  /** Everything the plan still expects to arrive before the next paycheck: the sum over the income budgets, as a positive amount. */
+  final def stillToReceive: Signal[Money] = sumBudgets(_ < 0, -1)
 
   /** The net amount that went to savings in the current period so far, by the bank ledger: the opposite of the `fromSavings` term of the period's
     * latest recorded day. It is read from [[freeMoneyHistory]], so the page and the daily record count the planned saving down by one figure.
@@ -278,10 +231,6 @@ trait DataService {
       .combineWith(savingReserve)
       .map { case (balance, toReceive, toPay, reserve) => balance + toReceive - toPay - reserve }
 
-  /** A deliberately conservative variant for the shared summary: the balance less only what's planned by hand. */
-  final def availableNow: Signal[Money] =
-    bankAccountBalance.combineWith(unpaidPlannedExpenses).map { case (balance, unpaid) => balance - unpaid }
-
   final def dailyBudget: Signal[Money] =
     freeMoney.combineWith(daysRemainingInPeriod).map { case (free, days) => if days > 0 then free / days else Money.zero(free.currency) }
 }
@@ -289,12 +238,7 @@ trait DataService {
 object DataService {
   import scala.concurrent.ExecutionContext.Implicits.global
 
-  private lazy val apiService = new ApiDataService(new ApiClient())
-
-  lazy val instance: DataService = {
-    if dom.window.location.search.contains("mock=true") then InMemoryDataService
-    else apiService
-  }
+  lazy val instance: DataService = new ApiDataService(new ApiClient())
 
   // UTC everywhere: ZoneId.systemDefault() fails silently in Scala.js without the tzdb dependency (see Formatting).
   private val utc = ZoneOffset.UTC

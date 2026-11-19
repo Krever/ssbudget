@@ -102,19 +102,3 @@ FROM (
   FROM daily_budget_snapshots s
   LEFT JOIN periods p ON p.id = s.period_id
 ) b;
-
-DROP VIEW IF EXISTS v_planned_items;
-CREATE VIEW v_planned_items AS
-SELECT
-  d.name                          AS name,
-  d.item_type                     AS item_type,
-  d.currency                      AS currency,
-  d.estimate_cents * 1.0 / 100    AS estimate,
-  COALESCE(r.paid_amount, 0) * 1.0 / 100 AS paid,
-  CASE WHEN r.settled = 1 THEN 'yes' ELSE 'no' END AS settled,
-  date(p.started_at)              AS period_start,
-  p.expected_end                  AS period_expected_end,
-  date(r.paid_at)                 AS paid_on
-FROM expense_definitions d
-LEFT JOIN expense_records r ON r.expense_def_id = d.id
-LEFT JOIN periods p ON p.id = r.period_id;

@@ -38,12 +38,6 @@ object E2ESpec {
 
   /** How long element lookups keep retrying. Also the ceiling for [[Eventually]] assertions. */
   val implicitWait: Duration = Duration.ofSeconds(10)
-
-  /** Locates one entry of the Dashboard's Plan by name: the block holding its bar, state line and buttons. Lives here because `DemoScenarioSpec`
-    * builds its own driver and can't extend the trait, and one xpath with two owners would drift.
-    */
-  def planEntryXpath(name: String): String =
-    s"//span[contains(@class,'fw-semibold') and contains(.,'$name')]/ancestor::div[contains(@class,'mb-3')][1]"
 }
 
 trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with BeforeAndAfterEach with Eventually {
@@ -177,7 +171,7 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
 
   // ============ Setup Helpers ============
 
-  /** Open the Dashboard — the app's single working surface, home to the summary, accounts, planned items and category budgets. */
+  /** Open the Dashboard — the app's single working surface, home to the summary, accounts and category budgets. */
   protected def openDashboard(): Unit = {
     driver.get(baseUrl)
     waitForPage("Dashboard")
@@ -244,13 +238,13 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     * replaces the block on every update and a captured reference would go stale.
     */
   protected def planEntry(name: String): WebElement =
-    driver.findElement(By.xpath(E2ESpec.planEntryXpath(name)))
+    driver.findElement(By.xpath(s"//span[contains(@class,'fw-semibold') and contains(.,'$name')]/ancestor::div[contains(@class,'mb-3')][1]"))
 
-  /** The name line of a Plan entry — for a category entry that's also the drill-down toggle. */
+  /** The name line of a Plan entry. It is also the drill-down toggle. */
   protected def planEntryName(name: String): WebElement =
     driver.findElement(By.xpath(s"//span[contains(@class,'fw-semibold') and contains(.,'$name')]"))
 
-  /** Turn off the Plan's "Hide done" switch, which otherwise hides settled entries and covered budgets. Idempotent. */
+  /** Turn off the Plan's "Hide done" switch, which otherwise hides the budgets with nothing left. Idempotent. */
   protected def showDonePlanEntries(): Unit = {
     val toggle = driver.findElement(By.id("hideDone"))
     if toggle.isSelected then {
@@ -258,23 +252,4 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
       eventually(driver.findElement(By.id("hideDone")).isSelected shouldBe false)
     }
   }
-
-  /** Add a manual entry to the Dashboard's Plan — an expense or an income, per `income`. */
-  private def addPlannedItem(name: String, amount: Double, income: Boolean): Unit = {
-    openDashboard()
-
-    val card = findCard("Plan")
-    click(card, if income then "+ Income" else "+ Expense")
-
-    val form = driver.findElement(By.id(if income then "plan-add-income" else "plan-add-expense"))
-    form.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
-    form.findElement(By.cssSelector("input[type='number']")).sendKeys(amount.toString)
-    click(form, "Add")
-    eventually(findCard("Plan").getText should include(name))
-  }
-
-  protected def addPlannedExpense(name: String, amount: Double): Unit = addPlannedItem(name, amount, income = false)
-
-  protected def addPlannedIncome(name: String, amount: Double): Unit = addPlannedItem(name, amount, income = true)
-
 }

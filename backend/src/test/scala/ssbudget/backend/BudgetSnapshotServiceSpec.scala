@@ -17,8 +17,8 @@ import java.time.{Instant, LocalDate, ZoneOffset}
 
 /** The daily free-money components, over a database built to have a knowable answer on each day.
   *
-  * The fixture is a single period with one spending account, one planned expense settled part-way through, and a bank ledger that moves the balance
-  * on days no snapshot was taken — which is the situation the reconstruction exists for.
+  * The fixture is a single period with one spending account, one category budget drawn down part-way through, and a bank ledger that moves the
+  * balance on days no snapshot was taken — which is the situation the reconstruction exists for.
   */
 class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
 
@@ -41,26 +41,17 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
       .guarantee(IO.blocking(Files.deleteIfExists(file)).void)
   }
 
-  /** 1,000 PLN on the account, a 300 PLN bill settled on day 5, and 150 PLN of card spend on day 7 that no balance snapshot ever saw. */
+  /** 1,000 PLN on the account, a 1,000 PLN budget that 100 EUR of spend draws down on day 2, and 150 PLN of card spend on day 7 that no balance
+    * snapshot ever saw.
+    */
   private def seed(xa: Transactor[IO]): IO[Unit] = {
     val insert = for {
       _ <- sql"""INSERT INTO accounts (id, name, currency, role, balance_cents, balance_source, balance_updated_at)
                  VALUES ('acc1', 'Main', 'PLN', 'spending', 85000, 'bank', ${at(today)})""".update.run
       _ <- sql"""INSERT INTO periods (id, started_at, expected_end, ended_at) VALUES ('per1', ${at(periodStart, 9)}, $periodEnd, NULL)""".update.run
-      _ <- sql"""INSERT INTO expense_definitions (id, name, item_type, estimate_cents, currency)
-                 VALUES ('def1', 'Rent', 'planned_expense', 30000, 'PLN')""".update.run
-      _ <- sql"""INSERT INTO expense_records (id, period_id, expense_def_id, paid_amount, paid_at, settled)
-                 VALUES ('rec1', 'per1', 'def1', 30000, ${at(periodStart.plusDays(5), 10)}, 1)""".update.run
-      // A 100 EUR bill, with a record, and 4 PLN/EUR on the books: it must be reserved as 400 PLN, not as 100.
-      _ <- sql"""INSERT INTO expense_definitions (id, name, item_type, estimate_cents, currency)
-                 VALUES ('def2', 'Hosting', 'planned_expense', 10000, 'EUR')""".update.run
-      _ <- sql"""INSERT INTO expense_records (id, period_id, expense_def_id, paid_amount, paid_at, settled)
-                 VALUES ('rec2', 'per1', 'def2', NULL, NULL, 0)""".update.run
+      // 4 PLN/EUR on the books: 100 EUR of spend must count as 400 PLN, not as 100.
       _ <- sql"""INSERT INTO exchange_rates (from_currency, to_currency, rate, fetched_at)
                  VALUES ('EUR', 'PLN', 40000, ${at(periodStart, 1)})""".update.run
-      // A definition with no record in this period — never declared for it, so it is not owed in it.
-      _ <- sql"""INSERT INTO expense_definitions (id, name, item_type, estimate_cents, currency)
-                 VALUES ('def3', 'Added later', 'planned_expense', 90000, 'PLN')""".update.run
       // The only balance ever recorded: 1,000 PLN on the day the period opened.
       _ <- sql"""INSERT INTO balance_snapshots (id, account_id, amount, currency, recorded_at)
                  VALUES ('snap1', 'acc1', 100000, 'PLN', ${at(periodStart, 9)})""".update.run
@@ -107,24 +98,14 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
     service.componentsAsOf(day).map(_.getOrElse(fail(s"no components for $day")))
 
   "A day's components" - {
-    "reserve a planned item in full before it was paid" in {
+    "hold zero in the two terms of the removed planned items" in {
       withFixture { (service, _, _) =>
         freeOn(service, periodStart.plusDays(1)).asserting { s =>
           s.spendableCents shouldBe 100000L
-          s.plannedToPayCents shouldBe 70000L // 300 PLN rent + 100 EUR hosting at 4.0
+          s.plannedToPayCents shouldBe 0L
+          s.plannedToReceiveCents shouldBe 0L
+          s.currency shouldBe Currency.PLN
           s.source shouldBe SnapshotSource.Reconstructed
-        }
-      }
-    }
-
-    "release it from the day it was settled" in {
-      withFixture { (service, _, _) =>
-        for {
-          before <- freeOn(service, periodStart.plusDays(4))
-          after  <- freeOn(service, periodStart.plusDays(5))
-        } yield {
-          before.plannedToPayCents shouldBe 70000L
-          after.plannedToPayCents shouldBe 40000L // only the unpaid EUR bill is left
         }
       }
     }
@@ -137,26 +118,6 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
         } yield {
           before.spendableCents shouldBe 100000L // the snapshot, unmoved
           after.spendableCents shouldBe 85000L   // less the 150 PLN booked on day 7
-        }
-      }
-    }
-
-    "reserve a foreign-currency item in the primary currency" in {
-      withFixture { (service, _, _) =>
-        freeOn(service, periodStart.plusDays(6)).asserting { s =>
-          // 100 EUR at 4.0 PLN/EUR. Counting it as 10000 raw cents would understate what is owed fourfold.
-          s.plannedToPayCents shouldBe 40000L
-          s.currency shouldBe Currency.PLN
-        }
-      }
-    }
-
-    "ignore a definition that has no record in the period" in {
-      withFixture { (service, _, _) =>
-        freeOn(service, periodStart.plusDays(6)).asserting { s =>
-          // 'Added later' is a 900 PLN expense with no record here. A record is opened for every definition when a period
-          // starts, so its absence is the app's own statement that the item did not exist then.
-          s.plannedToPayCents shouldBe 40000L
         }
       }
     }
@@ -181,6 +142,56 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
           s.spendableCents shouldBe 85000L
           s.source shouldBe SnapshotSource.Live
           s.daysRemaining shouldBe Some(20) // the period opened 10 days ago and runs 30 days
+        }
+      }
+    }
+  }
+
+  "A fixed budget, which stands for a one-off item" - {
+    // A one-off income of 2,000 PLN and a one-off bill of 300 PLN, each a category with a fixed budget.
+    def seedOneOffs(xa: Transactor[IO]): IO[Unit] =
+      (for {
+        _ <- sql"""INSERT INTO categories (id, name, color, budget_type, budget_method, budget_fixed_cents)
+                   VALUES ('bonus', 'Bonus', '#888', 'subscription', 'fixed', -200000)""".update.run
+        _ <- sql"""INSERT INTO categories (id, name, color, budget_type, budget_method, budget_fixed_cents)
+                   VALUES ('repair', 'Repair', '#888', 'subscription', 'fixed', 30000)""".update.run
+        // Day 3: the income arrives on the spending account.
+        _ <- tx("b1", "uid1", 200000, "PLN", periodStart.plusDays(3), internal = false, Some("bonus"))
+      } yield ()).transact(xa)
+
+    "is still to receive until the income arrives, and the arrival does not move free money" in {
+      withFixture { (service, _, xa) =>
+        for {
+          _      <- seedOneOffs(xa)
+          before <- freeOn(service, periodStart.plusDays(2))
+          after  <- freeOn(service, periodStart.plusDays(3))
+        } yield {
+          before.budgetsToReceiveCents shouldBe 200000L
+          before.stillToReceiveCents shouldBe 200000L
+          after.budgetsToReceiveCents shouldBe 0L
+          // The plan expected this income, so it is not unplanned income, and the balance rises by what the plan no longer expects.
+          after.unplannedIncomeCents shouldBe 0L
+          after.spendableCents shouldBe before.spendableCents + 200000L
+          after.freeMoneyCents shouldBe before.freeMoneyCents
+          after.planLineCents shouldBe before.planLineCents
+        }
+      }
+    }
+
+    "is still to pay until a manual override closes it, from the day the override was typed" in {
+      withFixture { (service, _, xa) =>
+        val typedOn = periodStart.plusDays(5)
+        for {
+          _      <- seedOneOffs(xa)
+          _      <- sql"""INSERT INTO category_budget_overrides (period_id, category_id, remaining_cents, updated_at)
+                          VALUES ('per1', 'repair', 0, ${at(typedOn, 10)})""".update.run.transact(xa)
+          before <- freeOn(service, typedOn.minusDays(1))
+          after  <- freeOn(service, typedOn)
+        } yield {
+          // 300 PLN of the bill, and the 600 PLN that the budget of the fixture still expects.
+          before.budgetsToSpendCents shouldBe 30000L + 60000L
+          after.budgetsToSpendCents shouldBe 60000L
+          after.freeMoneyCents shouldBe before.freeMoneyCents + 30000L
         }
       }
     }
@@ -407,6 +418,39 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
         } yield {
           def closed(rows: List[DailyBudgetSnapshot]) = rows.filter(_.onDate.isBefore(closedOn)).map(_.budgetsToSpendCents)
           closed(after) shouldBe closed(before)
+        }
+      }
+    }
+  }
+
+  "The amounts of the removed planned items, in the rows of a closed period" - {
+    "stay as they were recorded, and stay in free money" in {
+      withFixture { (service, repos, xa) =>
+        val closedOn = periodStart.plusDays(6)
+        for {
+          _      <- service.ensureUpToDate
+          // The period ends on day 6, and a new one opens at that moment. The rows of the closed period hold amounts from the time of the planned
+          // items: 700 PLN still to pay and 100 PLN still to receive.
+          _      <- sql"UPDATE periods SET ended_at = ${at(closedOn, 9)} WHERE id = 'per1'".update.run.transact(xa)
+          _      <- sql"""INSERT INTO periods (id, started_at, expected_end, ended_at)
+                          VALUES ('per2', ${at(closedOn, 9)}, ${closedOn.plusDays(30)}, NULL)""".update.run.transact(xa)
+          _      <- sql"""UPDATE daily_budget_snapshots SET planned_to_pay_cents = 70000, planned_to_receive_cents = 10000
+                          WHERE on_date < $closedOn""".update.run.transact(xa)
+          before <- repos.dailyBudgetSnapshots.findAll
+          _      <- service.ensureUpToDate
+          after  <- repos.dailyBudgetSnapshots.findAll
+          fromDb <- viewFreeMoney(xa)
+        } yield {
+          val (closed, open) = after.partition(_.onDate.isBefore(closedOn))
+          closed shouldBe before.filter(_.onDate.isBefore(closedOn))
+          closed.map(r => (r.plannedToPayCents, r.plannedToReceiveCents)).distinct shouldBe List((70000L, 10000L))
+          closed.foreach { r =>
+            r.stillToPayCents shouldBe r.budgetsToSpendCents + 70000L
+            r.freeMoneyCents shouldBe r.spendableCents + r.budgetsToReceiveCents + 10000L - r.budgetsToSpendCents - 70000L - r.savingReserveCents
+          }
+          open should not be empty
+          open.map(r => (r.plannedToPayCents, r.plannedToReceiveCents)).distinct shouldBe List((0L, 0L))
+          fromDb.toMap shouldBe after.map(r => r.onDate.toString -> r.freeMoneyCents).toMap
         }
       }
     }

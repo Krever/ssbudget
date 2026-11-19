@@ -13,9 +13,7 @@ object DoobieMeta {
 
   // ID types
   given Meta[AccountId]            = Meta[String].timap(AccountId.apply)(_.value)
-  given Meta[ExpenseDefId]         = Meta[String].timap(ExpenseDefId.apply)(_.value)
   given Meta[PeriodId]             = Meta[String].timap(PeriodId.apply)(_.value)
-  given Meta[ExpenseRecordId]      = Meta[String].timap(ExpenseRecordId.apply)(_.value)
   given Meta[BalanceSnapshotId]    = Meta[String].timap(BalanceSnapshotId.apply)(_.value)
   given Meta[BankConnectionId]     = Meta[String].timap(BankConnectionId.apply)(_.value)
   given Meta[BankAccountLinkId]    = Meta[String].timap(BankAccountLinkId.apply)(_.value)
@@ -49,15 +47,6 @@ object DoobieMeta {
 
   given Write[BankLinkTarget] =
     Write[(String, Option[String])].contramap(t => (BankLinkTarget.kind(t), BankLinkTarget.idValue(t)))
-
-  given Meta[BudgetItemType] = Meta[String].tiemap {
-    case "planned_expense" => BudgetItemType.PlannedExpense.asRight
-    case "planned_income"  => BudgetItemType.PlannedIncome.asRight
-    case other             => Left(s"Unknown budget item type: $other")
-  } {
-    case BudgetItemType.PlannedExpense => "planned_expense"
-    case BudgetItemType.PlannedIncome  => "planned_income"
-  }
 
   given Meta[SnapshotSource] = Meta[String].tiemap(SnapshotSource.fromString)(SnapshotSource.asString)
 

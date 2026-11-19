@@ -65,7 +65,8 @@ object BalanceSource {
 }
 
 /** A money container: a spending account, a savings bucket or an investment. The current balance and its provenance live here uniformly;
-  * [[BalanceSnapshot]] rows are append-only history. Intended saving is modelled as a planned expense, not as a target on the bucket.
+  * [[BalanceSnapshot]] rows are append-only history. Intended saving is one amount for each period ([[Period.plannedSavingCents]]), not a target on
+  * the bucket.
   */
 final case class Account(
     id: AccountId,

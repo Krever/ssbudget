@@ -63,15 +63,6 @@ object Routes {
       route(Endpoints.accounts.update) { case (id, dto) => updateAccount(repos)(id, dto) },
       route(Endpoints.accounts.updateBalance) { case (id, dto) => updateAccountBalance(repos)(id, dto) },
       route(Endpoints.accounts.delete)(deleteAccount(repos)),
-      // Budget items
-      route(Endpoints.budgetItems.list)(_ => repos.expenseDefinitions.findAll.map(Right(_))),
-      route(Endpoints.budgetItems.create)(createBudgetItem(repos)),
-      route(Endpoints.budgetItems.update) { case (id, dto) => updateBudgetItem(repos)(id, dto) },
-      route(Endpoints.budgetItems.delete)(deleteBudgetItem(repos)),
-      // Expense records
-      route(Endpoints.expenseRecords.listCurrent)(_ => listCurrentPeriodRecords(repos)),
-      route(Endpoints.expenseRecords.pay) { case (id, dto) => payExpenseRecord(repos)(id, dto) },
-      route(Endpoints.expenseRecords.unpay)(unpayExpenseRecord(repos)),
       // Periods
       route(Endpoints.periods.list)(_ => repos.periods.findAll.map(Right(_))),
       route(Endpoints.periods.startNew)(_ => startNewPeriod(repos)),
@@ -144,13 +135,6 @@ object Routes {
     interpreter.toRoutes(routes)
   }
 
-  private def listCurrentPeriodRecords(repos: Repositories): Result[List[ExpenseRecord]] = {
-    for {
-      currentPeriod <- repos.periods.findCurrent
-      records       <- currentPeriod.fold(IO.pure(List.empty[ExpenseRecord]))(p => repos.expenseRecords.findByPeriod(p.id))
-    } yield Right(records)
-  }
-
   private def createAccount(repos: Repositories)(dto: CreateAccount): Result[Account] = {
     val accountId = AccountId(UUID.randomUUID().toString)
     val now       = Instant.now()
@@ -213,94 +197,6 @@ object Routes {
     } yield result
   }
 
-  private def createBudgetItem(repos: Repositories)(dto: CreateBudgetItem): Result[BudgetItemDefinition] = {
-    val itemId = ExpenseDefId(UUID.randomUUID().toString)
-    val item   = BudgetItemDefinition(itemId, dto.name, dto.itemType, dto.estimateCents, dto.currency)
-
-    for {
-      _             <- repos.expenseDefinitions.create(item)
-      // Open a record for the current period so the item can be paid straight away
-      currentPeriod <- repos.periods.findCurrent
-      _             <- currentPeriod match {
-                         case Some(period) =>
-                           val recordId = ExpenseRecordId(UUID.randomUUID().toString)
-                           val record   = ExpenseRecord(recordId, period.id, itemId, None, None, settled = false)
-                           repos.expenseRecords.create(record)
-                         case None         => IO.unit
-                       }
-    } yield Right(item)
-  }
-
-  private def updateBudgetItem(repos: Repositories)(id: ExpenseDefId, dto: UpdateBudgetItem): Result[BudgetItemDefinition] = {
-    for {
-      existingOpt <- repos.expenseDefinitions.findById(id)
-      result      <- existingOpt match {
-                       case Some(existing) =>
-                         val updated =
-                           existing.copy(name = dto.name, itemType = dto.itemType, estimateCents = dto.estimateCents, currency = dto.currency)
-                         repos.expenseDefinitions.update(updated).as(Right(updated))
-                       case None           =>
-                         IO.pure(Left(s"Budget item not found: ${id.value}"))
-                     }
-    } yield result
-  }
-
-  private def deleteBudgetItem(repos: Repositories)(id: ExpenseDefId): Result[Unit] = {
-    for {
-      // Note: expense records referencing this item should be deleted or we could have FK issues
-      // For now, just delete the definition (assuming cascade or manual cleanup)
-      _ <- repos.expenseDefinitions.delete(id)
-    } yield Right(())
-  }
-
-  /** Record a payment against a planned item in the current period. The amount ADDS to what's already been paid, so paying in instalments
-    * accumulates; `settle` is what closes the item (see [[PayBudgetItem]]).
-    */
-  private def payExpenseRecord(repos: Repositories)(expenseDefId: ExpenseDefId, dto: PayBudgetItem): Result[ExpenseRecord] = {
-    for {
-      currentPeriod <- repos.periods.findCurrent
-      result        <- currentPeriod match {
-                         case Some(period) =>
-                           for {
-                             recordOpt <- repos.expenseRecords.findByPeriodAndExpense(period.id, expenseDefId)
-                             record    <- recordOpt match {
-                                            case Some(record) =>
-                                              val updated = record.withPayment(dto.amountCents, Instant.now(), dto.settle)
-                                              repos.expenseRecords.savePayment(updated).as(updated)
-                                            case None         =>
-                                              IO.raiseError(
-                                                new Exception(s"Expense record not found for period ${period.id.value} and expense ${expenseDefId.value}"),
-                                              )
-                                          }
-                           } yield Right(record)
-                         case None         =>
-                           IO.pure(Left("No current period found"))
-                       }
-    } yield result
-  }
-
-  /** Undo all payment progress for the current period: back to nothing paid, nothing settled. */
-  private def unpayExpenseRecord(repos: Repositories)(expenseDefId: ExpenseDefId): Result[ExpenseRecord] = {
-    for {
-      currentPeriod <- repos.periods.findCurrent
-      result        <- currentPeriod match {
-                         case Some(period) =>
-                           for {
-                             recordOpt <- repos.expenseRecords.findByPeriodAndExpense(period.id, expenseDefId)
-                             record    <- recordOpt match {
-                                            case Some(record) =>
-                                              val reset = record.cleared
-                                              repos.expenseRecords.savePayment(reset).as(reset)
-                                            case None         =>
-                                              IO.raiseError(new Exception(s"Expense record not found"))
-                                          }
-                           } yield Right(record)
-                         case None         =>
-                           IO.pure(Left("No current period found"))
-                       }
-    } yield result
-  }
-
   /** Correct when a period is expected to end. The date is the period's own — nothing re-derives it — so this is the whole of "the paycheck came a
     * few days early", "it came late", or "the pay cycle changed shape".
     */
@@ -337,13 +233,6 @@ object Routes {
       _             <- currentPeriod.fold(IO.unit)(p => repos.periods.close(p.id, now))
       // Create new period
       _             <- repos.periods.create(newPeriod)
-      // Every budget item is a planned item (expense or income), so each one gets a fresh record for the new period.
-      budgetItems   <- repos.expenseDefinitions.findAll
-      _             <- budgetItems.traverse { item =>
-                         val recordId = ExpenseRecordId(UUID.randomUUID().toString)
-                         val record   = ExpenseRecord(recordId, newPeriodId, item.id, None, None, settled = false)
-                         repos.expenseRecords.create(record)
-                       }
     } yield Right(newPeriod)
   }
 
@@ -426,20 +315,18 @@ object Routes {
       all       <- repos.periods.findAll
       periods    = all.sortBy(_.startDate.toEpochMilli).reverse.take(limitOpt.filter(_ > 0).getOrElse(periodSummaryDefaultCount).min(60))
       accounts  <- repos.accounts.findAll
-      defs      <- repos.expenseDefinitions.findAll
       cats      <- repos.categories.findAll
       converter <- primaryConverter(repos)
       // Every period needs each account's balance at two instants. The history of each account is read ONCE here, and the boundaries are resolved
       // in memory.
       history   <- BalanceHistory.load(repos, accounts)
-      summaries <- periods.traverse(periodSummary(repos, converter, accounts, defs, cats, history))
+      summaries <- periods.traverse(periodSummary(repos, converter, accounts, cats, history))
     } yield Right(summaries)
 
   private def periodSummary(
       repos: Repositories,
       converter: (Currency, (Long, Currency) => Long),
       accounts: List[Account],
-      defs: List[BudgetItemDefinition],
       cats: List[Category],
       history: BalanceHistory,
   )(p: Period): IO[PeriodSummary] = {
@@ -475,16 +362,9 @@ object Routes {
       moved   <- movedToInvestments(repos, toPrimary)(from, to)
       // A deposit to an investment account is not spend, so a transfer category has no place in the spend breakdown.
       catRows <- repos.bankTransactions.spendByCategoryBetween(from, to).map(_.filterNot(r => transferCategories(r._1)))
-      records <- repos.expenseRecords.findByPeriod(p.id)
     } yield {
-      val byId                                                             = defs.map(d => d.id -> d).toMap
-      // A record whose definition has since been deleted carries neither an estimate nor a type, so it can't be attributed to expenses or income.
-      val withDefs                                                         = records.flatMap(r => byId.get(r.expenseDefId).map(r -> _))
-      val expenses                                                         = withDefs.filter(_._2.itemType == BudgetItemType.PlannedExpense)
-      val incomes                                                          = withDefs.filter(_._2.itemType == BudgetItemType.PlannedIncome)
-      def paidSum(rows: List[(ExpenseRecord, BudgetItemDefinition)]): Long = rows.map { case (r, d) => toPrimary(r.paidCents, d.currency) }.sum
-      val catIndex                                                         = cats.map(c => c.id -> c).toMap
-      val topCategories                                                    = catRows
+      val catIndex      = cats.map(c => c.id -> c).toMap
+      val topCategories = catRows
         .groupBy(_._1)
         .view
         .mapValues(_.map { case (_, cur, cents) => toPrimary(cents, cur) }.sum)
@@ -500,11 +380,6 @@ object Routes {
         currency = primary,
         inflowCents = flows.map { case (cur, in, _) => toPrimary(in, cur) }.sum,
         outflowCents = flows.map { case (cur, _, out) => toPrimary(out, cur) }.sum,
-        plannedPaidCents = paidSum(expenses),
-        plannedEstimateCents = expenses.map { case (_, d) => toPrimary(d.estimateCents, d.currency) }.sum,
-        incomeReceivedCents = paidSum(incomes),
-        plannedSettled = expenses.count(_._1.settled),
-        plannedTotal = expenses.size,
         savingsChangeCents = savingsDelta,
         savingsEndCents = savingsEnd,
         investmentChangeCents = investmentDelta,

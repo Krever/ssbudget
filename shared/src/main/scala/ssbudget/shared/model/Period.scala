@@ -21,7 +21,8 @@ object PeriodId                          extends StringId[PeriodId]
   * A period is nonetheless expected to stay ROUGHLY A MONTH long. Category budgets derive a monthly figure and [[CategoryBudgetType]] draws it down
   * over one period without scaling it, so a deliberately half-length period reserves a whole month of variable spend against it. The old payday rule
   * enforced that bound as a side effect; a stored date does not, so it is now a convention this comment is the only statement of. Being paid twice a
-  * month is modelled by leaving the period monthly and treating the second paycheck as a planned income, not by halving the period.
+  * month is modelled by leaving the period monthly, not by halving it. The second paycheck is then income of a category: with a budget, the plan
+  * expects it; without one, it is unplanned income.
   *
   * @param endDate
   *   when the period was actually closed; `None` while it is running. An open period past its [[expectedEnd]] overruns — days remaining go negative

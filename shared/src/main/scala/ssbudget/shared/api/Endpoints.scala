@@ -59,54 +59,6 @@ object Endpoints {
       secureEndpoint.get.in("savings" / "period-baselines").out(jsonBody[List[AccountPeriodBaseline]]).errorOut(stringBody)
   }
 
-  object budgetItems {
-    val list: Secured[Unit, List[BudgetItemDefinition]] =
-      secureEndpoint.get
-        .in("budget-items")
-        .out(jsonBody[List[BudgetItemDefinition]])
-        .errorOut(stringBody)
-
-    val create: Secured[CreateBudgetItem, BudgetItemDefinition] =
-      secureEndpoint.post
-        .in("budget-items")
-        .in(jsonBody[CreateBudgetItem])
-        .out(jsonBody[BudgetItemDefinition])
-        .errorOut(stringBody)
-
-    val update: Secured[(ExpenseDefId, UpdateBudgetItem), BudgetItemDefinition] =
-      secureEndpoint.put
-        .in("budget-items" / path[ExpenseDefId]("id"))
-        .in(jsonBody[UpdateBudgetItem])
-        .out(jsonBody[BudgetItemDefinition])
-        .errorOut(stringBody)
-
-    val delete: Secured[ExpenseDefId, Unit] =
-      secureEndpoint.delete
-        .in("budget-items" / path[ExpenseDefId]("id"))
-        .errorOut(stringBody)
-  }
-
-  object expenseRecords {
-    val listCurrent: Secured[Unit, List[ExpenseRecord]] =
-      secureEndpoint.get
-        .in("expense-records" / "current")
-        .out(jsonBody[List[ExpenseRecord]])
-        .errorOut(stringBody)
-
-    val pay: Secured[(ExpenseDefId, PayBudgetItem), ExpenseRecord] =
-      secureEndpoint.post
-        .in("expense-records" / path[ExpenseDefId]("expenseDefId") / "pay")
-        .in(jsonBody[PayBudgetItem])
-        .out(jsonBody[ExpenseRecord])
-        .errorOut(stringBody)
-
-    val unpay: Secured[ExpenseDefId, ExpenseRecord] =
-      secureEndpoint.post
-        .in("expense-records" / path[ExpenseDefId]("expenseDefId") / "unpay")
-        .out(jsonBody[ExpenseRecord])
-        .errorOut(stringBody)
-  }
-
   object periods {
     val list: Secured[Unit, List[Period]] =
       secureEndpoint.get
@@ -426,13 +378,6 @@ object Endpoints {
     accounts.update,
     accounts.updateBalance,
     accounts.delete,
-    budgetItems.list,
-    budgetItems.create,
-    budgetItems.update,
-    budgetItems.delete,
-    expenseRecords.listCurrent,
-    expenseRecords.pay,
-    expenseRecords.unpay,
     periods.list,
     periods.startNew,
     periods.setExpectedEnd,
@@ -518,39 +463,6 @@ object Endpoints {
     object savings {
       val periodBaselines: Client[Unit, List[AccountPeriodBaseline]] =
         baseEndpoint.get.in("savings" / "period-baselines").out(jsonBody[List[AccountPeriodBaseline]]).errorOut(stringBody)
-    }
-
-    object budgetItems {
-      val list: Client[Unit, List[BudgetItemDefinition]] =
-        baseEndpoint.get.in("budget-items").out(jsonBody[List[BudgetItemDefinition]]).errorOut(stringBody)
-
-      val create: Client[CreateBudgetItem, BudgetItemDefinition] =
-        baseEndpoint.post.in("budget-items").in(jsonBody[CreateBudgetItem]).out(jsonBody[BudgetItemDefinition]).errorOut(stringBody)
-
-      val update: Client[(ExpenseDefId, UpdateBudgetItem), BudgetItemDefinition] =
-        baseEndpoint.put
-          .in("budget-items" / path[ExpenseDefId]("id"))
-          .in(jsonBody[UpdateBudgetItem])
-          .out(jsonBody[BudgetItemDefinition])
-          .errorOut(stringBody)
-
-      val delete: Client[ExpenseDefId, Unit] =
-        baseEndpoint.delete.in("budget-items" / path[ExpenseDefId]("id")).errorOut(stringBody)
-    }
-
-    object expenseRecords {
-      val listCurrent: Client[Unit, List[ExpenseRecord]] =
-        baseEndpoint.get.in("expense-records" / "current").out(jsonBody[List[ExpenseRecord]]).errorOut(stringBody)
-
-      val pay: Client[(ExpenseDefId, PayBudgetItem), ExpenseRecord] =
-        baseEndpoint.post
-          .in("expense-records" / path[ExpenseDefId]("expenseDefId") / "pay")
-          .in(jsonBody[PayBudgetItem])
-          .out(jsonBody[ExpenseRecord])
-          .errorOut(stringBody)
-
-      val unpay: Client[ExpenseDefId, ExpenseRecord] =
-        baseEndpoint.post.in("expense-records" / path[ExpenseDefId]("expenseDefId") / "unpay").out(jsonBody[ExpenseRecord]).errorOut(stringBody)
     }
 
     object periods {

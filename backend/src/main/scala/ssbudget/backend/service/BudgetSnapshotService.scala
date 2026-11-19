@@ -18,13 +18,16 @@ import java.time.{Instant, LocalDate, ZoneOffset}
   * whatever it missed. With an empty table that same pass reconstructs the whole history back to the first period — there is no separate backfill.
   *
   * Reconstruction is exact in level and approximate in timing: balances are carried between bank syncs by the transaction ledger and category budgets
-  * are recomputed from the transactions themselves, but a planned item records only the date of its LAST payment, so instalments step down once
-  * rather than in stages. Rows say which they are via [[SnapshotSource]].
+  * are recomputed from the transactions themselves, but a manual override of a budget counts only from the day it was typed. Rows say which they are
+  * via [[SnapshotSource]].
+  *
+  * The two `planned` terms of a row belonged to the hand-declared planned items, a feature that is removed. This service writes zero there. The days
+  * of periods that closed before the removal keep the amounts they were recorded with.
   *
   * The days of the OPEN period follow the record and the configuration as they are now. On each pass, all terms of those days that are not balances
-  * ([[DerivedTerms]]) are computed again, by the same rules as a reconstruction. Thus a changed budget, a changed estimate, a transaction that got
-  * another category, or a transaction that the bank sent late moves the line on the days it belongs to, and does not show as one bad day on the day
-  * it was typed or imported. The balances of those days stay as they were measured. A closed period keeps what it was recorded with.
+  * ([[DerivedTerms]]) are computed again, by the same rules as a reconstruction. Thus a changed budget, a transaction that got another category, or a
+  * transaction that the bank sent late moves the line on the days it belongs to, and does not show as one bad day on the day it was typed or
+  * imported. The balances of those days stay as they were measured. A closed period keeps what it was recorded with.
   */
 class BudgetSnapshotService(repos: Repositories) {
 
@@ -114,12 +117,10 @@ class BudgetSnapshotService(repos: Repositories) {
         val needsLedger = balancesFor.exists(_ != today)
         for {
           accounts   <- repos.accounts.findAll
-          defs       <- repos.expenseDefinitions.findAll
           cats       <- repos.categories.findAll
           rates      <- repos.exchangeRates.findAll
           primaryOpt <- repos.currencySettings.findPrimary
           snaps      <- accounts.traverse(a => repos.balanceSnapshots.findByAccount(a.id).map(a.id -> _)).map(_.toMap)
-          records    <- periods.traverse(p => repos.expenseRecords.findByPeriod(p.id).map(p.id -> _)).map(_.toMap)
           overrides  <- repos.categoryBudgetOverrides.findAllStamped
           // Category history reaches as far back as the bank data goes, not just to the first period: the monthly statistic behind every budget is
           // drawn from all of it.
@@ -140,11 +141,9 @@ class BudgetSnapshotService(repos: Repositories) {
               capturedAt = now,
               periods = sorted,
               accounts = accounts,
-              defs = defs,
               categories = cats,
               rates = rateTable,
               snapshots = snaps.view.mapValues(_.sortBy(_.recordedAt.toEpochMilli)).toMap,
-              records = records.view.mapValues(_.map(r => r.expenseDefId -> r).toMap).toMap,
               overrides = overrides.map { case (p, c, cents, at) => (p, c) -> (cents, at) }.toMap,
               monthlyByCat = byBucket(monthly, rateTable)(ym => LocalDate.parse(ym + "-01")),
               dailyByCat = byDay(dailyCat.map { case (cat, cur, d, cents, _, _) => (cat, cur, d, cents) }, rateTable),
@@ -186,8 +185,9 @@ class BudgetSnapshotService(repos: Repositories) {
       periodId = period.map(_.id),
       currency = w.rates.primary,
       spendableCents = total(AccountRole.Spending),
-      plannedToPayCents = derived.plannedToPayCents,
-      plannedToReceiveCents = derived.plannedToReceiveCents,
+      // The planned items are removed. Their two terms stay in the row, because the days of old periods hold amounts there.
+      plannedToPayCents = 0L,
+      plannedToReceiveCents = 0L,
       budgetsToSpendCents = derived.budgetsToSpendCents,
       budgetsToReceiveCents = derived.budgetsToReceiveCents,
       savingsCents = total(AccountRole.Savings),
@@ -202,14 +202,13 @@ class BudgetSnapshotService(repos: Repositories) {
 
   /** All terms of `day` that are not balances: what a row holds apart from the readings of its day. */
   private def derivedTerms(w: World, period: Option[Period], day: LocalDate): DerivedTerms = {
-    val (toPay, toReceive)            = plannedRemaining(w, period, day)
     val budgets                       = period.toList.flatMap(p => budgetRemainings(w, p, day).map(_._2))
     val (ledger, fromSavings, income) = outsideMoney(w, period, day)
     val (toSpend, toArrive)           = (budgets.filter(_ > 0).sum, -budgets.filter(_ < 0).sum)
     // What went to savings is the opposite of what came from them. It is counted as the line counts it: net of the budgeted bills that were paid
     // from a savings account, so that money moved there only to pay such a bill is not taken for saving.
-    val savingReserve                 = period.fold(0L)(_.savingReserveCents(savedCents = -fromSavings, stillToPayCents = toPay + toSpend))
-    DerivedTerms(day, toPay, toReceive, toSpend, toArrive, ledger, fromSavings, income, savingReserve)
+    val savingReserve                 = period.fold(0L)(_.savingReserveCents(savedCents = -fromSavings, stillToPayCents = toSpend))
+    DerivedTerms(day, toSpend, toArrive, ledger, fromSavings, income, savingReserve)
   }
 
   /** For each day of the open period after its first: the parts of that day's change of the plan's own line, largest first.
@@ -219,7 +218,6 @@ class BudgetSnapshotService(repos: Repositories) {
     *     zero. A payment above the budget gives the excess. A quiet day of a steady budget gives back that day's share.
     *   - a category with no budget (no category is one such group): its spend on the spending accounts. While the group's net of the period is above
     *     zero it is unplanned income, which the line leaves out, and it gives nothing.
-    *   - the planned items: the change of what they still expect.
     *
     * Transfers between own accounts are not in the list: the line leaves them out.
     */
@@ -228,27 +226,23 @@ class BudgetSnapshotService(repos: Repositories) {
       val days       = allDays(p.startDay, w.today)
       val names      = w.categories.map(c => c.id -> c.name).toMap
       val inPeriod   = w.movementsIn(p, w.today).filter(!_.internal)
-      // What each budget still expects, and what the planned items still expect, at the end of each day.
+      // What each budget still expects at the end of each day.
       val remaining  = days.map(d => d -> budgetRemainings(w, p, d).map { case (cat, cents) => cat.id -> cents }.toMap).toMap
-      val planned    = days.map(d => d -> plannedRemaining(w, Some(p), d)).toMap
       val budgetMove = inPeriod.filter(_.category.exists(w.budgeted)).groupMapReduce(m => (m.day, m.category))(_.cents)(_ + _)
       // The movements of each group with no budget, on the spending accounts.
       val unbudgeted = inPeriod.filter(w.isUnbudgeted).groupBy(_.category)
 
       days.zip(days.drop(1)).map { case (prev, day) =>
-        val fromBudgets                    = w.budgeted.toList.map { id =>
+        val fromBudgets  = w.budgeted.toList.map { id =>
           val moved    = budgetMove.getOrElse((day, Some(id)), 0L)
           val expected = remaining(day).getOrElse(id, 0L) - remaining(prev).getOrElse(id, 0L)
           LineCause(names.getOrElse(id, id.value), moved - expected)
         }
-        val fromNoBudget                   = unbudgeted.toList.map { case (category, moves) =>
+        val fromNoBudget = unbudgeted.toList.map { case (category, moves) =>
           def lossTo(d: LocalDate) = math.min(0L, moves.filter(!_.day.isAfter(d)).map(_.cents).sum)
           LineCause(category.flatMap(names.get).getOrElse("No category"), lossTo(day) - lossTo(prev))
         }
-        val (toPay, toReceive)             = planned(day)
-        val (toPayBefore, toReceiveBefore) = planned(prev)
-        val fromPlanned                    = LineCause("Planned items", (toReceive - toReceiveBefore) - (toPay - toPayBefore))
-        DayCauses(day, (fromPlanned :: fromBudgets ++ fromNoBudget).filter(_.cents != 0).sortBy(c => -math.abs(c.cents)))
+        DayCauses(day, (fromBudgets ++ fromNoBudget).filter(_.cents != 0).sortBy(c => -math.abs(c.cents)))
       }
     }
 
@@ -302,21 +296,6 @@ class BudgetSnapshotService(repos: Repositories) {
         case None         => BalanceHistory.carriedBack(history, ledger, day)
       }
     }
-
-  /** (still to pay, still to receive) across the hand-declared items of the period `day` falls in, in the primary currency.
-    *
-    * Driven by the period's RECORDS rather than by the definition list: a record is opened for every definition when a period starts, and for a new
-    * definition in the period it was created in, so "has a record in this period" is already the app's own statement of "existed then". Reading the
-    * definitions directly would charge every past period with items invented since.
-    */
-  private def plannedRemaining(w: World, period: Option[Period], day: LocalDate): (Long, Long) = {
-    val byDef                  = period.fold(Map.empty[ExpenseDefId, ExpenseRecord])(p => w.records.getOrElse(p.id, Map.empty))
-    val amounts                = w.defs.flatMap { d =>
-      byDef.get(d.id).map(r => d.itemType -> w.rates.convert(r.remainingAsOf(d.estimateCents, day), d.currency, day))
-    }
-    def sum(t: BudgetItemType) = amounts.collect { case (`t`, cents) => cents }.sum
-    (sum(BudgetItemType.PlannedExpense), sum(BudgetItemType.PlannedIncome))
-  }
 
   /** Signed remaining per category budget on `day`: positive still to be spent, negative still to arrive.
     *
@@ -411,11 +390,9 @@ object BudgetSnapshotService {
       capturedAt: Instant,
       periods: List[Period],                                         // oldest first
       accounts: List[Account],
-      defs: List[BudgetItemDefinition],
       categories: List[Category],
       rates: RateTable,
       snapshots: Map[AccountId, List[BalanceSnapshot]],              // oldest first
-      records: Map[PeriodId, Map[ExpenseDefId, ExpenseRecord]],
       overrides: Map[(PeriodId, CategoryId), (Long, Instant)],
       monthlyByCat: Map[CategoryId, Map[String, Long]],              // "YYYY-MM" -> net spend
       dailyByCat: Map[CategoryId, Map[LocalDate, Long]],             // day -> net spend

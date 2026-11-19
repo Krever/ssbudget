@@ -37,8 +37,16 @@ object ServerBuilder {
     case (body, encoding) if encoding.isEmpty || encoding.equalsIgnoreCase("identity") => body
   }
 
+  /** "ok", and the commit the image was built from when the build left a `VERSION` file beside the app (see build.sh). A check that only needs "is it
+    * up" reads the status; a person reads which build is live.
+    */
+  private val healthText: String = {
+    val file = java.nio.file.Paths.get(sys.env.getOrElse("SSBUDGET_VERSION_FILE", "VERSION"))
+    scala.util.Try(java.nio.file.Files.readString(file).trim).toOption.filter(_.nonEmpty).fold("ok")(version => s"ok $version")
+  }
+
   private val healthRoute = Http4sServerInterpreter[IO]().toRoutes(
-    HealthEndpoint.health.serverLogicSuccess(_ => IO.pure("ok")),
+    HealthEndpoint.health.serverLogicSuccess(_ => IO.pure(healthText)),
   )
 
   // WebAuthn configuration from environment

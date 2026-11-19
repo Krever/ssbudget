@@ -7,9 +7,9 @@ A personal budget tracker built to answer one question: **"How much can I spend 
 Traditional budget apps obsess over categories and past spending. SSBudget focuses on the future.
 
 SSBudget takes a different approach:
-- Define your **planned items** — the fixed expenses (rent, bills), incomes and savings top-ups you expect this period
-- Let **category budgets** derive your variable spend (groceries, fuel) from real bank transactions
-- Update account balances and mark previously planned payments throughout the period
+- Let **category budgets** derive what you still expect to pay and to receive this period from real bank transactions
+- Give a category a fixed budget for a bill or an income that history cannot predict
+- Set how much you plan to save this period
 - Get your remaining free cash — your budget until the next paycheck
   
 [demo.webm](https://github.com/user-attachments/assets/54a9688f-e4d3-4279-988b-be4c40bc5f5a)
@@ -17,12 +17,12 @@ SSBudget takes a different approach:
 ### Additional Features
 
 - **Multi-currency** — PLN, EUR, USD + 30 more with live exchange rates
-- **Passkey auth** — Passwordless login, no user management needed
+- **Password + passkey auth** — One owner, no user management; passkeys for daily login
 - **Import/Export** — You can take your whole database with you (god bless SQLite!) 
 - **Spreadsheet-like UI** — Edit in place, minimal clicks, maximum density
 - **Self-hosted** — You can run it yourself anywhere.
 - **E2E test coverage** — Everything important is covered with e2e selenium test. 
-- **WhatsApp notification** - So that you can proactively share your budget with your spouse.
+- **Share the summary** - Copy a short budget summary, or open a WhatsApp share link with it.
 
 ## Built With Claude
 
@@ -30,7 +30,7 @@ This project was 100% vibe-coded using [Claude Code](https://www.anthropic.com/c
 The entire codebase — backend, frontend, database schema, tests, deployment config — was generated through conversation
 with Claude Opus/Sonnet.
 
-Check `docs/sessions/` for the session logs and `CLAUDE.md` for the context file that guided development.
+Check `CLAUDE.md` for the context file that guides development.
 
 ## Tech Stack
 
@@ -48,23 +48,17 @@ Check `docs/sessions/` for the session logs and `CLAUDE.md` for the context file
 ### Prerequisites
 
 - JDK 21+
-- sbt 1.9+
-- Node.js 18+
+- sbt 1.12+
+- Node.js 20+
 
-### Development (3 terminals)
+### Development
 
 ```bash
-# Terminal 1: Scala.js watch
-sbt '~frontend/fastLinkJS'
-
-# Terminal 2: Vite dev server
-cd frontend && npm install && npm run dev
-
-# Terminal 3: Backend
-sbt backend/run
+./dev.sh                  # Vite on https://localhost:3000, backend on :8080, Scala.js watch, Metabase
+./dev.sh --no-analytics   # the same without Metabase
 ```
 
-Open http://localhost:3000. First visit prompts password setup.
+Open https://localhost:3000. First visit prompts password setup.
 
 ### Production Build
 
@@ -75,7 +69,7 @@ docker run -p 8080:8080 -v ./data:/data ssbudget
 
 The image includes the Metabase that powers the Analytics page, and the container starts and
 configures it on its own. Use `./build.sh --no-analytics` for an app-only image (~630MB smaller,
-runs in 512MB). See `docs/metabase-analytics.md`.
+runs in 512MB).
 
 ### Environment Variables
 
@@ -102,5 +96,5 @@ ssbudget/
 ├── backend/    # http4s server, repositories, auth
 ├── frontend/   # Laminar SPA
 ├── e2e/        # Selenium tests
-└── docs/       # Session logs
+└── docs/       # MCP guide, audit log
 ```

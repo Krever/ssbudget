@@ -10,8 +10,14 @@
 #   fly secrets set SSBUDGET_RP_ORIGINS=https://ssbudget.fly.dev
 #
 # Deploy:
-#   ./build.sh                      # Build everything + Docker image (Metabase included)
-#   fly deploy --local-only         # Push local image to fly.io (runs Flyway migrations on startup)
+#   ./build.sh --no-image           # Build the backend and the frontend, and stamp the commit (docker/VERSION)
+#   fly deploy --remote-only        # fly.io builds the image from those artifacts; Flyway migrates at start
+# or, with a working local Docker:
+#   ./build.sh                      # the same, plus the Docker image (Metabase included)
+#   fly deploy --local-only         # push the local image
+#
+# Each start copies the database to /data/backups first (docker/entrypoint.sh), and the deploy waits for the
+# health check below. `curl https://<app>/api/health` answers "ok <commit>", so it says what is live.
 #
 # If flyctl says "docker is unavailable to build the deployment image": Docker Desktop keeps its
 # socket at ~/.docker/run/docker.sock and only symlinks /var/run/docker.sock when "Allow the default
@@ -54,6 +60,15 @@ primary_region = 'fra'
   auto_stop_machines = 'suspend'
   auto_start_machines = true
   min_machines_running = 0
+
+  # A deploy is good only when the app answers. Without this check, a start that fails (for example on a migration) can pass as a
+  # successful deploy. The grace period covers the start of the JVM and the migrations.
+  [[http_service.checks]]
+    method = 'GET'
+    path = '/api/health'
+    grace_period = '60s'
+    interval = '30s'
+    timeout = '5s'
 
   [http_service.concurrency]
     type = 'connections'

@@ -31,6 +31,11 @@ object SnapshotSource {
   * Free money is `spendable + stillToReceive − stillToPay − savingReserve`. Persisting that one number would lose which term moved, so the terms are
   * what's stored and the arithmetic lives in `v_daily_budget` (and in [[freeMoneyCents]], which the tests hold the view to).
   *
+  * @param plannedToPayCents
+  *   what the hand-declared planned items still expected to pay. That feature is removed, so a new row holds zero here. The days of periods that
+  *   closed before the removal keep their amounts, and those amounts stay in the arithmetic.
+  * @param plannedToReceiveCents
+  *   the same, for the income that the planned items still expected.
   * @param savingsCents
   *   informational only. Moving money into a savings bucket already lowers `spendableCents`, so subtracting it again would double-count.
   * @param ledgerCents

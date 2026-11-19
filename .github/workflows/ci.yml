@@ -30,22 +30,53 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Compile
-        run: sbt compile
-
-      - name: Run backend tests
-        run: sbt backend/test
-
-      - name: Build frontend (Scala.js)
-        run: sbt frontend/fastLinkJS
+      # One sbt start for all of it. Test/compile also compiles the e2e specs, which `compile` does not. The last two tasks are the
+      # release path of build.sh, so a release that cannot build fails here and not on the day of a deploy.
+      - name: Format check, compile, backend tests, release artifacts
+        run: sbt scalafmtCheckAll scalafmtSbtCheck Test/compile backend/test backend/stage frontend/fullLinkJS
 
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
-      - name: Build frontend (Vite)
+      - name: Build frontend (Vite, release mode)
         working-directory: frontend
-        run: npm run build
+        run: SCALAJS_STAGE=full npm run build
 
-      - name: Format check
-        run: sbt scalafmtCheckAll
+      - name: Build the image (without Metabase)
+        run: |
+          git rev-parse --short HEAD > docker/VERSION
+          docker build --build-arg WITH_ANALYTICS=false -t ssbudget:ci .
+
+  # The browser tests. They are not yet a gate: they were not run in CI before, so the first runs must show if they are stable here.
+  # Remove `continue-on-error` when they are.
+  e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'sbt'
+
+      - name: Set up sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Browser tests
+        run: sbt e2e/test

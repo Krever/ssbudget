@@ -223,10 +223,6 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   private def findCard(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//span[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
-  /** One entry of the Dashboard's Plan, found by name. Re-found on each call, because Laminar replaces the block on every update. */
-  private def planEntry(name: String): WebElement =
-    driver.findElement(By.xpath(E2ESpec.planEntryXpath(name)))
-
   private def findCardByDiv(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//div[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
@@ -383,122 +379,11 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       pause()
     }
 
-    // ========================================
-    // PART 4: Plan Budget
-    // ========================================
-
-    showPhase("📋 Planning Income & Expenses")
-
-    driver.get(baseUrl)
-    waitForPage("Dashboard")
-    injectDemoStyles()
-    pause()
-
-    val plannedCard = findCard("Plan")
-
-    // Add income
-    demoClickButton(plannedCard, "+ Income")
-    pause(shortPause)
-
-    val incomeRow         = driver.findElement(By.id("plan-add-income"))
-    val incomeNameInput   = incomeRow.findElement(By.cssSelector("input[type='text']"))
-    demoClick(incomeNameInput)
-    typeSlowly(incomeNameInput, "Monthly Salary")
-    val incomeAmountInput = incomeRow.findElement(By.cssSelector("input[type='number']"))
-    demoClick(incomeAmountInput)
-    typeSlowly(incomeAmountInput, "8500")
-    pause(shortPause)
-    demoClickButton(incomeRow, "Add")
-    pause()
-
-    // Add planned expenses
-    val expenses = List(
-      ("Rent", "2000"),
-      ("Utilities", "350"),
-      ("Subscriptions", "85"),
-    )
-
-    expenses.foreach { case (name, amount) =>
-      demoClickButton(findCard("Plan"), "+ Expense")
-      pause(shortPause)
-
-      val expenseRow     = driver.findElement(By.id("plan-add-expense"))
-      val expNameInput   = expenseRow.findElement(By.cssSelector("input[type='text']"))
-      demoClick(expNameInput)
-      typeSlowly(expNameInput, name)
-      val expAmountInput = expenseRow.findElement(By.cssSelector("input[type='number']"))
-      demoClick(expAmountInput)
-      typeSlowly(expAmountInput, amount)
-      pause(shortPause)
-      demoClickButton(expenseRow, "Add")
-      pause(shortPause)
-    }
-
-    pause()
-
-    // Saving is planned like any other expense now: a planned item named after the bucket.
-    demoClickButton(findCard("Plan"), "+ Expense")
-    pause(shortPause)
-
-    val savingRow       = driver.findElement(By.id("plan-add-expense"))
-    val savingNameInput = savingRow.findElement(By.cssSelector("input[type='text']"))
-    demoClick(savingNameInput)
-    typeSlowly(savingNameInput, "Emergency Fund top-up")
-    val savingAmount    = savingRow.findElement(By.cssSelector("input[type='number']"))
-    demoClick(savingAmount)
-    typeSlowly(savingAmount, "500")
-    pause(shortPause)
-    demoClickButton(savingRow, "Add")
-    pause()
+    // The plan is made of category budgets, and a category budget reads bank transactions. This scenario has no bank connection, so it shows no
+    // plan entries.
 
     // ========================================
-    // PART 5: Pay Bills
-    // ========================================
-
-    showPhase("✅ Paying Bills")
-    injectDemoStyles()
-
-    // Receive income first
-    demoClickButton(planEntry("Monthly Salary"), "Receive")
-    pause(shortPause)
-    // The editor opens inside the entry, in place of its state line.
-    demoClickButton(planEntry("Monthly Salary"), "Receive")
-    pause()
-
-    // Pay Rent in full, at the estimate
-    demoClickButton(planEntry("Rent"), "Pay")
-    pause(shortPause)
-    demoClickButton(planEntry("Rent"), "Pay")
-    pause()
-
-    // Pay Utilities at the actual amount, which came in under the estimate — settling closes it at 320.50.
-    demoClickButton(planEntry("Utilities"), "Pay")
-    pause(shortPause)
-
-    val utilPayRow = planEntry("Utilities")
-    val utilInput  = utilPayRow.findElement(By.cssSelector("input[type='number']"))
-    utilInput.clear()
-    demoClick(utilInput)
-    typeSlowly(utilInput, "320.50")
-    pause(shortPause)
-    demoClickButton(utilPayRow, "Pay")
-    pause()
-
-    // Part-pay the savings top-up: half now, the rest still counted as expected.
-    demoClickButton(planEntry("Emergency Fund top-up"), "Pay")
-    pause(shortPause)
-
-    val partPayRow = planEntry("Emergency Fund top-up")
-    val partInput  = partPayRow.findElement(By.cssSelector("input[type='number']"))
-    partInput.clear()
-    demoClick(partInput)
-    typeSlowly(partInput, "250")
-    pause(shortPause)
-    demoClickButton(partPayRow, "Part")
-    pause()
-
-    // ========================================
-    // PART 6: Update Balances & View Dashboard
+    // PART 4: Update Balances & View Dashboard
     // ========================================
 
     showPhase("📈 Viewing Dashboard")
@@ -555,7 +440,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause(longPause)
 
     // ========================================
-    // PART 7: View Periods
+    // PART 5: View Periods
     // ========================================
 
     showPhase("🏁 Demo Complete!")

@@ -14,22 +14,16 @@ import scala.util.{Failure, Success}
 
 /** Everything expected to move before the next paycheck, as one list.
   *
-  * Two kinds of entry share it, and the CATEGORY BUDGET is the primary one: recurring spending is planned by flagging a category and letting real
-  * transactions drive the expectation. A PLANNED ITEM is the escape hatch beside it — declared by hand for what no category can predict (a salary, a
-  * savings top-up, an exceptional bill) and closed by settling it.
+  * Each entry is a CATEGORY BUDGET: a category is flagged as a budget, and real transactions drive what it still expects. A one-off item is a
+  * category with a fixed budget.
   *
-  * Because budgets are the common case, every entry is drawn the budget way — name, a bar of how far through it the period is, and one line of state
-  * — rather than as a grid of columns. A manual entry's bar is simply what's been paid of its estimate. Entries are grouped by DIRECTION (expenses,
-  * incomes) and every amount is a magnitude in that direction, so an income entry's "remaining" is what's still expected to arrive.
+  * An entry shows a name, a bar of how far through it the period is, and one line of state. Entries are grouped by DIRECTION (expenses, incomes) and
+  * every amount is a magnitude in that direction, so the "remaining" of an income entry is what is still expected to arrive.
   */
 object PlanCard {
 
   private val dataService = DataService.instance
 
-  private val editingItemId     = Var[Option[ExpenseDefId]](None)
-  private val payingItemId      = Var[Option[ExpenseDefId]](None)
-  private val addingExpense     = Var(false)
-  private val addingIncome      = Var(false)
   private val hideDone          = Var(true)
   private val editingOverrideId = Var[Option[CategoryId]](None)
 
@@ -43,54 +37,24 @@ object PlanCard {
     */
   private val drillDownRows = 8
 
-  private enum Entry {
-    case Item(definition: BudgetItemDefinition, record: Option[ExpenseRecord])
-    case Budget(summary: CategorySummary, elapsed: Double)
-  }
-
-  /** An entry reduced to what the list needs, with every amount as a magnitude in the entry's own direction: `actual` is spent for an expense and
-    * received for an income, `remaining` is what's still to spend or still to arrive. One definition of the sort key and of "done", so the sections
-    * and the hide switch can't disagree with the entries they show.
+  /** A category budget reduced to what the list needs, with every amount as a magnitude in the direction of the budget: `actual` is spent for an
+    * expense and received for an income, `remaining` is what is still to spend or still to arrive. One definition of the sort key and of "done", so
+    * the sections and the hide switch cannot disagree with the entries they show.
     */
-  private case class Line(entry: Entry) {
+  private case class Line(summary: CategorySummary, elapsed: Double) {
 
-    val isIncome: Boolean = entry match {
-      case Entry.Item(d, _)   => d.itemType == BudgetItemType.PlannedIncome
-      case Entry.Budget(s, _) => s.isIncome
-    }
+    val isIncome: Boolean = summary.isIncome
 
-    val name: String = entry match {
-      case Entry.Item(d, _)   => d.name
-      case Entry.Budget(s, _) => s.category.name
-    }
+    val name: String = summary.category.name
 
-    val expected: Long = entry match {
-      case Entry.Item(d, _)   => d.estimateCents
-      case Entry.Budget(s, _) => s.expectedMagnitude
-    }
+    val expected: Long = summary.expectedMagnitude
 
-    val actual: Long = entry match {
-      case Entry.Item(_, r)   => r.map(_.paidCents).getOrElse(0L)
-      case Entry.Budget(s, _) => s.movedMagnitude
-    }
+    val actual: Long = summary.movedMagnitude
 
-    val remaining: Long = entry match {
-      case Entry.Item(d, r)   => ExpenseRecord.remainingFor(r, d.estimateCents)
-      case Entry.Budget(s, e) => s.remainingMagnitude(e)
-    }
+    val remaining: Long = summary.remainingMagnitude(elapsed)
 
-    /** Nothing further expected this period. A planned item is done when SETTLED (however little was paid — a zero-estimate item stays visible and
-      * editable), a budget when its remaining reaches zero in either direction.
-      */
-    val isDone: Boolean = entry match {
-      case Entry.Item(_, r)   => r.exists(_.settled)
-      case Entry.Budget(_, _) => remaining == 0
-    }
-
-    val isBudget: Boolean = entry match {
-      case Entry.Budget(_, _) => true
-      case Entry.Item(_, _)   => false
-    }
+    /** Nothing further expected this period: the remaining amount is zero, in either direction. */
+    val isDone: Boolean = remaining == 0
   }
 
   def apply(): HtmlElement =
@@ -99,10 +63,6 @@ object PlanCard {
       // Transient state is cleared on every visit: a half-finished edit shouldn't resume, and a cached drill-down would be stale after recategorizing
       // something on the Transactions page.
       onMountCallback { _ =>
-        editingItemId.set(None)
-        payingItemId.set(None)
-        addingExpense.set(false)
-        addingIncome.set(false)
         editingOverrideId.set(None)
         budgetTxs.set(Map.empty)
       },
@@ -122,11 +82,6 @@ object PlanCard {
             ),
             label(cls := "form-check-label small", forId := "hideDone", "Hide done"),
           ),
-          div(
-            cls := "btn-group btn-group-sm",
-            button(cls := "btn btn-outline-primary", "+ Expense", onClick --> { _ => addingExpense.set(true) }),
-            button(cls := "btn btn-outline-success", "+ Income", onClick --> { _ => addingIncome.set(true) }),
-          ),
         ),
       ),
       div(
@@ -139,41 +94,25 @@ object PlanCard {
       footer(),
     )
 
-  /** Every entry of the plan, both directions, built once — the two groups and the empty state all read from here rather than each combining the same
-    * five sources for themselves.
-    */
+  /** Every entry of the plan, both directions, built once. The two groups and the empty state all read from here. */
   private val planLines: Signal[List[Line]] =
-    dataService.plannedExpenses
-      .combineWith(dataService.plannedIncomes)
-      .combineWith(dataService.currentPeriodRecords)
-      .combineWith(dataService.budgetedCategories)
+    dataService.budgetedCategories
       .combineWith(dataService.periodElapsedFraction)
-      .map { case (expenses, incomes, records, budgets, elapsed) =>
-        val recordFor = records.groupBy(_.expenseDefId)
-        val items     = (expenses ++ incomes).map(d => Line(Entry.Item(d, recordFor.get(d.id).flatMap(_.headOption))))
-        budgets.map(s => Line(Entry.Budget(s, elapsed))) ++ items
-      }
+      .map { case (budgets, elapsed) => budgets.map(Line(_, elapsed)) }
 
-  /** One direction's entries: budgets first (they carry the recurring spending), then the hand-declared items, each group biggest-outstanding first.
-    * A stable grouping beats one merged ordering here — paying something shouldn't reshuffle the list under the cursor.
-    */
+  /** The entries of one direction, largest outstanding amount first. */
   private def section(income: Boolean): Signal[Node] =
     planLines
       .combineWith(hideDone.signal)
-      .combineWith(if income then addingIncome.signal else addingExpense.signal)
-      .combineWith(dataService.primaryCurrency)
-      .map { case (lines, hide, adding, currency) =>
-        val visible = lines.filter(_.isIncome == income).filterNot(l => hide && l.isDone)
-        val ordered =
-          visible.filter(_.isBudget).sortBy(l => (-l.remaining, l.name)) ++ visible.filterNot(_.isBudget).sortBy(l => (-l.remaining, l.name))
+      .map { case (lines, hide) =>
+        val ordered = lines.filter(_.isIncome == income).filterNot(l => hide && l.isDone).sortBy(l => (-l.remaining, l.name))
 
-        if ordered.isEmpty && !adding then emptyNode
+        if ordered.isEmpty then emptyNode
         else
           div(
             cls := (if income then "mt-3 pt-2 border-top" else ""),
             div(cls := "text-muted small text-uppercase mb-2", if income then "Incomes" else "Expenses"),
             ordered.map(lineBlock),
-            if adding then addForm(income, currency) else emptyNode,
           )
       }
 
@@ -209,48 +148,35 @@ object PlanCard {
     )
   }
 
-  /** The expanded transactions under a category entry; a manual entry has nothing to expand. */
-  private def drillDownSlot(line: Line): Modifier[HtmlElement] =
-    line.entry match {
-      case Entry.Budget(s, _) =>
-        child <-- budgetTxs.signal.map(_.get(s.category.id)).distinct.map {
-          case Some(txs) => drillDown(s, txs)
-          case None      => emptyNode
-        }
-      case Entry.Item(_, _)   => emptyMod
+  /** The expanded transactions under an entry. */
+  private def drillDownSlot(line: Line): Modifier[HtmlElement] = {
+    val s = line.summary
+    child <-- budgetTxs.signal.map(_.get(s.category.id)).distinct.map {
+      case Some(txs) => drillDown(s, txs)
+      case None      => emptyNode
     }
+  }
 
-  /** Name, plus the badges that say what kind of entry this is: its budget type when transaction-derived, `manual` when hand-declared, and the
-    * exceptions on top of that (an overridden budget, an income budget).
-    */
-  private def header(line: Line): HtmlElement =
-    line.entry match {
-      case Entry.Budget(s, _) =>
-        val bt       = s.category.budgetType.getOrElse(CategoryBudgetType.Steady)
-        span(
-          cls       := "fw-semibold user-select-none",
-          styleAttr := "cursor: pointer",
-          title     := "Show the transactions behind this spend",
-          onClick --> { _ => toggleBudgetExpansion(s.category.id) },
-          span(cls := "text-muted me-1", child.text <-- rowExpanded(s.category.id).map(if _ then "▾" else "▸")),
-          s.category.name,
-          span(cls := "badge text-bg-light text-muted ms-2", CategoryBudgetType.asString(bt)),
-          if s.overrideRemainingCents.isDefined then span(
-            cls   := "badge text-bg-warning ms-1",
-            title := "remaining amount set by hand for this period",
-            "override",
-          )
-          else emptyNode,
-        )
-      case Entry.Item(d, _)   =>
-        span(
-          cls := "fw-semibold",
-          // Aligns with a budget's caret, which is a toggle a manual entry has nothing to expand.
-          span(cls := "me-1", styleAttr                            := "visibility: hidden", "▸"),
-          d.name,
-          span(cls := "badge text-bg-light text-muted ms-2", title := "declared by hand, not derived from transactions", "manual"),
-        )
-    }
+  /** Name, plus the badges that say what kind of entry this is: its budget type, and `override` when the remaining amount was set by hand. */
+  private def header(line: Line): HtmlElement = {
+    val s        = line.summary
+    val bt       = s.category.budgetType.getOrElse(CategoryBudgetType.Steady)
+    span(
+      cls       := "fw-semibold user-select-none",
+      styleAttr := "cursor: pointer",
+      title     := "Show the transactions behind this spend",
+      onClick --> { _ => toggleBudgetExpansion(s.category.id) },
+      span(cls := "text-muted me-1", child.text <-- rowExpanded(s.category.id).map(if _ then "▾" else "▸")),
+      s.category.name,
+      span(cls := "badge text-bg-light text-muted ms-2", CategoryBudgetType.asString(bt)),
+      if s.overrideRemainingCents.isDefined then span(
+        cls   := "badge text-bg-warning ms-1",
+        title := "remaining amount set by hand for this period",
+        "override",
+      )
+      else emptyNode,
+    )
+  }
 
   /** How an entry stands: the words for the state line, plus the four facts its bar has to carry at once.
     *
@@ -290,53 +216,42 @@ object PlanCard {
     // An income arriving late isn't the failure overspending is, so its bar only distinguishes "still coming" from "all in".
     def fill(alarm: => String): String = if income then (if complete then "bg-success" else "bg-primary") else alarm
 
-    val (label, color, paceAt, marker) = line.entry match {
-      case Entry.Item(_, record) =>
-        val settled = record.exists(_.settled)
-        val partial = record.exists(_.isPartiallyPaid)
-        val text    =
-          if settled then (if income then "received ✓" else "paid ✓")
-          else if partial then s"${if income then "received" else "paid"} ${MoneyFormatter.formatBare(spent)} of ${money(plan)}"
+    val s                              = line.summary
+    val elapsed                        = line.elapsed
+    val isOverridden                   = s.overrideRemainingCents.isDefined
+    val (label, color, paceAt, marker) = s.category.budgetType.getOrElse(CategoryBudgetType.Steady) match {
+      case CategoryBudgetType.Bill         =>
+        // An override decides the settled state (that's the point of setting one); otherwise the expected payments all have to land.
+        val made      = s.billPaymentsMade
+        val isSettled = if isOverridden then complete else made >= s.category.billPayments
+        val verb      = if income then "received" else "paid"
+        // No trailing tick in the words here: the marker in front of them carries it.
+        val text      =
+          if isSettled then verb
+          else if made > 0 && !isOverridden then s"$verb $made of ${s.category.billPayments}"
           else if income then "not received yet"
           else "not paid yet"
-        (text, if settled then "bg-success" else if partial then "bg-primary" else "bg-secondary", None, None)
-
-      case Entry.Budget(s, elapsed) =>
-        val isOverridden = s.overrideRemainingCents.isDefined
-        s.category.budgetType.getOrElse(CategoryBudgetType.Steady) match {
-          case CategoryBudgetType.Bill         =>
-            // An override decides the settled state (that's the point of setting one); otherwise the expected payments all have to land.
-            val made      = s.billPaymentsMade
-            val isSettled = if isOverridden then complete else made >= s.category.billPayments
-            val verb      = if income then "received" else "paid"
-            // No trailing tick in the words here: the marker in front of them carries it.
-            val text      =
-              if isSettled then verb
-              else if made > 0 && !isOverridden then s"$verb $made of ${s.category.billPayments}"
-              else if income then "not received yet"
-              else "not paid yet"
-            (text, if isSettled then "bg-success" else "bg-secondary", None, Some(isSettled))
-          case CategoryBudgetType.Subscription =>
-            val over = plan > 0 && spent > plan
-            val text = if complete then (if income then "fully received ✓" else "fully paid ✓") else "fixed pool"
-            (text, fill(if over then "bg-danger" else "bg-success"), None, None)
-          case CategoryBudgetType.Steady       =>
-            val expectedByNow = (plan * elapsed).toLong
-            val overAll       = plan > 0 && spent > plan
-            val overPace      = plan > 0 && spent > expectedByNow
-            val text          =
-              if plan <= 0 then "no budget history yet"
-              else if income then (if overAll then "all in ✓" else if overPace then "ahead of pace ✓" else "behind pace")
-              else if overAll then "over budget"
-              else if overPace then "over pace"
-              else "under pace ✓"
-            (
-              text,
-              fill(if overAll then "bg-danger" else if overPace then "bg-warning" else "bg-success"),
-              Option.when(plan > 0)(expectedByNow),
-              None,
-            )
-        }
+        (text, if isSettled then "bg-success" else "bg-secondary", None, Some(isSettled))
+      case CategoryBudgetType.Subscription =>
+        val over = plan > 0 && spent > plan
+        val text = if complete then (if income then "fully received ✓" else "fully paid ✓") else "fixed pool"
+        (text, fill(if over then "bg-danger" else "bg-success"), None, None)
+      case CategoryBudgetType.Steady       =>
+        val expectedByNow = (plan * elapsed).toLong
+        val overAll       = plan > 0 && spent > plan
+        val overPace      = plan > 0 && spent > expectedByNow
+        val text          =
+          if plan <= 0 then "no budget history yet"
+          else if income then (if overAll then "all in ✓" else if overPace then "ahead of pace ✓" else "behind pace")
+          else if overAll then "over budget"
+          else if overPace then "over pace"
+          else "under pace ✓"
+        (
+          text,
+          fill(if overAll then "bg-danger" else if overPace then "bg-warning" else "bg-success"),
+          Option.when(plan > 0)(expectedByNow),
+          None,
+        )
     }
 
     val forecast     = math.max(plan, spent + reserved)
@@ -433,112 +348,27 @@ object PlanCard {
       title     := "expected by now",
     )
 
-  /** What's left, and how to close it. A budget is adjusted by clicking the amount it has reserved — the editor that opens is where "paid" lives, so
-    * the state line stays a statement rather than a row of buttons. A manual entry instead gets the actions that close it, since paying is what it's
-    * for.
+  /** What is left. A click on the amount opens the editor of the remaining amount, and that editor is where "paid" lives. The state line thus stays a
+    * statement, not a row of buttons.
     */
   private def actions(line: Line): HtmlElement = {
     val word          = if line.isIncome then "expected" else "reserved"
     val remainingText = if line.remaining == 0 then "" else s"$word ${money(line.remaining)}"
 
-    line.entry match {
-      case Entry.Budget(s, _)    =>
-        span(
-          cls       := "font-monospace text-decoration-underline",
-          styleAttr := "cursor: pointer",
-          title     := "Set the remaining amount by hand for this period",
-          onClick --> { _ => editingOverrideId.set(Some(s.category.id)) },
-          if remainingText.nonEmpty then remainingText else "set remaining",
-        )
-      case Entry.Item(d, record) =>
-        val settled = record.exists(_.settled)
-        val partial = record.exists(_.isPartiallyPaid)
-        // Settled entries undo everything; part-paid ones clear the instalments so far. Same action, different word for it.
-        val reset   = if settled then (if line.isIncome then "Undo" else "Unpay") else "Reset"
-        div(
-          cls := "d-flex align-items-center",
-          span(cls := "font-monospace me-2", remainingText),
-          div(
-            cls    := "btn-group btn-group-sm",
-            Option.when(!settled)(
-              button(
-                cls := "btn btn-outline-success btn-sm py-0",
-                if line.isIncome then "Receive" else "Pay",
-                onClick --> { _ => payingItemId.set(Some(d.id)) },
-              ),
-            ),
-            button(cls := "btn btn-outline-secondary btn-sm py-0", "Edit", onClick --> { _ => editingItemId.set(Some(d.id)) }),
-            Option.when(settled || partial)(
-              Loading.actionButton(reset, () => dataService.resetBudgetItemPayment(d.id), "btn btn-outline-warning btn-sm py-0"),
-            ),
-          ),
-        )
-    }
+    span(
+      cls       := "font-monospace text-decoration-underline",
+      styleAttr := "cursor: pointer",
+      title     := "Set the remaining amount by hand for this period",
+      onClick --> { _ => editingOverrideId.set(Some(line.summary.category.id)) },
+      if remainingText.nonEmpty then remainingText else "set remaining",
+    )
   }
 
   /** The editor open on this entry, if any — narrowed and deduped per entry, so opening one doesn't re-render the rest of the list. */
   private def openEditor(line: Line): Signal[Option[HtmlElement]] =
-    line.entry match {
-      case Entry.Budget(s, _)    =>
-        editingOverrideId.signal.map(_.contains(s.category.id)).distinct.map(Option.when(_)(overrideForm(line, s)))
-      case Entry.Item(d, record) =>
-        payingItemId.signal
-          .combineWith(editingItemId.signal)
-          .map { case (paying, editing) => (paying.contains(d.id), editing.contains(d.id)) }
-          .distinct
-          .map {
-            case (true, _) => Some(payForm(line, d))
-            case (_, true) => Some(editForm(d))
-            case _         => None
-          }
-    }
+    editingOverrideId.signal.map(_.contains(line.summary.category.id)).distinct.map(Option.when(_)(overrideForm(line, line.summary)))
 
   // ---- Inline editors -------------------------------------------------------------------------
-
-  /** Payment editor for a manual entry. The amount ADDS to what's already paid, so it defaults to the remainder: "Pay" settles the entry at that
-    * amount (closing it even if it came in under estimate), "Part" banks the instalment and leaves the rest outstanding.
-    */
-  private def payForm(line: Line, item: BudgetItemDefinition): HtmlElement = {
-    var inputRef: org.scalajs.dom.html.Input = null
-
-    def pay(settle: Boolean): () => Future[Unit] =
-      () => dataService.payBudgetItem(item.id, parseCents(inputRef), settle).map(_ => payingItemId.set(None))
-
-    val settleAction = Loading.actionGroup(if line.isIncome then "Receive" else "Pay", pay(settle = true), "btn btn-success btn-sm py-0")
-
-    editorRow(
-      if line.isIncome then "Received now" else "Paying now",
-      moneyInput(Some(line.remaining), ref => inputRef = ref, autoFocus = true).amend(settleAction.onEnter),
-      settleAction.btn,
-      Loading.actionButton("Part", pay(settle = false), "btn btn-outline-success btn-sm py-0"),
-      cancelButton(() => payingItemId.set(None)),
-    )
-  }
-
-  private def editForm(item: BudgetItemDefinition): HtmlElement = {
-    var nameRef: org.scalajs.dom.html.Input     = null
-    var estimateRef: org.scalajs.dom.html.Input = null
-
-    div(
-      cls := "d-flex align-items-center gap-2 mt-1",
-      div(styleAttr := "max-width: 14rem", textInput(item.name, ref => nameRef = ref)),
-      div(styleAttr := "width: 7rem", moneyInput(Some(item.estimateCents), ref => estimateRef = ref, autoFocus = true)),
-      div(
-        cls         := "btn-group btn-group-sm",
-        Loading.actionButton(
-          "Save",
-          () => dataService.updateBudgetItemEstimate(item.id, parseCents(estimateRef), item.currency).map(_ => editingItemId.set(None)),
-          "btn btn-success btn-sm py-0",
-        ),
-        Loading.actionButton(
-          "Del",
-          () => dataService.deleteBudgetItem(item.id).map(_ => editingItemId.set(None)),
-          "btn btn-outline-danger btn-sm py-0",
-        ),
-        cancelButton(() => editingItemId.set(None)),
-      ),
-    )
-  }
 
   /** Inline editor for a budget's remaining amount, for this period only. It takes a MAGNITUDE and re-applies the budget's direction on the way out,
     * so an income budget is adjusted by saying how much is still expected to arrive rather than by typing a negative number.
@@ -564,42 +394,6 @@ object PlanCard {
         ),
         Some(cancelButton(() => editingOverrideId.set(None))),
       ).flatten*,
-    )
-  }
-
-  private def addForm(income: Boolean, currency: Currency): HtmlElement = {
-    var nameRef: org.scalajs.dom.html.Input     = null
-    var estimateRef: org.scalajs.dom.html.Input = null
-    val itemType                                = if income then BudgetItemType.PlannedIncome else BudgetItemType.PlannedExpense
-    val addingVar                               = if income then addingIncome else addingExpense
-
-    val addAction = Loading.actionGroup(
-      "Add",
-      () => {
-        val name = Option(nameRef).map(_.value.trim).getOrElse("")
-        if name.nonEmpty then dataService.addBudgetItem(name, itemType, parseCents(estimateRef), currency).map(_ => addingVar.set(false))
-        else Future.successful(())
-      },
-      "btn btn-success btn-sm py-0",
-    )
-
-    div(
-      cls    := "d-flex align-items-center gap-2 mb-3",
-      idAttr := (if income then "plan-add-income" else "plan-add-expense"),
-      div(
-        styleAttr := "max-width: 14rem",
-        textInput(
-          "",
-          ref => nameRef = ref,
-          placeholderText = if income then "Income name" else "Expense name",
-          autoFocus = true,
-        ).amend(addAction.onEnter),
-      ),
-      div(
-        styleAttr := "width: 7rem",
-        moneyInput(None, ref => estimateRef = ref, placeholderText = if income then "Expected" else "Estimate").amend(addAction.onEnter),
-      ),
-      div(cls     := "btn-group btn-group-sm", addAction.btn, cancelButton(() => addingVar.set(false))),
     )
   }
 
@@ -684,7 +478,7 @@ object PlanCard {
 
   private def money(cents: Long): String = MoneyFormatter.formatSimple(cents, MoneyFormatter.primary)
 
-  /** What the plan still expects to move, in both directions — the two terms the free-money figure is waiting on, across both kinds of entry. */
+  /** What the plan still expects to move, in both directions — the two terms the free-money figure is waiting on, across all entries. */
   private def footer(): HtmlElement =
     div(
       cls := "card-footer py-2",
@@ -698,7 +492,7 @@ object PlanCard {
         span(cls := "text-muted small", "Still to receive"),
         span(cls := "font-monospace small", MoneyFormatter.formatChild(dataService.stillToReceive)),
       ),
-      // Worth saying only while nothing is transaction-derived yet: that's the mechanism to reach for first.
+      // With no budgets the list is empty, so say how an entry is made.
       child.maybe <-- dataService.budgetedCategories.map { budgets =>
         Option.when(budgets.isEmpty)(
           div(

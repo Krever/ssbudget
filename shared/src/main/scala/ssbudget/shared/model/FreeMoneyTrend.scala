@@ -5,7 +5,7 @@ import io.circe.Codec
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
-/** One part of the change of the plan's own line on a day: a category (or the planned items) and how much it moved the line.
+/** One part of the change of the plan's own line on a day: a category and how much it moved the line.
   *
   * Negative: the plan lost that much there, for example a payment above its budget, or spend in a category with no budget. Positive: the plan got
   * that much back, for example the part of a steady budget that the day did not use.

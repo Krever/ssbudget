@@ -84,7 +84,6 @@ class DatabaseSpec extends E2ESpec {
     // Step 1: Create initial data
     ensurePeriodExists()
     addBankAccount("Original Account")
-    addPlannedExpense("Original Expense", 100)
 
     // Step 2: Export the database
     driver.get(s"$baseUrl/settings")
@@ -109,7 +108,6 @@ class DatabaseSpec extends E2ESpec {
 
     // Step 3: Add more data (this will be lost after restore)
     addBankAccount("New Account After Backup")
-    addPlannedExpense("New Expense After Backup", 200)
 
     // Verify the new data exists
     driver.get(s"$baseUrl/accounts")
@@ -140,14 +138,6 @@ class DatabaseSpec extends E2ESpec {
       val bankCardAfter = findCard("Bank Accounts")
       bankCardAfter.getText should include("Original Account")
       bankCardAfter.getText should not include "New Account After Backup"
-    }
-
-    openDashboard()
-
-    eventually {
-      val plannedCard = findCard("Plan")
-      plannedCard.getText should include("Original Expense")
-      plannedCard.getText should not include "New Expense After Backup"
     }
   }
 

@@ -51,6 +51,9 @@ trait DailyBudgetSnapshotRepository {
 
   /** Replace the derived terms of existing rows. The balances and the source of a row are not touched, so a measured row keeps what was measured. A
     * row whose terms are already equal is not written.
+    *
+    * The two `planned` terms of such a row become zero. The planned items are removed, so a day of the open period expects nothing from them. This is
+    * called for the days of the open period only: a closed period keeps its amounts.
     */
   def rederive(terms: List[DerivedTerms]): IO[Unit]
 }
@@ -104,12 +107,12 @@ class DailyBudgetSnapshotRepositoryImpl(xa: Transactor[IO]) extends DailyBudgetS
     terms
       .traverse_ { t =>
         sql"""UPDATE daily_budget_snapshots
-            SET planned_to_pay_cents = ${t.plannedToPayCents}, planned_to_receive_cents = ${t.plannedToReceiveCents},
+            SET planned_to_pay_cents = 0, planned_to_receive_cents = 0,
                 budgets_to_spend_cents = ${t.budgetsToSpendCents}, budgets_to_receive_cents = ${t.budgetsToReceiveCents},
                 ledger_cents = ${t.ledgerCents}, from_savings_cents = ${t.fromSavingsCents}, unplanned_income_cents = ${t.unplannedIncomeCents},
                 saving_reserve_cents = ${t.savingReserveCents}
             WHERE on_date = ${t.day}
-              AND (planned_to_pay_cents IS NOT ${t.plannedToPayCents} OR planned_to_receive_cents IS NOT ${t.plannedToReceiveCents}
+              AND (planned_to_pay_cents IS NOT 0 OR planned_to_receive_cents IS NOT 0
                 OR budgets_to_spend_cents IS NOT ${t.budgetsToSpendCents} OR budgets_to_receive_cents IS NOT ${t.budgetsToReceiveCents}
                 OR ledger_cents IS NOT ${t.ledgerCents} OR from_savings_cents IS NOT ${t.fromSavingsCents}
                 OR unplanned_income_cents IS NOT ${t.unplannedIncomeCents} OR saving_reserve_cents IS NOT ${t.savingReserveCents})""".update.run
@@ -120,13 +123,11 @@ class DailyBudgetSnapshotRepositoryImpl(xa: Transactor[IO]) extends DailyBudgetS
   private val columns = Fragment.const(s"SELECT $SelectList FROM daily_budget_snapshots")
 }
 
-/** The terms of one day that are computed from the record (the plan, the budgets, the bank ledger) and today's configuration, as opposed to the
-  * balances, which are read on the day.
+/** The terms of one day that are computed from the record (the budgets, the bank ledger) and today's configuration, as opposed to the balances, which
+  * are read on the day.
   */
 final case class DerivedTerms(
     day: LocalDate,
-    plannedToPayCents: Long,
-    plannedToReceiveCents: Long,
     budgetsToSpendCents: Long,
     budgetsToReceiveCents: Long,
     ledgerCents: Long,

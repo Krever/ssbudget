@@ -38,34 +38,32 @@ pointer position maps to its data, and its text. `FreeMoneyChart` and `MonthlyHi
   rather than a rule change
 - An open period past its `expectedEnd` overruns (days remaining go negative) instead of rolling forward, so being late to close
   it stays visible
-- A second paycheck inside a period is not a period boundary: it is a **planned income**, and so reaches free money through
-  `Pending Income`. Timing is deliberately not modelled — the app takes an approximate, eventually-consistent view of when money
+- A second paycheck inside a period is not a period boundary: it is income of a category. When that category has a budget (an
+  income budget), the paycheck reaches free money through `Pending Income` until it arrives. With no budget it is unplanned income
+  when it arrives. Timing is deliberately not modelled — the app takes an approximate, eventually-consistent view of when money
   lands, because dating every expense would cost more effort than the precision is worth
 - All calculations are relative to the current period
 - A period can be added later for the time before the app was in use (a backfill of the period history, done with a script). The
   Periods page shows its figures from the bank ledger: in, out, saved, market result and the balances at its end, all through
   `BalanceHistory`. It gets NO daily free-money rows: the record of `daily_budget_snapshots` begins on its first row and never grows
   backwards, because old days could only be computed with the budgets of today
-- The planned-item figures of the Periods page (the "Planned paid" column and the "Plan execution" block) show only when a listed
-  period has planned items
 
-### Budget Items
+### Category Budgets
 
-**Planned Items** - anything you expect to move this period, expense or income (rent, subscriptions, salary, a savings top-up)
-- Have an estimated amount
-- Are paid in one go or in instalments: each payment ADDS to the period's paid total
-- `settled` is what closes an item — "nothing more expected this period", however little was actually paid. A bill that comes in
-  cheaper than its estimate settles at the lower amount instead of leaving a residual
-- Remaining (`estimate - paid`, or 0 once settled) is what feeds predicted expenses
-- There is deliberately no automatic scaling: an item is either expected in full, part-paid, or settled
-
-Variable spend (groceries, fuel) is **not** modelled here — it comes from **Category Budgets**, which derive expected spend from
-real bank transactions. Two independent settings per category:
+The plan is made of **Category Budgets** only: a category is flagged as a budget, and real bank transactions drive what it still
+expects, for spend and for income. Two independent settings per category:
 - **Budget** (`CategoryBudget`) picks the monthly figure: `Average` / `Median` over the last N completed months (blank = all
   history), or `Fixed` — a typed amount, history ignored. Leading/trailing empty months are never counted, so a short history isn't
   diluted by a long window; interior gap months count as zero.
 - **Type** (`CategoryBudgetType`) spreads that figure over the period: Steady / Bill / Subscription, with a per-period manual
   override of what's remaining.
+
+A one-off item (an exceptional bill, a bonus) is a category with a `Fixed` budget. The override closes it when no matching
+transaction arrives: the "Paid" / "Received" button of the Plan card sets the remaining amount to zero for the period.
+
+There are no hand-declared planned items. The code of that feature was removed in November 2026. Its data was NOT dropped: the
+tables `expense_definitions` and `expense_records` (and the view `v_planned_items` on a database that had it) stay, and no code
+reads them. Its two terms also stay in `daily_budget_snapshots` (see Data Model).
 
 Both are edited in a settings strip that opens under the category's row on the Transactions page; the table itself stays
 read-only so the figures scan like a spreadsheet. The strip charts `CategorySummary.monthlyHistory` — the same series the
@@ -116,9 +114,10 @@ Daily Budget = Free Money / Days Until Period End
 ```
 
 Where:
-- `Predicted Expenses = Sum(remaining per planned expense) + Sum(remaining per category budget)`
-- `Pending Income = Sum(remaining per planned income)`
-- `remaining` for a planned item = `0` if settled, else `max(0, estimate - paid so far)`
+- `Predicted Expenses = Sum(remaining per category budget that expects spend)` ("Still to pay")
+- `Pending Income = Sum(remaining per category budget that expects income)` ("Still to receive")
+- `remaining` for a category budget = the manual override of the period when there is one, else what its type still expects
+  (`CategorySummary.remainingCents`)
 - `Saving Reserve` is positive while a part of the planned saving is not yet moved to savings: `clamp(planned − net moved, 0, planned)`.
   That money is still in the spending balance, and it is not free
 - It is negative when MORE than the plan was moved: the excess, up to what is still to pay. The plan says what is saving, and the rest
@@ -169,37 +168,15 @@ projection) and on the Periods page (a row sparkline, and a chart in the expande
 | JSON        | circe                                    |
 | CSS         | Bootstrap 5 (CSS-only)                   |
 | Bundler     | Vite + vite-plugin-scalajs               |
-| Auth        | Passkeys (WebAuthn) via java-webauthn-server |
+| Auth        | Password (Argon2id) + passkeys (java-webauthn-server) |
 | Deployment  | Docker + fly.io                          |
-
-## Reference Projects
-
-- **workflow4s-web-ui** (`/Users/krever/Projects/priv/workflow4s/workflows4s-web-ui`) - Reference for Vite + Scala.js setup
-- **laminar-full-stack-demo** (https://github.com/raquo/laminar-full-stack-demo) - Reference for Laminar full-stack architecture
-- **forms4s** (`/Users/krever/Projects/priv/forms4s`) - Form/datatable library to extend with Laminar support
-- **business4s ecosystem** (https://business4s.org/) - Parent OSS ecosystem
-
-### forms4s Integration Strategy
-1. Use `forms4s-core` for table/form state management (no UI dependency)
-2. Build `forms4s-laminar` module as part of this project (can be extracted later)
-3. Leverage existing: TableDef, TableState, filtering, sorting, pagination, URL state encoding
 
 ## Data Model (Conceptual)
 
 ```
-BudgetItemDefinition (table: expense_definitions):
-  - id, name, itemType (planned_expense|planned_income)
-  - estimateMode (fixed|lastMonth|average)   -- vestigial; always Fixed in practice
-  - fixedEstimate (optional), currency
-
 Period:
   - id, startDate, expectedEnd (stored, editable), endDate (nullable until closed)
   - plannedSavingCents (stored, editable; 0 = no plan)
-
-ExpenseRecord (one per planned item per period):
-  - periodId, expenseDefId
-  - paidAmount (nullable, ACCUMULATED across instalments), paidAt (last payment)
-  - settled (no further payment expected this period; what closes the item)
 
 BalanceSnapshot:
   - accountId, amount, currency, timestamp   -- append-only history
@@ -207,6 +184,8 @@ BalanceSnapshot:
 DailyBudgetSnapshot (table: daily_budget_snapshots):
   - one row per day: the TERMS of the free-money calculation, never the answer
   - spendable / plannedToPay / plannedToReceive / budgetsToSpend / budgetsToReceive / savings, daysRemaining
+  - plannedToPay / plannedToReceive          -- terms of the removed planned items. New rows hold 0. The days of periods closed before
+                                                the removal keep their amounts, and free money still counts them
   - ledger / fromSavings / unplannedIncome   -- cumulative since the period's first day, from the bank ledger (see Free Money Trend)
   - savingReserve                            -- planned saving not yet moved (+), or the excess above the plan that waits for bills (−);
                                                 in free money, NOT in the plan's own line
@@ -256,7 +235,7 @@ without `SSBUDGET_METABASE_URL` the proxy, provisioning and nav entry all disapp
 
 `./dev.sh` runs it locally and `./build.sh` bundles it into the image — both on by default, both
 take `--no-analytics`. The container generates and persists the Metabase credentials itself, so a
-deploy needs no analytics config. See `docs/metabase-analytics.md`.
+deploy needs no analytics config.
 
 ## MCP server
 
@@ -278,139 +257,59 @@ deploy needs no analytics config. See `docs/metabase-analytics.md`.
 
 ## Authentication
 
-**Passkeys (WebAuthn)** - Modern passwordless authentication
-- No user accounts - just credential registration
-- Library: [Yubico java-webauthn-server](https://github.com/Yubico/java-webauthn-server)
-- Frontend uses Web Authentication API (browser native)
-- Credentials stored in SQLite
-- First visitor registers a passkey, subsequent access requires registered passkey
+One owner, no user accounts.
 
-Implementation resources:
-- https://developers.yubico.com/java-webauthn-server/
-- https://github.com/YubicoLabs/passkey-workshop
+- **Password**: set once at setup (`/api/auth/setup`), stored as an Argon2id hash. The password login is throttled
+  (`LoginThrottle`: 5 free failures, then a lock that doubles).
+- **Passkeys (WebAuthn)**: registered in Settings after the first login, as a second way in. Library:
+  [Yubico java-webauthn-server](https://github.com/Yubico/java-webauthn-server).
+- **Session**: a random token in an HttpOnly cookie, 30 days, `SameSite=Lax`, `Secure` when the configured origins are https.
+- **Identity proof**: an action with lasting effect (a password change, a new MCP token) needs the password or a passkey again,
+  not only the session (`IdentityProof`).
+- **Test mode** (`SSBUDGET_TEST_MODE=1`) turns the login off. It is for local runs and the e2e tests only: the app refuses to start
+  in it when `SSBUDGET_RP_ID` is not `localhost`.
 
-## Notifications
+## Sharing the summary
 
-- MVP: "Copy to clipboard" button for summary
-- Target: WhatsApp integration (via API or webhook)
+The Dashboard has two buttons: "Copy Summary" puts a short text on the clipboard, and "WhatsApp" opens a share link with the same
+text. Nothing is sent by the app itself: the backend has no scheduler, and the machine sleeps when nobody uses it.
 
-Summary format (example):
-```
-Budget Update (Jan 15)
-Balance: 5,000 PLN
-Predicted: 2,500 PLN
-Free: 2,500 PLN
-Daily: 250 PLN (10 days left)
-```
-
-## File Structure (Target)
+## File Structure
 
 ```
 ssbudget/
-├── build.sbt                    # Multi-module build
-├── project/
-│   ├── build.properties
-│   └── plugins.sbt              # ScalaJS, Flyway, native-packager
-│
-├── shared/                      # Cross-compiled (JVM + JS)
-│   └── src/main/scala/ssbudget/shared/
-│       ├── api/                 # Tapir endpoint definitions
-│       └── model/               # Domain models (Expense, Account, etc.)
-│
-├── backend/
-│   └── src/main/scala/ssbudget/backend/
-│       ├── Main.scala
-│       ├── db/                  # SQLite + Flyway + repositories
-│       ├── auth/                # WebAuthn/passkey handling
-│       └── service/             # Business logic
-│
-├── frontend/                    # Scala.js + Laminar
-│   ├── vite.config.mjs
-│   ├── package.json
-│   ├── index.html
-│   └── src/main/scala/ssbudget/frontend/
-│       ├── Main.scala           # @JSExportTopLevel entry point
-│       ├── api/                 # HTTP client (tapir-sttp-client)
-│       ├── components/          # Laminar components
-│       └── pages/               # Page components
-│
-├── forms4s-laminar/             # Laminar integration for forms4s
-│   └── src/main/scala/
-│
-└── docker/
-    └── Dockerfile
+├── build.sbt, project/          # multi-module sbt build
+├── shared/                      # cross-compiled (JVM + JS): tapir endpoints (api/), domain models (model/), rules
+├── backend/                     # http4s server: Routes, auth/, banking/, mcp/, analytics/, service/, db/ (repositories)
+│   └── src/main/resources/db/migration/   # Flyway: V<n>__*.sql (never edit one that is released), R__analytics_views.sql
+├── frontend/                    # Scala.js + Laminar SPA: pages/, components/, services/, styles/app.css
+├── e2e/                         # Selenium browser tests
+├── docker/entrypoint.sh         # container start: database copy, Metabase, the app
+├── Dockerfile, fly.toml         # the image and the fly.io deployment
+├── build.sh, dev.sh             # release build, local development
+└── docs/                        # mcp.md, audit-2026-11.md (open findings, with status)
 ```
 
-## Development Workflow
-
-Three-terminal setup for development:
+## Development and build
 
 ```bash
-# Terminal 1: Scala.js continuous compilation
-sbt '~frontend/fastLinkJS'
+./dev.sh                  # the whole stack locally: Vite on https://localhost:3000, backend on :8080, Scala.js watch, Metabase
+./dev.sh --no-analytics   # the same without Metabase
 
-# Terminal 2: Vite dev server (hot reload, proxies /api to backend)
-cd frontend && npm install && npm run dev
+sbt backend/test          # the fast test loop (a plain `sbt test` also starts the browser tests)
+sbt e2e/test              # browser tests (Chrome)
+sbt scalafmtAll           # format; CI checks it
 
-# Terminal 3: Backend server
-sbt backend/run
+./build.sh --no-image     # release artifacts: backend/stage, optimized frontend, docker/VERSION (the commit)
+fly deploy --remote-only  # fly.io builds the image from those artifacts
 ```
 
-Navigate to `http://localhost:3000` - Vite proxies API calls to backend.
-
-## Build Commands
-
-```bash
-# Development
-sbt '~frontend/fastLinkJS'        # Watch mode for frontend
-sbt backend/run                   # Run backend
-cd frontend && npm run dev        # Vite dev server
-
-# Production build
-sbt frontend/fullLinkJS           # Optimized JS
-cd frontend && npm run build      # Vite production bundle
-sbt backend/assembly              # Fat JAR with bundled frontend
-
-# Database
-sbt backend/flywayMigrate         # Run migrations
-
-# Docker
-docker build -t ssbudget .
-```
-
-## Critical Build Settings
-
-```scala
-// build.sbt - REQUIRED for Vite integration
-scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.ESModule) }
-```
-
-```javascript
-// vite.config.mjs
-import scalaJSPlugin from "@scala-js/vite-plugin-scalajs";
-
-export default defineConfig({
-  plugins: [
-    scalaJSPlugin({
-      cwd: "..",           // Parent directory with build.sbt
-      projectID: "frontend" // Must match sbt project name
-    })
-  ],
-  server: {
-    proxy: { '/api': 'http://localhost:8080' }
-  }
-})
-```
-
-## Session Workflow
-
-This project uses incremental development across multiple Claude sessions:
-1. Check `ROADMAP.md` for current phase
-2. Check `docs/sessions/` for completed work
-3. Pick next item from roadmap
-4. Create detailed plan for the session
-5. Implement
-6. Update session log and roadmap status
+- The app migrates its database at start (Flyway). The container copies the database to `/data/backups` before that
+  (`docker/entrypoint.sh`, newest 5 kept), and the deploy waits for the health check in `fly.toml`.
+- `GET /api/health` answers `ok <commit>`: it says which build is live.
+- To check a change on real data, run the backend with `SSBUDGET_TEST_MODE=1` on a COPY of the database
+  (`SSBUDGET_DB_PATH`, `SSBUDGET_PORT`, `SSBUDGET_STATIC_DIR=frontend/dist`).
+- Open findings and ideas are in `docs/audit-2026-11.md`. Change the status of an item when you work on it.
 
 ## Code Style
 
@@ -429,7 +328,7 @@ This project uses incremental development across multiple Claude sessions:
 |--------------------|---------------------------|--------------------------------------------------|
 | Database           | SQLite + Flyway           | Simple, file-based, migrations built-in          |
 | CSS Framework      | Bootstrap 5               | Industry standard, extensive components, good docs |
-| Auth               | Passkeys (WebAuthn)       | Modern, passwordless, secure, no passwords to manage |
+| Auth               | Password + passkeys       | One owner; passkeys (WebAuthn) for daily use, a password as the base |
 | Bundler            | Vite + vite-plugin-scalajs| Fast dev, HMR, proven in workflow4s              |
 | Historical data    | Per-update                | Track each balance update with timestamp         |
 | Expense recurrence | Monthly only              | Keep simple                                      |

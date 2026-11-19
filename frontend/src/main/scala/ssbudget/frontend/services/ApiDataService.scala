@@ -12,8 +12,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
 
   // Mutable state for all entities
   private val accountsVar: Var[List[Account]]                     = Var(List.empty)
-  private val budgetItemsVar: Var[List[BudgetItemDefinition]]     = Var(List.empty)
-  private val budgetRecordsVar: Var[List[ExpenseRecord]]          = Var(List.empty)
   private val periodsVar: Var[List[Period]]                       = Var(List.empty)
   private val exchangeRatesVar: Var[Map[Currency, Double]]        = Var(Map.empty)
   private val currencySettingsVar: Var[List[CurrencySetting]]     = Var(List.empty)
@@ -42,9 +40,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   // Initialize by fetching all data from individual endpoints
   override def initialize(): Future[Unit] = {
     val accountsFut         = client.accounts.list()
-    val budgetItemsFut      = client.budgetItems.list()
     val periodsFut          = client.periods.list()
-    val recordsFut          = client.expenseRecords.listCurrent()
     val exchangeRatesFut    = client.exchangeRates.getAll()
     val currencySettingsFut = client.currencies.getSettings()
     val categorySummsFut    = client.categories.summaries()
@@ -54,9 +50,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
 
     for {
       accounts         <- accountsFut
-      budgetItems      <- budgetItemsFut
       periods          <- periodsFut
-      records          <- recordsFut
       exchangeRates    <- exchangeRatesFut
       currencySettings <- currencySettingsFut
       categorySumms    <- categorySummsFut
@@ -64,9 +58,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       _                <- historyFut
     } yield {
       accountsVar.set(accounts)
-      budgetItemsVar.set(budgetItems)
       periodsVar.set(periods)
-      budgetRecordsVar.set(records)
       exchangeRatesVar.set(exchangeRates.map(r => r.fromCurrency -> r.rateAsDouble).toMap)
       currencySettingsVar.set(currencySettings.currencies)
       availableCurrenciesVar.set(currencySettings.availableCurrencies.map(c => (c.code, c.name)))
@@ -96,19 +88,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   // Derived signals
   override def currentPeriod: Signal[Option[Period]] =
     periodsVar.signal.map(_.find(_.endDate.isEmpty))
-
-  override def plannedExpenses: Signal[List[BudgetItemDefinition]] =
-    budgetItemsVar.signal.map(_.filter(_.itemType == BudgetItemType.PlannedExpense))
-
-  override def plannedIncomes: Signal[List[BudgetItemDefinition]] =
-    budgetItemsVar.signal.map(_.filter(_.itemType == BudgetItemType.PlannedIncome))
-
-  override def currentPeriodRecords: Signal[List[ExpenseRecord]] =
-    Signal
-      .combine(budgetRecordsVar.signal, currentPeriod)
-      .map { case (records, periodOpt) =>
-        periodOpt.fold(List.empty[ExpenseRecord])(period => records.filter(_.periodId == period.id))
-      }
 
   override def bankAccountBalance: Signal[Money] =
     spendingAccounts
@@ -184,58 +163,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   override def updateAccountBalance(accountId: AccountId, amountCents: Long): Future[Unit] =
     client.accounts.updateBalance(accountId, UpdateAccountBalance(amountCents)).map(upsertAccount)
 
-  override def addBudgetItem(name: String, itemType: BudgetItemType, estimateCents: Long, currency: Currency): Future[Unit] = {
-    replanned(client.budgetItems.create(CreateBudgetItem(name, itemType, estimateCents, currency)).map { item =>
-      budgetItemsVar.update(_ :+ item)
-      getCurrentPeriod.foreach { period =>
-        budgetRecordsVar.update { records =>
-          records :+ ExpenseRecord(
-            ExpenseRecordId(s"temp-${System.currentTimeMillis()}"),
-            period.id,
-            item.id,
-            None,
-            None,
-            settled = false,
-          )
-        }
-      }
-    })
-  }
-
-  override def updateBudgetItemEstimate(itemId: ExpenseDefId, newEstimateCents: Long, currency: Currency): Future[Unit] = {
-    val current = budgetItemsVar.now().find(_.id == itemId)
-    current match {
-      case Some(item) =>
-        replanned(client.budgetItems.update(itemId, UpdateBudgetItem(item.name, item.itemType, newEstimateCents, currency)).map { updated =>
-          budgetItemsVar.update(items => items.map(i => if i.id == itemId then updated else i))
-        })
-      case None       => Future.failed(new Exception(s"Budget item not found: $itemId"))
-    }
-  }
-
-  override def deleteBudgetItem(itemId: ExpenseDefId): Future[Unit] = {
-    replanned(client.budgetItems.delete(itemId).map { _ =>
-      budgetItemsVar.update(_.filterNot(_.id == itemId))
-      budgetRecordsVar.update(_.filterNot(_.expenseDefId == itemId))
-    })
-  }
-
-  override def payBudgetItem(itemId: ExpenseDefId, amountCents: Long, settle: Boolean): Future[Unit] = {
-    replanned(client.expenseRecords.pay(itemId, PayBudgetItem(amountCents, settle)).map { record =>
-      budgetRecordsVar.update { records =>
-        records.map(r => if r.expenseDefId == itemId && r.periodId == record.periodId then record else r)
-      }
-    })
-  }
-
-  override def resetBudgetItemPayment(itemId: ExpenseDefId): Future[Unit] = {
-    replanned(client.expenseRecords.unpay(itemId).map { record =>
-      budgetRecordsVar.update { records =>
-        records.map(r => if r.expenseDefId == itemId && r.periodId == record.periodId then record else r)
-      }
-    })
-  }
-
   override def setPeriodExpectedEnd(id: PeriodId, expectedEnd: LocalDate): Future[Unit] =
     replanned(client.periods.setExpectedEnd(id, expectedEnd).map { updated =>
       periodsVar.update(DataService.upsertById(_, updated)(_.id))
@@ -255,18 +182,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
         }
       }
       periodsVar.update(_ :+ newPeriod)
-      budgetRecordsVar.set(
-        budgetItemsVar.now().map { item =>
-          ExpenseRecord(
-            ExpenseRecordId(s"rec-${System.currentTimeMillis()}-${item.id.value}"),
-            newPeriod.id,
-            item.id,
-            None,
-            None,
-            settled = false,
-          )
-        },
-      )
     })
   }
 
@@ -275,9 +190,6 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
 
   override def updateAccount(id: AccountId, name: String, currency: Currency, role: AccountRole): Future[Unit] =
     client.accounts.update(id, UpdateAccount(name, currency, Some(role))).map(upsertAccount)
-
-  private def getCurrentPeriod: Option[Period] =
-    periodsVar.now().find(_.endDate.isEmpty)
 
   // Currency settings mutations
   override def enableCurrency(code: String): Future[Unit] = {
