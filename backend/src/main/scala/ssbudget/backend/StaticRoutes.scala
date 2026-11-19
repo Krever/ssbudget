@@ -5,7 +5,9 @@ import cats.effect.IO
 import fs2.io.file.{Files, Path}
 import org.http4s.*
 import org.http4s.dsl.io.*
-import org.http4s.headers.`Content-Type`
+import org.http4s.headers.{`Cache-Control`, `Content-Type`}
+
+import scala.concurrent.duration.*
 
 /** Serves static files from the frontend build directory */
 object StaticRoutes {
@@ -27,6 +29,16 @@ object StaticRoutes {
     "eot"   -> MediaType.application.`vnd.ms-fontobject`,
     "map"   -> MediaType.application.json,
   )
+
+  /** How long a browser can keep a file.
+    *
+    * The bundler puts a hash of the content in the name of each file under `assets/`, so such a file never changes: the browser keeps it for a year
+    * and does not ask again. Without this the browser downloaded the full script (some megabytes) on each visit. Each other file (index.html, which
+    * names the current assets) is checked on each use, so a new release shows at once.
+    */
+  private[backend] def cachingFor(relativePath: String): `Cache-Control` =
+    if relativePath.startsWith("assets/") then `Cache-Control`(CacheDirective.public, CacheDirective.`max-age`(365.days), CacheDirective("immutable"))
+    else `Cache-Control`(CacheDirective.`no-cache`())
 
   private def getMimeType(filename: String): MediaType = {
     val ext = filename.lastIndexOf('.') match {
@@ -89,12 +101,13 @@ object StaticRoutes {
               if isFile then {
                 val mediaType   = getMimeType(relativePath)
                 val contentType = `Content-Type`(mediaType)
+                val caching     = cachingFor(normalizedBase.relativize(normalizedFile).toString.replace('\\', '/'))
                 if headOnly then {
                   // For HEAD requests, return headers without body
-                  IO.pure(Some(Response[IO](Status.Ok).withContentType(contentType)))
+                  IO.pure(Some(Response[IO](Status.Ok).withContentType(contentType).putHeaders(caching)))
                 } else {
                   val body = Files[IO].readAll(filePath)
-                  IO.pure(Some(Response[IO](Status.Ok).withEntity(body).withContentType(contentType)))
+                  IO.pure(Some(Response[IO](Status.Ok).withEntity(body).withContentType(contentType).putHeaders(caching)))
                 }
               } else {
                 IO.pure(None)

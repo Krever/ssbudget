@@ -8,7 +8,7 @@ import ssbudget.backend.db.DoobieMeta.given
 import ssbudget.shared.api.CategoryFilter
 import ssbudget.shared.model.*
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 
 /** The non-text filters every transaction listing shares. A case class rather than six positional parameters: three consecutive `Option[String]` and
   * two `Option[Instant]` are an arg-swap that compiles cleanly and returns the wrong rows on one code path only.
@@ -32,6 +32,13 @@ final case class TransactionSearchRow(
     currency: Currency,
     bookedAt: Instant,
 )
+
+/** The non-internal entries of one bank account on one day, in one category (None = no category): what came in and what went out, both as positive
+  * amounts in the currency of the entries.
+  */
+final case class DailyFlow(day: LocalDate, accountUid: String, currency: Currency, category: Option[CategoryId], inflow: Long, outflow: Long) {
+  def net: Long = inflow - outflow
+}
 
 /** The net of one bank account on one day, in one category: a row of `dailyNetByAccountAndCategory`.
   *
@@ -114,6 +121,12 @@ trait BankTransactionRepository {
     * outside, less what left it.
     */
   def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]]
+
+  /** The non-internal money in and out from `from` on, for each (day, bank account, currency, category). It is the one read behind the period
+    * reports: the figures of every period are sums of these rows over the days of the period, so a page of periods costs one query and not a set of
+    * queries for each period.
+    */
+  def dailyFlowsSince(from: Instant): IO[List[DailyFlow]]
 
   /** Spend per (category, currency, YYYY-MM) over `[from, to)`, categorized + non-internal — a per-month breakdown. `includeInflows` as in
     * [[spendByCategoryBetween]] (false = gross outflow, e.g. for the analytics chart; true = net, for the budget statistic).
@@ -309,6 +322,18 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
             AND t.booked_at >= $from""" ++ upper ++
       fr"GROUP BY c.transfer_account_id, t.currency").query[(AccountId, Currency, Long)].to[List].transact(xa)
   }
+
+  override def dailyFlowsSince(from: Instant): IO[List[DailyFlow]] =
+    sql"""SELECT substr(booked_at, 1, 10) AS d, eb_account_uid, currency, category_id,
+                 COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
+                 COALESCE(SUM(CASE WHEN amount_cents < 0 THEN -amount_cents ELSE 0 END), 0)
+          FROM bank_transactions
+          WHERE is_internal = 0 AND booked_at >= $from
+          GROUP BY d, eb_account_uid, currency, category_id"""
+      .query[(LocalDate, String, Currency, Option[CategoryId], Long, Long)]
+      .map(DailyFlow.apply.tupled)
+      .to[List]
+      .transact(xa)
 
   override def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]] = {
     val upper = to.fold(Fragment.empty)(t => fr"AND booked_at < $t")

@@ -3,6 +3,7 @@ package ssbudget.backend.service
 import cats.effect.IO
 import cats.implicits.*
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.db.repository.DailyFlow
 import ssbudget.backend.service.BudgetQueries.*
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
@@ -125,8 +126,11 @@ class PeriodService(repos: Repositories) {
       // in memory.
       history   <- BalanceHistory.load(repos, accounts)
       now       <- IO.realTimeInstant
-      summaries <- periods.traverse(periodSummary(converter, accounts, cats, history, now))
-    } yield summaries
+      // The entries of all listed periods are read ONCE too, and each period sums the rows of its own days. With a set of queries for each
+      // period, a page of 16 periods ran about 200 statements on the one database connection.
+      flows     <- periods.map(periodStartOfDay).minOption.fold(IO.pure(List.empty[DailyFlow]))(repos.bankTransactions.dailyFlowsSince)
+      uidIndex  <- BalanceHistory.accountUidIndex(repos)
+    } yield periods.map(periodSummary(converter, accounts, cats, history, now, flows, uidIndex))
 
   private def periodSummary(
       converter: (Currency, (Long, Currency) => Long),
@@ -134,15 +138,16 @@ class PeriodService(repos: Repositories) {
       cats: List[Category],
       history: BalanceHistory,
       now: Instant,
-  )(p: Period): IO[PeriodSummary] = {
+      allFlows: List[DailyFlow],
+      uidIndex: Map[String, AccountId],
+  )(p: Period): PeriodSummary = {
     val (primary, toPrimary) = converter
 
-    val (from, to)         = periodWindow(p)
-    val transferCategories = cats.filter(_.transferAccount.isDefined).map(_.id).toSet
-    val spending           = accounts.filter(_.role == AccountRole.Spending)
-    val savings            = accounts.filter(_.role == AccountRole.Savings)
-    val investment         = accounts.filter(_.role == AccountRole.Investment)
-    val holding            = accounts.filter(_.role == AccountRole.Holding)
+    val (from, to) = periodWindow(p)
+    val spending   = accounts.filter(_.role == AccountRole.Spending)
+    val savings    = accounts.filter(_.role == AccountRole.Savings)
+    val investment = accounts.filter(_.role == AccountRole.Investment)
+    val holding    = accounts.filter(_.role == AccountRole.Holding)
 
     // A balance at a period boundary: the recorded balance at or before that instant, and, before the first record of an account, that record
     // carried back through the bank ledger (see [[BalanceHistory]]). So a period from before the balances were recorded shows what the bank
@@ -164,18 +169,44 @@ class PeriodService(repos: Repositories) {
     val endBalances                                                = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
     val holdingEnds                                                = holding.flatMap(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
 
-    for {
-      flows   <- repos.bankTransactions.flowsBetween(from, to)
-      moved   <- movedToInvestments(toPrimary)(from, to)
-      // A deposit to an investment account is not spend, so a transfer category has no place in the spend breakdown.
-      catRows <- repos.bankTransactions.spendByCategoryBetween(from, to).map(_.filterNot(r => transferCategories(r._1)))
-    } yield {
-      val catIndex      = cats.map(c => c.id -> c).toMap
-      val topCategories = catRows
-        .groupBy(_._1)
-        .view
-        .mapValues(_.map { case (_, cur, cents) => toPrimary(cents, cur) }.sum)
+    // The entries of this period: those of its days. The window is from the day the period started to the day before the day it ended; a bank
+    // entry has a date and no time, so the days say all of it.
+    val fromDay = LocalDate.ofInstant(from, ZoneOffset.UTC)
+    val toDay   = to.map(LocalDate.ofInstant(_, ZoneOffset.UTC))
+    val rows    = allFlows.filter(f => !f.day.isBefore(fromDay) && toDay.forall(f.day.isBefore))
+
+    // A transfer category stands for the transfers to and from one investment account: neither income nor spend.
+    val transferAccount                                                                                 = cats.flatMap(c => c.transferAccount.map(c.id -> _)).toMap
+    def isTransfer(f: DailyFlow): Boolean                                                               = f.category.exists(transferAccount.contains)
+    // Each sum is made in the currency of the entries first and converted one time, as a query with GROUP BY currency does.
+    def inPrimary[K](of: List[DailyFlow])(key: DailyFlow => K)(amount: DailyFlow => Long): Map[K, Long] =
+      of.groupMapReduce(f => (key(f), f.currency))(amount)(_ + _)
         .toList
+        .groupMapReduce(_._1._1) { case ((_, currency), cents) =>
+          toPrimary(cents, currency)
+        }(_ + _)
+
+    val cash         = rows.filterNot(isTransfer)
+    val inflowCents  = inPrimary(cash)(_ => ())(_.inflow).getOrElse((), 0L)
+    val outflowCents = inPrimary(cash)(_ => ())(_.outflow).getOrElse((), 0L)
+
+    // What was moved INTO each investment account (see [[movedToInvestments]], which answers the same for one window with queries): the
+    // opposite of what the bank side shows in its transfer categories, plus the net of its own ledger.
+    val viaCategories = inPrimary(
+      rows.filter(f => isTransfer(f) && !f.category.flatMap(transferAccount.get).exists(uidIndex.get(f.accountUid).contains)),
+    )(f => transferAccount(f.category.get))(_.net).view.mapValues(-_).toMap
+    val viaLedger     = inPrimary(rows.filter(f => uidIndex.contains(f.accountUid)))(_.accountUid)(_.net).toList.groupMapReduce { case (uid, _) =>
+      uidIndex(uid)
+    }(_._2)(_ + _)
+    val moved         = (viaCategories.toList ++ viaLedger.toList).groupMapReduce(_._1)(_._2)(_ + _)
+
+    // Spend by category: what went out, refunds not taken off. A deposit to an investment account is not spend, so a transfer category has
+    // no place in the breakdown.
+    val spentByCategory = inPrimary(rows.filter(f => f.category.isDefined && !isTransfer(f)))(_.category.get)(_.outflow)
+
+    {
+      val catIndex      = cats.map(c => c.id -> c).toMap
+      val topCategories = spentByCategory.toList
         .flatMap { case (id, cents) => catIndex.get(id).map(PeriodCategorySpend(_, cents)) }
         .filter(_.spentCents > 0)
         .sortBy(-_.spentCents)
@@ -185,8 +216,8 @@ class PeriodService(repos: Repositories) {
         period = p,
         days = periodDays(p, now),
         currency = primary,
-        inflowCents = flows.map { case (cur, in, _) => toPrimary(in, cur) }.sum,
-        outflowCents = flows.map { case (cur, _, out) => toPrimary(out, cur) }.sum,
+        inflowCents = inflowCents,
+        outflowCents = outflowCents,
         savingsChangeCents = savingsDelta,
         savingsEndCents = savingsEnd,
         investmentChangeCents = investmentDelta,
