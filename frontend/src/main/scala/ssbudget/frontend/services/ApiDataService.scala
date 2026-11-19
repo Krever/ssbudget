@@ -37,8 +37,33 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       ()
     }
 
-  // Initialize by fetching all data from individual endpoints
-  override def initialize(): Future[Unit] = {
+  // The load that is in progress, if there is one: a second caller gets the same load and no new requests.
+  private var loading: Option[Future[Unit]] = None
+  // What the state of the last load was made from: the change count that it started at, and when it ended.
+  private var changesAtLoad                 = -1
+  private var loadedAtMillis                = 0L
+  // Data that nobody changed from this page can still be old: a bank sync on another device, a new day.
+  private val maxAgeMillis                  = 60000L
+
+  override def initialize(): Future[Unit] =
+    loading.getOrElse {
+      // Taken before the requests go out: a write that lands during the load makes the result old again.
+      val startedAt = ApiClient.changes
+      val load      = loadAll().map { _ =>
+        changesAtLoad = startedAt
+        loadedAtMillis = System.currentTimeMillis()
+      }
+      loading = Some(load)
+      load.onComplete(_ => loading = None)
+      load
+    }
+
+  override def refreshIfStale(): Future[Unit] =
+    if loading.isDefined || ApiClient.changes != changesAtLoad || System.currentTimeMillis() - loadedAtMillis > maxAgeMillis then initialize()
+    else Future.successful(())
+
+  // Fetch all data from the individual endpoints
+  private def loadAll(): Future[Unit] = {
     val accountsFut         = client.accounts.list()
     val periodsFut          = client.periods.list()
     val exchangeRatesFut    = client.exchangeRates.getAll()

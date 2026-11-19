@@ -54,6 +54,14 @@ period) are the charts. The one exception is
   `BalanceHistory`. It gets NO daily free-money rows: the record of `daily_budget_snapshots` begins on its first row and never grows
   backwards, because old days could only be computed with the budgets of today
 
+### Period boundary
+
+`PeriodWindow` (backend service) is the ONE definition of where a period begins and ends for the bank ledger and the balance history.
+A bank entry has a date and no time, so the rule is: the day a period opens is of that period, in full. Its three views are the
+entries of the period (first day up to, not including, the day it was closed), the balance at a boundary (end of the day before), and
+the movement since the baseline (from the day after the first day, for the free-money terms). New code asks `PeriodWindow`; it does
+not compute a boundary of its own.
+
 ### Category Budgets
 
 The plan is made of **Category Budgets** only: a category is flagged as a budget, and real bank transactions drive what it still
@@ -232,6 +240,18 @@ McpToken (table: mcp_tokens):
   - id, name, tokenHash (SHA-256; the token itself is never stored), createdAt, lastUsedAt
 ```
 
+## Database rules
+
+- **Foreign keys are ON** for the connections of the app (`Database.hikariConfig`). A `REFERENCES` in a migration is thus enforced:
+  write one only for a rule that the app keeps. A parent row is deleted after its children. Two links are on purpose NOT references:
+  a rate can be for a currency that is not enabled, and a bank transaction stays after its connection is gone (V33).
+- **Migrations run with foreign keys OFF** (`Database.migrateWithDataSource`), because SQLite changes a table by making it again. A
+  migration that makes a table again must first drop the reporting views that read it, and change `R__analytics_views.sql` (a
+  comment is sufficient) so that Flyway makes them again.
+- **An instant has one text form**: UTC with milliseconds, 24 characters (`DoobieMeta`, V32). The columns are compared as text, so
+  raw SQL that writes an instant must use this form.
+- The tables of the removed planned items hold old rows that break a reference (`expense_records`). No code reads or writes them.
+
 ## Analytics
 
 The Analytics page is served by a **bundled Metabase**, not by in-app charting. It is optional:
@@ -294,7 +314,9 @@ One owner, no user accounts.
 ## Errors and warnings in the UI
 
 `NoticeStrip` (in the layout, above every page) shows two things. A failed write: `ApiClient` reports EVERY write that the server
-refuses or does not answer to `Notices`, so a page does not have to. A failed read stays with the page. And the data warnings of
+refuses or does not answer to `Notices`, so a page does not have to. The client also counts every accepted write
+(`ApiClient.changes`): `DataService.refreshIfStale`, which a page calls when it opens, loads again only after a change or after a
+minute. A failed read stays with the page. And the data warnings of
 `GET /api/warnings` (`DataHealth`): faults that make a figure wrong, today a currency in use with no exchange rate (it counts 1 to 1).
 
 ## Bank entries

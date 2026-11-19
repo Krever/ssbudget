@@ -7,6 +7,7 @@ import io.circe.parser.decode
 import io.circe.syntax.*
 import ssbudget.shared.model.*
 
+import java.time.format.{DateTimeFormatter, DateTimeFormatterBuilder}
 import java.time.{Instant, LocalDate}
 
 object DoobieMeta {
@@ -51,7 +52,13 @@ object DoobieMeta {
   given Meta[SnapshotSource] = Meta[String].tiemap(SnapshotSource.fromString)(SnapshotSource.asString)
 
   // Date/Time types (stored as TEXT in SQLite)
-  given Meta[Instant]   = Meta[String].timap(Instant.parse)(_.toString)
+  //
+  // An instant has ONE text form: UTC with milliseconds, 'YYYY-MM-DDTHH:MM:SS.mmmZ', always 24 characters. The columns are compared as text
+  // (`recorded_at <= ?`, `ORDER BY booked_at`), and only text of one width sorts as time does. `Instant.toString` prints 0, 3, 6 or 9 digits
+  // of the second, so it must not be used here. Digits after the milliseconds are cut. V32 brought the rows of before to this form.
+  private val instantText: DateTimeFormatter        = new DateTimeFormatterBuilder().appendInstant(3).toFormatter
+  private[db] def instantToText(i: Instant): String = instantText.format(i)
+  given Meta[Instant]                               = Meta[String].timap(Instant.parse)(instantToText)
   // Bare calendar days, 'YYYY-MM-DD' — SQLite's date() and strftime() read them directly.
-  given Meta[LocalDate] = Meta[String].timap(LocalDate.parse)(_.toString)
+  given Meta[LocalDate]                             = Meta[String].timap(LocalDate.parse)(_.toString)
 }

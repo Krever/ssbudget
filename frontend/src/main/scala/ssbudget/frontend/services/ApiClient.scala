@@ -442,7 +442,9 @@ class ApiClient(implicit ec: ExecutionContext) {
       throw ApiException("The session ended. Log in again.")
     } else
       response.body match {
-        case DecodeResult.Value(Right(value)) => value
+        case DecodeResult.Value(Right(value)) =>
+          if reported(method, uri) then ApiClient.dataChanged()
+          value
         case DecodeResult.Value(Left(error))  => refused(error)
         case failure: DecodeResult.Failure    => refused(s"The answer of the server could not be read: $failure")
       }
@@ -455,6 +457,14 @@ object ApiClient {
     * object: the app has more than one (`Main` and `DataService` each make their own).
     */
   var onSessionEnded: () => Unit = () => ()
+
+  /** How many times the data of the server changed by an action of this page, as far as the page knows. `DataService` reads it to know when what it
+    * holds is old: it loads again only then, and not on each visit of a page. Every write that the server accepted counts by itself; a change that
+    * comes another way (a background job that ended) is counted by its observer with [[dataChanged]].
+    */
+  def changes: Int        = changeCount
+  def dataChanged(): Unit = changeCount += 1
+  private var changeCount = 0
 }
 
 case class ApiException(message: String) extends Exception(message)

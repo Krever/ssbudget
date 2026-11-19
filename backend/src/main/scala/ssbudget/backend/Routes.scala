@@ -15,7 +15,7 @@ import ssbudget.backend.db.{Database, Repositories}
 import ssbudget.backend.db.repository.{TransactionFilter, TransactionSearchRow}
 import ssbudget.backend.search.TransactionSearch
 import ssbudget.backend.service.BudgetQueries.*
-import ssbudget.backend.service.{BudgetSnapshotService, CategorySummaryService, CurrencyService, DataHealth, PeriodService}
+import ssbudget.backend.service.{BudgetSnapshotService, CategorySummaryService, CurrencyService, DataHealth, PeriodService, PeriodWindow}
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 import ssbudget.shared.rules.RuleMatcher
@@ -252,7 +252,7 @@ object Routes {
       q: Option[String],
   ): Result[TransactionListResponse] = {
     // The month dropdown carries period sentinels instead of a YYYY-MM bucket; resolve them to the same [from, to) window the category-spend figures
-    // use (see periodWindow), so drilling into a category budget lists exactly the transactions its number was computed from.
+    // use (see `PeriodWindow`), so drilling into a category budget lists exactly the transactions its number was computed from.
     val isSentinel = month.exists(m => m == MonthFilter.CurrentPeriod || m == MonthFilter.PreviousPeriod)
     val searchTerm = q.map(_.trim).filter(_.nonEmpty)
     val cap        = limit.getOrElse(transactionPageCap)
@@ -264,12 +264,12 @@ object Routes {
                      case Some(MonthFilter.PreviousPeriod) => repos.periods.findAll.map(previousClosedPeriod)
                      case _                                => IO.pure(Option.empty[Period])
                    }
-      window     = periodOpt.map(periodWindow)
+      window     = periodOpt.map(PeriodWindow.of)
       filter     = TransactionFilter(
                      accountUid = accountUid.filter(_.nonEmpty),
                      month = if isSentinel then None else month.filter(_.nonEmpty),
-                     from = window.map(_._1),
-                     to = window.flatMap(_._2),
+                     from = window.map(_.from),
+                     to = window.flatMap(_.until),
                      category = category.filter(_.nonEmpty),
                      hideInternal = hideInternal.getOrElse(false),
                    )

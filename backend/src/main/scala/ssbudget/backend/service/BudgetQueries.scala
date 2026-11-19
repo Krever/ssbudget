@@ -6,8 +6,6 @@ import ssbudget.backend.db.Repositories
 import ssbudget.shared.api.CategorySummary
 import ssbudget.shared.model.*
 
-import java.time.Instant
-
 /** Period boundaries and currency conversion — primitives that every figure the app reports is built on.
   *
   * They sit here rather than in the route file because three callers now need them: the HTTP handlers, the per-period retrospective, and the daily
@@ -38,20 +36,6 @@ object BudgetQueries {
   def previousClosedPeriod(periods: List[Period]): Option[Period] =
     periods.filter(_.endDate.isDefined).sortBy(_.startDate.toEpochMilli).lastOption
 
-  def startOfDayUtc(i: Instant): Instant =
-    java.time.LocalDate.ofInstant(i, java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant
-
-  /** Start of a period's first calendar day (UTC). Bank `booked_at` is date-at-midnight, but a period starts at the paycheck instant (an afternoon
-    * time), so comparing against the raw instant drops the whole start day's spend. Filtering from midnight of that day includes the start-day
-    * transactions (bank data is date-granular, so we can't tell pre- vs post-paycheck spend anyway).
-    */
-  def periodStartOfDay(p: Period): Instant = startOfDayUtc(p.startDate)
-
-  /** A period's `[from, to)` transaction window: midnight of its first day (see [[periodStartOfDay]]) up to, but excluding, midnight of the day it
-    * ended (open-ended while it's still running). Used both to total a category's spend and to list the transactions behind that total, so the two
-    * can't drift apart.
-    */
-  def periodWindow(p: Period): (Instant, Option[Instant]) = (periodStartOfDay(p), p.endDate.map(startOfDayUtc))
 }
 
 /** Per-category spend stats for the CURRENT period, as the Transactions page and the category budgets read them.
@@ -85,14 +69,15 @@ class CategorySummaryService(repos: Repositories) {
       currentMonth = firstOfMonth.atStartOfDay(java.time.ZoneOffset.UTC).toInstant
       currentOpt   = periods.find(_.endDate.isEmpty)
       prevOpt      = previousClosedPeriod(periods)
-      periodStart  = currentOpt.map(periodStartOfDay).getOrElse(currentMonth)
+      periodStart  = currentOpt.map(PeriodWindow.of(_).from).getOrElse(currentMonth)
       // NET spend (inflows subtract). All completed-month spend (current partial month excluded by `< currentMonth`), per (cat, currency, YYYY-MM).
       histRows    <- repos.bankTransactions.monthlySpendByCategory(java.time.Instant.EPOCH, currentMonth, includeInflows = true)
       curRows     <- repos.bankTransactions.spendByCategoryBetween(periodStart, None, includeInflows = true)
       curCounts   <- repos.bankTransactions.paymentCountsByCategoryBetween(periodStart, None)
       prevRows    <- prevOpt match {
                        case Some(p) =>
-                         val (from, to) = periodWindow(p)
+                         val window     = PeriodWindow.of(p)
+                         val (from, to) = (window.from, window.until)
                          repos.bankTransactions.spendByCategoryBetween(from, to, includeInflows = true)
                        case None    => IO.pure(List.empty[(CategoryId, Currency, Long)])
                      }

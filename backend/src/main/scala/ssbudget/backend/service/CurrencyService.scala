@@ -51,7 +51,13 @@ class CurrencyService(repos: Repositories, sttpBackend: SttpBackend[IO, Any]) {
                           result      <- if accountsUse then {
                                            IO.pure(Left(s"Currency $code is in use by accounts and cannot be disabled"))
                                          } else {
-                                           repos.currencySettings.delete(code).as(Right(()))
+                                           // Other stored rows can still name the currency (the balance history of an account in
+                                           // another state, the records of the removed planned items). The database then refuses the
+                                           // delete, and the user gets a plain answer.
+                                           repos.currencySettings
+                                             .delete(code)
+                                             .as(Right(()))
+                                             .handleError(_ => Left(s"Currency $code is in use by stored records and cannot be disabled"))
                                          }
                         } yield result
                     }

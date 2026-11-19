@@ -35,7 +35,7 @@ object PeriodsPage {
     div(
       cls := "container-fluid mt-3",
       onMountCallback { _ =>
-        val _ = dataService.initialize()
+        val _ = dataService.refreshIfStale()
         load()
       },
       div(

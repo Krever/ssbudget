@@ -439,7 +439,7 @@ object BudgetSnapshotService {
 
     /** The movements of period `p` up to `day`, from the day AFTER the period opened: the first day is the baseline, and the paycheck lands on it. */
     def movementsIn(p: Period, day: LocalDate): List[Movement] =
-      movements.filter(m => m.day.isAfter(p.startDay) && !m.day.isAfter(day))
+      movements.filter(m => PeriodWindow.of(p).sinceBaseline(m.day, day))
 
     /** Is this a movement of a group with no budget, on a spending account? Such a group is unplanned spend, or unplanned income. */
     def isUnbudgeted(m: Movement): Boolean =

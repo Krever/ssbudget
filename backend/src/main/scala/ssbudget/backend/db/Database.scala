@@ -39,6 +39,10 @@ object Database {
     config.setJdbcUrl(jdbcUrl)
     config.setMaximumPoolSize(1)
     config.setConnectionInitSql("PRAGMA busy_timeout = 10000")
+    // SQLite checks a REFERENCES only when this is on, and it is a setting of the connection, not of the file. The driver sets it when it opens
+    // a connection. With it on, a row cannot name a parent that is not there, and a parent with children cannot be deleted: the code deletes
+    // the children first, or the schema has no reference (see V33).
+    config.addDataSourceProperty("foreign_keys", "true")
     config
   }
 
@@ -73,13 +77,26 @@ object Database {
     Flyway.configure().dataSource(xa.kernel).load().info().all().toList.flatMap(i => Option(i.getVersion).map(_.getVersion)).toSet
   }
 
+  /** Runs the migrations with the foreign keys OFF, and turns them on again after.
+    *
+    * A migration that makes a table again (SQLite has no other way to change a column or a constraint) drops the old table. With the keys on, that is
+    * a delete of every row, and it fails when another table refers to them. SQLite says to do such a change with the keys off. The setting cannot
+    * change inside a transaction, so it is set on the connection before Flyway starts one. The pool has one connection, so the connection that Flyway
+    * gets is the one that the two statements here get.
+    */
   private def migrateWithDataSource(xa: HikariTransactor[IO]): IO[Unit] = IO.blocking {
-    val hikariDataSource = xa.kernel
-    Flyway
-      .configure()
-      .dataSource(hikariDataSource)
-      .load()
-      .migrate()
-    ()
+    val hikariDataSource               = xa.kernel
+    def foreignKeys(on: Boolean): Unit = {
+      val connection = hikariDataSource.getConnection
+      try {
+        val statement = connection.createStatement()
+        try { val _ = statement.execute(s"PRAGMA foreign_keys = ${if on then "ON" else "OFF"}") }
+        finally statement.close()
+      } finally connection.close()
+    }
+    foreignKeys(on = false)
+    try {
+      val _ = Flyway.configure().dataSource(hikariDataSource).load().migrate()
+    } finally foreignKeys(on = true)
   }
 }

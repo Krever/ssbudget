@@ -780,6 +780,8 @@ object SettingsPage {
         xhr.onload = { _ =>
           importingVar.set(false)
           if xhr.status == 200 then {
+            // This request does not go through the API client, so it counts the change itself: all the data is new.
+            ApiClient.dataChanged()
             successVar.set(Some(xhr.responseText))
           } else {
             errorVar.set(Some(s"Import failed: ${xhr.responseText}"))

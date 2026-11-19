@@ -97,8 +97,8 @@ object DashboardPage {
   def apply(): HtmlElement = {
     div(
       cls := "container-fluid mt-3",
-      // Refresh on each visit so changes made elsewhere (e.g. linking a bank account) are reflected without a manual page reload.
-      onMountCallback(_ => { val _ = dataService.initialize(); () }),
+      // On each visit, load again when something changed elsewhere (a bank account was linked, a sync ended) or the data is old.
+      onMountCallback(_ => { val _ = dataService.refreshIfStale(); () }),
       div(
         cls := "d-flex justify-content-between align-items-center mb-3",
         h4(cls := "mb-0", "Dashboard"),

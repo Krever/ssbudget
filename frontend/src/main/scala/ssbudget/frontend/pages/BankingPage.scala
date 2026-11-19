@@ -70,7 +70,12 @@ object BankingPage {
         case Success(js) =>
           val wasRunning = jobsVar.now().exists(_.status == ImportJobStatus.Running)
           val running    = js.exists(_.status == ImportJobStatus.Running)
-          if wasRunning && !running then { loadConnections(); loadAccounts() }
+          if wasRunning && !running then {
+            // The job wrote balances and transactions on the server: what the data service holds is old now.
+            ApiClient.dataChanged()
+            loadConnections()
+            loadAccounts()
+          }
           jobsVar.set(js)
         case Failure(_)  => () // polling is best-effort
       }

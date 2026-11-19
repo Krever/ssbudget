@@ -17,6 +17,8 @@
 --     provisioner applies a `Coercion/ISO8601->Date` to each, which is what makes time-series
 --     grouping and date filters work.
 
+-- V33 drops these views before it makes two tables again; this file then makes them again.
+
 DROP VIEW IF EXISTS v_transactions;
 CREATE VIEW v_transactions AS
 SELECT

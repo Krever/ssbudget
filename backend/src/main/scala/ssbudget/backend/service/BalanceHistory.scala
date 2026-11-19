@@ -33,7 +33,7 @@ final case class BalanceHistory(
   def asOf(account: AccountId, at: Instant): Option[Long] = {
     val history = snapshots.getOrElse(account, Nil)
     val moves   = ledger.getOrElse(account, Map.empty)
-    val lastDay = BalanceHistory.dayOf(at).minusDays(1)
+    val lastDay = PeriodWindow.lastLedgerDayBefore(at)
     history
       .findLast(!_.recordedAt.isAfter(at))
       .map(record => BalanceHistory.carriedForward(record, moves, lastDay))

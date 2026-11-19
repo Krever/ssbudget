@@ -11,6 +11,12 @@ trait DataService {
   // Loads all data from the server.
   def initialize(): Future[Unit]
 
+  /** Loads the data again when it can be old: something was written since the last load (see `ApiClient.changes`), or the load was some time ago. A
+    * page calls this when it opens. Before, each page did a full load on each visit, and the first page did it a second time right after the load of
+    * the app.
+    */
+  def refreshIfStale(): Future[Unit]
+
   // Accounts (spending + savings, unified)
   def accounts: Signal[List[Account]]                                             // all accounts
   def spendingAccounts: Signal[List[Account]]                                     // role == Spending

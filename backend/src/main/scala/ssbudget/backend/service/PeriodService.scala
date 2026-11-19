@@ -46,7 +46,8 @@ class PeriodService(repos: Repositories) {
     */
   def startNew(asOf: Option[LocalDate]): IO[Either[String, Period]] =
     for {
-      now     <- IO.realTimeInstant
+      // To the millisecond, as the database stores an instant: the period that this call returns is then equal to the stored one.
+      now     <- IO.realTimeInstant.map(_.truncatedTo(java.time.temporal.ChronoUnit.MILLIS))
       current <- repos.periods.findCurrent
       result  <- startInstant(asOf, now, current) match {
                    case Left(reason) => IO.pure(Left(reason))
@@ -70,14 +71,14 @@ class PeriodService(repos: Repositories) {
       accounts  <- repos.accounts.findAll
       periodOpt <- repos.periods.findCurrent
       baselines <- periodOpt.toList.flatTraverse { p =>
-                     val savings    = accounts.filter(a => AccountRole.held(a.role))
+                     val savings = accounts.filter(a => AccountRole.held(a.role))
                      // The balance at the period's start. An account whose first balance was recorded after that start (bank balances are
                      // recorded on sync, so this is usual for a new link) gets it from the ledger: see [[BalanceHistory]].
-                     val (from, to) = periodWindow(p)
+                     val window  = PeriodWindow.of(p)
                      for {
                        history   <- BalanceHistory.load(repos, savings)
                        converter <- primaryConverter(repos)
-                       moved     <- movedToInvestments(converter._2)(from, to)
+                       moved     <- movedToInvestments(converter._2)(window.from, window.until)
                      } yield savings.flatMap { acc =>
                        history
                          .asOf(acc.id, p.startDate)
@@ -128,7 +129,7 @@ class PeriodService(repos: Repositories) {
       now       <- IO.realTimeInstant
       // The entries of all listed periods are read ONCE too, and each period sums the rows of its own days. With a set of queries for each
       // period, a page of 16 periods ran about 200 statements on the one database connection.
-      flows     <- periods.map(periodStartOfDay).minOption.fold(IO.pure(List.empty[DailyFlow]))(repos.bankTransactions.dailyFlowsSince)
+      flows     <- periods.map(PeriodWindow.of(_).from).minOption.fold(IO.pure(List.empty[DailyFlow]))(repos.bankTransactions.dailyFlowsSince)
       uidIndex  <- BalanceHistory.accountUidIndex(repos)
     } yield periods.map(periodSummary(converter, accounts, cats, history, now, flows, uidIndex))
 
@@ -143,7 +144,6 @@ class PeriodService(repos: Repositories) {
   )(p: Period): PeriodSummary = {
     val (primary, toPrimary) = converter
 
-    val (from, to) = periodWindow(p)
     val spending   = accounts.filter(_.role == AccountRole.Spending)
     val savings    = accounts.filter(_.role == AccountRole.Savings)
     val investment = accounts.filter(_.role == AccountRole.Investment)
@@ -169,11 +169,8 @@ class PeriodService(repos: Repositories) {
     val endBalances                                                = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
     val holdingEnds                                                = holding.flatMap(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
 
-    // The entries of this period: those of its days. The window is from the day the period started to the day before the day it ended; a bank
-    // entry has a date and no time, so the days say all of it.
-    val fromDay = LocalDate.ofInstant(from, ZoneOffset.UTC)
-    val toDay   = to.map(LocalDate.ofInstant(_, ZoneOffset.UTC))
-    val rows    = allFlows.filter(f => !f.day.isBefore(fromDay) && toDay.forall(f.day.isBefore))
+    // The entries of this period: those of its days (see [[PeriodWindow]]).
+    val rows = allFlows.filter(f => PeriodWindow.of(p).holds(f.day))
 
     // A transfer category stands for the transfers to and from one investment account: neither income nor spend.
     val transferAccount                                                                                 = cats.flatMap(c => c.transferAccount.map(c.id -> _)).toMap
