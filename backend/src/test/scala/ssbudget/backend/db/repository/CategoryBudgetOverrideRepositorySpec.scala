@@ -68,19 +68,4 @@ class CategoryBudgetOverrideRepositorySpec extends RepositorySpec {
     }
   }
 
-  "deleteByCategory removes the category's overrides across periods" in {
-    val repo = new CategoryBudgetOverrideRepositoryImpl(xa)
-    for {
-      _      <- fixtures
-      _      <- repo.upsert(period1, catA, 500L, at)
-      _      <- repo.upsert(period2, catA, 900L, at)
-      _      <- repo.upsert(period1, catB, 700L, at)
-      _      <- repo.deleteByCategory(catA)
-      first  <- repo.findByPeriod(period1)
-      second <- repo.findByPeriod(period2)
-    } yield {
-      first shouldBe Map(catB -> 700L)
-      second shouldBe empty
-    }
-  }
 }

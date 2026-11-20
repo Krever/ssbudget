@@ -20,7 +20,6 @@ trait CategoryBudgetOverrideRepository {
   def findAllStamped: IO[List[(PeriodId, CategoryId, Long, Instant)]]
   def upsert(periodId: PeriodId, categoryId: CategoryId, remainingCents: Long, updatedAt: Instant): IO[Unit]
   def delete(periodId: PeriodId, categoryId: CategoryId): IO[Unit]
-  def deleteByCategory(categoryId: CategoryId): IO[Unit]
 }
 
 class CategoryBudgetOverrideRepositoryImpl(xa: Transactor[IO]) extends CategoryBudgetOverrideRepository {
@@ -48,6 +47,4 @@ class CategoryBudgetOverrideRepositoryImpl(xa: Transactor[IO]) extends CategoryB
   override def delete(periodId: PeriodId, categoryId: CategoryId): IO[Unit] =
     sql"DELETE FROM category_budget_overrides WHERE period_id = $periodId AND category_id = $categoryId".update.run.transact(xa).void
 
-  override def deleteByCategory(categoryId: CategoryId): IO[Unit] =
-    sql"DELETE FROM category_budget_overrides WHERE category_id = $categoryId".update.run.transact(xa).void
 }

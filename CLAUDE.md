@@ -246,8 +246,9 @@ McpToken (table: mcp_tokens):
   write one only for a rule that the app keeps. A parent row is deleted after its children. Two links are on purpose NOT references:
   a rate can be for a currency that is not enabled, and a bank transaction stays after its connection is gone (V33).
 - **Migrations run with foreign keys OFF** (`Database.migrateWithDataSource`), because SQLite changes a table by making it again. A
-  migration that makes a table again must first drop the reporting views that read it, and change `R__analytics_views.sql` (a
-  comment is sufficient) so that Flyway makes them again.
+  migration that makes a table again must first drop the reporting views that read it. After each migrate the app makes the views
+  again when one is missing (`Database.restoreMissingViews`), so `R__analytics_views.sql` does not have to change with it.
+- `MigrationOnDataSpec` runs the migrations on a database with rows. A migration that changes rows adds its rows and checks there.
 - **An instant has one text form**: UTC with milliseconds, 24 characters (`DoobieMeta`, V32). The columns are compared as text, so
   raw SQL that writes an instant must use this form.
 - The tables of the removed planned items hold old rows that break a reference (`expense_records`). No code reads or writes them.
@@ -316,8 +317,12 @@ One owner, no user accounts.
 `NoticeStrip` (in the layout, above every page) shows two things. A failed write: `ApiClient` reports EVERY write that the server
 refuses or does not answer to `Notices`, so a page does not have to. The client also counts every accepted write
 (`ApiClient.changes`): `DataService.refreshIfStale`, which a page calls when it opens, loads again only after a change or after a
-minute. A failed read stays with the page. And the data warnings of
-`GET /api/warnings` (`DataHealth`): faults that make a figure wrong, today a currency in use with no exchange rate (it counts 1 to 1).
+minute. A failed read stays with the page. And the warnings of
+`GET /api/warnings` (`DataHealth`): faults that make a figure wrong (a currency in use with no exchange rate counts 1 to 1), and a
+background task that failed (`BackgroundHealth`: the daily record), until it succeeds again.
+
+A write of more than one step is ONE transaction, in one repository method (`deleteWithDependents`, `importAll`, `rollover`): a
+service does not chain repository writes that must all happen or not at all.
 
 ## Bank entries
 

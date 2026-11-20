@@ -71,19 +71,9 @@ final case class Money(amountCents: Long, currency: Currency) derives Codec.AsOb
     Money(amountCents - other.amountCents, currency)
   }
 
-  def *(factor: Double): Money = {
-    Money((amountCents * factor).toLong, currency)
-  }
-
-  def /(divisor: Double): Money = {
-    Money((amountCents / divisor).toLong, currency)
-  }
 }
 
 object Money {
-  def fromDouble(amount: Double, currency: Currency): Money = {
-    Money((amount * 100).toLong, currency)
-  }
 
   def fromCents(cents: Long, currency: Currency): Money = Money(cents, currency)
 

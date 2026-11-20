@@ -1,6 +1,7 @@
 package ssbudget.backend.db.repository
 
 import cats.effect.IO
+import cats.implicits.*
 import doobie.*
 import doobie.implicits.*
 import ssbudget.backend.db.DoobieMeta.given
@@ -26,7 +27,9 @@ trait BankConnectionRepository {
   /** Detach every card that was a member of the given group (target -> Unlinked). */
   def clearCardGroupMembers(cardGroupId: CardGroupId): IO[Unit]
   def updateLinkSynced(link: BankAccountLink): IO[Unit]
-  def deleteLinksByConnection(id: BankConnectionId): IO[Unit]
+
+  /** Deletes the connection and its account links, in ONE transaction. The transactions that it imported stay: the ledger is history. */
+  def deleteWithLinks(id: BankConnectionId): IO[Unit]
 }
 
 class BankConnectionRepositoryImpl(xa: Transactor[IO]) extends BankConnectionRepository {
@@ -137,7 +140,8 @@ class BankConnectionRepositoryImpl(xa: Transactor[IO]) extends BankConnectionRep
     """.update.run.transact(xa).void
   }
 
-  override def deleteLinksByConnection(id: BankConnectionId): IO[Unit] = {
-    sql"DELETE FROM bank_account_links WHERE connection_id = $id".update.run.transact(xa).void
-  }
+  override def deleteWithLinks(id: BankConnectionId): IO[Unit] =
+    (sql"DELETE FROM bank_account_links WHERE connection_id = $id".update.run *>
+      sql"DELETE FROM bank_connections WHERE id = $id".update.run).transact(xa).void
+
 }

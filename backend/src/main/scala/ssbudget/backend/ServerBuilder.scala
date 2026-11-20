@@ -135,7 +135,6 @@ object ServerBuilder {
             sessionService,
             currencyService,
             bankingService,
-            importService,
             importJobService,
             ruleEngine,
             categorization,

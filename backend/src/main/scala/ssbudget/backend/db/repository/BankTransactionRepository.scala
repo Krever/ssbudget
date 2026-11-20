@@ -105,12 +105,6 @@ trait BankTransactionRepository {
     */
   def spendByCategoryBetween(from: Instant, to: Option[Instant], includeInflows: Boolean = false): IO[List[(CategoryId, Currency, Long)]]
 
-  /** Non-internal inflow / outflow totals per currency over `[from, to)`: `(currency, inflow, outflow)`, both positive cents. Internal transfers are
-    * excluded, so money moved between own accounts is neither income nor spend. For the same reason the transactions of a transfer category
-    * (`categories.transfer_account_id`) are excluded. Uncategorized transactions ARE counted — this is cash flow, not a category breakdown.
-    */
-  def flowsBetween(from: Instant, to: Option[Instant]): IO[List[(Currency, Long, Long)]]
-
   /** Signed net of the transactions of transfer categories over `[from, to)`, per (the account the category names, currency). The sign is that of the
     * bank side: a withdrawal from the investment account arrives at the bank and is positive. Internal transfers are not counted. A transaction on
     * the ledger of the named account itself is not counted either: it is already a movement of that account (see [[netByAccountBetween]]).
@@ -170,11 +164,9 @@ trait BankTransactionRepository {
   /** Assign/clear a category as a manual action: stamps `category_source = 'manual'` (or NULL when clearing) so the rule engine never overwrites it.
     */
   def setCategory(id: BankTransactionId, categoryId: Option[CategoryId]): IO[Unit]
-  def clearCategory(categoryId: CategoryId): IO[Unit]
 
   /** Set (or clear, when None) a transaction's free-text note. */
   def setNote(id: BankTransactionId, note: Option[String]): IO[Unit]
-  def deleteByConnection(connectionId: BankConnectionId): IO[Unit]
 
   /** Move every transaction of a re-authorized account onto its new connection + account uid. Enable Banking mints a fresh account uid on each
     * consent renewal, so a reconnect would otherwise orphan the old history and re-import it as duplicates; re-keying it here preserves the history
@@ -302,18 +294,6 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
       fr"GROUP BY category_id, currency").query[(CategoryId, Currency, Long)].to[List].transact(xa)
   }
 
-  override def flowsBetween(from: Instant, to: Option[Instant]): IO[List[(Currency, Long, Long)]] = {
-    val upper = to.fold(Fragment.empty)(t => fr"AND booked_at < $t")
-    (fr"""SELECT currency,
-            COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
-            COALESCE(SUM(CASE WHEN amount_cents < 0 THEN -amount_cents ELSE 0 END), 0)
-          FROM bank_transactions
-          WHERE is_internal = 0
-            AND (category_id IS NULL OR category_id NOT IN (SELECT id FROM categories WHERE transfer_account_id IS NOT NULL))
-            AND booked_at >= $from""" ++ upper ++
-      fr"GROUP BY currency").query[(Currency, Long, Long)].to[List].transact(xa)
-  }
-
   override def transfersByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(AccountId, Currency, Long)]] = {
     val upper = to.fold(Fragment.empty)(t => fr"AND t.booked_at < $t")
     (fr"""SELECT c.transfer_account_id, t.currency, SUM(t.amount_cents)
@@ -414,9 +394,6 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
     sql"UPDATE bank_transactions SET category_id = $categoryId, category_source = $source WHERE id = $id".update.run.transact(xa).void
   }
 
-  override def clearCategory(categoryId: CategoryId): IO[Unit] =
-    sql"UPDATE bank_transactions SET category_id = NULL, category_source = NULL WHERE category_id = $categoryId".update.run.transact(xa).void
-
   override def setNote(id: BankTransactionId, note: Option[String]): IO[Unit] =
     sql"UPDATE bank_transactions SET note = $note WHERE id = $id".update.run.transact(xa).void
 
@@ -427,9 +404,6 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
       val rows = updates.map { case (id, cat, src) => (cat, src, id) }
       Update[(Option[CategoryId], Option[CategorySource], BankTransactionId)](sql).updateMany(rows).transact(xa).void
     }
-
-  override def deleteByConnection(connectionId: BankConnectionId): IO[Unit] =
-    sql"DELETE FROM bank_transactions WHERE connection_id = $connectionId".update.run.transact(xa).void
 
   override def repointAccount(oldUid: String, newConnectionId: BankConnectionId, newUid: String): IO[Unit] =
     sql"""UPDATE bank_transactions SET connection_id = $newConnectionId, eb_account_uid = $newUid

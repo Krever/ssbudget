@@ -114,7 +114,6 @@ class BankingIntegrationSpec extends AnyFreeSpec with Matchers with BeforeAndAft
         SessionService(repos.sessions),
         currencyService,
         banking,
-        importService,
         importJobService,
         ruleEngine,
         new CategorizationService(repos, ruleEngine),

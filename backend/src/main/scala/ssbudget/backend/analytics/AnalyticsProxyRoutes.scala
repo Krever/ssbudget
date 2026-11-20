@@ -86,42 +86,60 @@ object AnalyticsProxyRoutes {
       backend: SttpBackend[IO, Fs2Streams[IO]],
       upstream: SttpUri,
       prefixLen: Int,
-  ): IO[Response[IO]] =
+  ): IO[Response[IO]] = {
+    val stripped = req.uri.path.toString.drop(prefixLen)
+    val target   = upstream
+      .withWholePath(if stripped.isEmpty then "/" else stripped)
+      .withParams(req.uri.query.toList.map { case (k, v) => k -> v.getOrElse("") }*)
+
+    def send(token: String) = {
+      val outgoing = emptyRequest
+        .method(SttpMethod(req.method.name), target)
+        .headers(forwardedHeaders(req.headers)*)
+        .header(SessionHeader, token)
+        // A proxy passes a redirect back to the browser: following it here would resolve it against
+        // the loopback upstream and strip the path prefix from what the browser finally sees.
+        .followRedirects(false)
+        .readTimeout(UpstreamTimeout)
+        .response(asStreamAlwaysUnsafe(Fs2Streams[IO]))
+      (if hasBody(req) then outgoing.streamBody(Fs2Streams[IO])(req.body) else outgoing).send(backend)
+    }
+
+    val unavailable = (err: String) => InternalServerError(s"Analytics unavailable: $err")
+
     client.sessionToken.flatMap {
-      case Left(err)    => InternalServerError(s"Analytics unavailable: $err")
+      case Left(err)    => unavailable(err)
       case Right(token) =>
-        val stripped = req.uri.path.toString.drop(prefixLen)
-        val target   = upstream
-          .withWholePath(if stripped.isEmpty then "/" else stripped)
-          .withParams(req.uri.query.toList.map { case (k, v) => k -> v.getOrElse("") }*)
-
-        val outgoing = emptyRequest
-          .method(SttpMethod(req.method.name), target)
-          .headers(forwardedHeaders(req.headers)*)
-          .header(SessionHeader, token)
-          // A proxy passes a redirect back to the browser: following it here would resolve it against
-          // the loopback upstream and strip the path prefix from what the browser finally sees.
-          .followRedirects(false)
-          .readTimeout(UpstreamTimeout)
-          .response(asStreamAlwaysUnsafe(Fs2Streams[IO]))
-
-        val withBody =
-          if hasBody(req) then outgoing.streamBody(Fs2Streams[IO])(req.body)
-          else outgoing
-
-        withBody.send(backend).map { resp =>
-          Response[IO](
-            status = Status.fromInt(resp.code.code).getOrElse(Status.BadGateway),
-            headers = Headers(resp.headers.collect {
-              case h if !HopByHop.contains(CIString(h.name)) && !DroppedResponseHeaders.exists(h.is) =>
-                Header.Raw(CIString(h.name), h.value)
-            }),
-            // The body is a stream, so Metabase's multi-megabyte assets pass through without ever
-            // being held in memory here.
-            body = resp.body,
-          )
+        send(token).flatMap {
+          // Metabase ends a session after some days, and the token here is cached for the life of the process. Without this, every page of
+          // "Explore" answered 401 until the app was started again. The token is dropped, so the next request logs in; a request with no body
+          // is also sent again at once with a new token. A body is a stream that was already read, so such a request cannot be sent twice.
+          case refused if refused.code.code == 401 =>
+            client.forgetSession *> {
+              if hasBody(req) then IO.pure(answer(refused))
+              else
+                refused.body.compile.drain *> client.sessionToken.flatMap {
+                  case Left(err)    => unavailable(err)
+                  case Right(fresh) => send(fresh).map(answer)
+                }
+            }
+          case resp                                => IO.pure(answer(resp))
         }
     }
+  }
+
+  /** The answer of Metabase as the answer of the proxy. The body is a stream, so Metabase's multi-megabyte assets pass through without ever being
+    * held in memory here.
+    */
+  private def answer(resp: sttp.client3.Response[fs2.Stream[IO, Byte]]): Response[IO] =
+    Response[IO](
+      status = Status.fromInt(resp.code.code).getOrElse(Status.BadGateway),
+      headers = Headers(resp.headers.collect {
+        case h if !HopByHop.contains(CIString(h.name)) && !DroppedResponseHeaders.exists(h.is) =>
+          Header.Raw(CIString(h.name), h.value)
+      }),
+      body = resp.body,
+    )
 
   /** Only forward a body when the request actually carries one: a stream body on a GET makes the upstream expect content that never arrives. */
   private def hasBody(req: Request[IO]): Boolean =

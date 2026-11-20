@@ -23,9 +23,6 @@ object MoneyFormatter {
   /** Get current primary currency value (for non-reactive contexts) */
   def primary: Currency = primaryCurrencyVar.now()
 
-  /** Format cents in the primary currency */
-  def formatPrimary(cents: Long): HtmlElement = format(cents, primaryCurrencyVar.now())
-
   /** Format cents as a bare amount, no currency code (e.g. "1,234.56") — for the left half of a pair whose code follows on the right. */
   def formatBare(cents: Long): String = f"${cents / 100.0}%,.2f"
 
@@ -48,23 +45,6 @@ object MoneyFormatter {
   /** Format money as a Laminar element with currency conversion if needed. */
   def format(money: Money): HtmlElement = {
     formatWithContext(money, primaryCurrencyVar.now(), exchangeRatesVar.now())
-  }
-
-  /** Format a signed delta as a Laminar element: coloured by sign, and — like [[format]] — with a muted ~equivalent sub-line when the currency isn't
-    * the primary one.
-    */
-  def formatDelta(money: Money): HtmlElement = {
-    val colour  = amountCls(money.amountCents)
-    val primary = primaryCurrencyVar.now()
-    if money.currency == primary then span(cls := colour, formatSigned(money.amountCents))
-    else {
-      val converted = convertToPrimary(money, primary, exchangeRatesVar.now())
-      span(
-        cls := s"money-foreign d-inline-flex flex-column align-items-end $colour",
-        span(cls := "money-amount", formatSigned(money.amountCents)),
-        span(cls := "money-equivalent text-muted small", s"~${formatSigned(converted.amountCents)}"),
-      )
-    }
   }
 
   /** Format cents as a Laminar element with currency conversion if needed. */

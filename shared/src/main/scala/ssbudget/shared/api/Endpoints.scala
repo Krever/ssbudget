@@ -371,14 +371,6 @@ object Endpoints {
         .errorOut(AuthEndpoints.apiError)
   }
 
-  object test {
-    // Test reset endpoint - still needs to be protected in non-test mode
-    val reset: Secured[Unit, Unit] =
-      secureEndpoint.post
-        .in("test" / "reset")
-        .errorOut(AuthEndpoints.apiError)
-  }
-
   object database {
     val download: Secured[Unit, (String, Array[Byte])] =
       secureEndpoint.get
@@ -450,7 +442,6 @@ object Endpoints {
     rules.exportRules,
     rules.importRules,
     analytics.config,
-    test.reset,
   )
 
   /** Client-side endpoint definitions for browser use.

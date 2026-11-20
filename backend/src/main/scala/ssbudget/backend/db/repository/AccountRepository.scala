@@ -14,7 +14,6 @@ trait AccountRepository {
   def create(account: Account): IO[Unit]
   def findById(id: AccountId): IO[Option[Account]]
   def findAll: IO[List[Account]]
-  def findByRole(role: AccountRole): IO[List[Account]]
   def update(account: Account): IO[Unit]
   def delete(id: AccountId): IO[Unit]
   def existsWithCurrency(currency: Currency): IO[Boolean]
@@ -24,6 +23,16 @@ trait AccountRepository {
 
   /** Change only the provenance (e.g. reverting to Manual when a bank link is detached). */
   def setBalanceSource(id: AccountId, source: BalanceSource): IO[Unit]
+
+  /** Creates the account and records its balance as the first entry of its history, in ONE transaction. Without that first record, the first balance
+    * that is set later would be the baseline of the period, and money put into a new account would never show as a change.
+    */
+  def createWithOpeningBalance(account: Account, at: Instant): IO[Unit]
+
+  /** Deletes the account with its balance history, in ONE transaction. Its transfer categories become ordinary categories. With separate commits, a
+    * failure after the first step left an account with no history.
+    */
+  def deleteWithHistory(id: AccountId): IO[Unit]
 }
 
 class AccountRepositoryImpl(xa: Transactor[IO]) extends AccountRepository {
@@ -43,9 +52,6 @@ class AccountRepositoryImpl(xa: Transactor[IO]) extends AccountRepository {
 
   override def findAll: IO[List[Account]] =
     (fr"SELECT" ++ columns ++ fr"FROM accounts ORDER BY name").query[Account].to[List].transact(xa)
-
-  override def findByRole(role: AccountRole): IO[List[Account]] =
-    (fr"SELECT" ++ columns ++ fr"FROM accounts WHERE role = $role ORDER BY name").query[Account].to[List].transact(xa)
 
   override def update(account: Account): IO[Unit] = {
     sql"""
@@ -76,6 +82,23 @@ class AccountRepositoryImpl(xa: Transactor[IO]) extends AccountRepository {
     } yield ()
     program.transact(xa)
   }
+
+  override def createWithOpeningBalance(account: Account, at: Instant): IO[Unit] = {
+    val snapId = BalanceSnapshotId(UUID.randomUUID().toString)
+    val create = sql"""
+      INSERT INTO accounts (id, name, currency, role, balance_cents, balance_source, balance_updated_at)
+      VALUES (${account.id}, ${account.name}, ${account.currency}, ${account.role}, ${account.balanceCents},
+              ${account.balanceSource}, $at)
+    """.update.run
+    val record = sql"""INSERT INTO balance_snapshots (id, account_id, amount, currency, recorded_at)
+                       VALUES ($snapId, ${account.id}, ${account.balanceCents}, ${account.currency}, $at)""".update.run
+    (create *> record).transact(xa).void
+  }
+
+  override def deleteWithHistory(id: AccountId): IO[Unit] =
+    (sql"DELETE FROM balance_snapshots WHERE account_id = $id".update.run *>
+      sql"UPDATE categories SET transfer_account_id = NULL WHERE transfer_account_id = $id".update.run *>
+      sql"DELETE FROM accounts WHERE id = $id".update.run).transact(xa).void
 
   override def setBalanceSource(id: AccountId, source: BalanceSource): IO[Unit] =
     sql"UPDATE accounts SET balance_source = $source WHERE id = $id".update.run.transact(xa).void

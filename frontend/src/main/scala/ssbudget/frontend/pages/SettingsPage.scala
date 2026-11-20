@@ -814,7 +814,6 @@ object SettingsPage {
             tpe                := "button",
             cls                := "btn btn-outline-primary",
             dataAttr("action") := "export-database",
-            i(cls := "bi bi-download me-2"),
             "Export Database",
             // The answer is a file to save (it comes with "attachment"), so the page stays.
             onClick --> { _ => sensitive(() => dom.window.location.assign("/api/database/export")) },
@@ -831,7 +830,6 @@ object SettingsPage {
                 )
               } else {
                 span(
-                  i(cls := "bi bi-upload me-2"),
                   "Import Database",
                 )
               }

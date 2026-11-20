@@ -14,16 +14,6 @@ object Loading {
   def spinner: HtmlElement =
     span(cls := "spinner-border spinner-border-sm", role := "status")
 
-  /** Render content based on loading state */
-  def render[T](state: Signal[LoadingState[T]])(content: T => HtmlElement): HtmlElement =
-    div(
-      child <-- state.map {
-        case LoadingState.Loading      => spinner
-        case LoadingState.Loaded(data) => content(data)
-        case LoadingState.Error(msg)   => span(cls := "text-danger", msg)
-      },
-    )
-
   /** Button that shows spinner while action is in progress */
   def actionButton(
       label: String,

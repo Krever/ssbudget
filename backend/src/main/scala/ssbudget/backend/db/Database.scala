@@ -97,6 +97,39 @@ object Database {
     foreignKeys(on = false)
     try {
       val _ = Flyway.configure().dataSource(hikariDataSource).load().migrate()
+      restoreMissingViews(hikariDataSource)
     } finally foreignKeys(on = true)
+  }
+
+  private val viewsScript = "db/migration/R__analytics_views.sql"
+
+  /** Makes the reporting views again when one of them is not there.
+    *
+    * The views are derived from the tables, and Flyway makes them from one repeatable script, which it runs again only when the text of the script
+    * changes. A migration that makes a table again must drop the views that read it. If the script was not changed with that migration, Flyway would
+    * leave the views dropped, and the Analytics page would fail with no sign at start. So the views that the script names are checked here after each
+    * migrate, and the script is run when one is missing. It drops each view before it makes it, so a second run is safe.
+    */
+  private def restoreMissingViews(dataSource: javax.sql.DataSource): Unit = {
+    val script     = scala.io.Source.fromResource(viewsScript, getClass.getClassLoader)
+    val text       =
+      try script.getLines().filterNot(_.trim.startsWith("--")).mkString("\n")
+      finally script.close()
+    val expected   = "(?i)CREATE\\s+VIEW\\s+(\\w+)".r.findAllMatchIn(text).map(_.group(1)).toSet
+    val connection = dataSource.getConnection
+    try {
+      val statement = connection.createStatement()
+      try {
+        val rows    = statement.executeQuery("SELECT name FROM sqlite_master WHERE type = 'view'")
+        val present = Iterator.continually(rows).takeWhile(_.next()).map(_.getString(1)).toSet
+        rows.close()
+        if !expected.subsetOf(present) then {
+          // The driver runs one statement in a call.
+          text.split(";").map(_.trim).filter(_.nonEmpty).foreach { sql =>
+            val _ = statement.execute(sql)
+          }
+        }
+      } finally statement.close()
+    } finally connection.close()
   }
 }

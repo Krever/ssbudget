@@ -243,7 +243,9 @@ trait DataService {
       .map { case (balance, toReceive, toPay, reserve) => balance + toReceive - toPay - reserve }
 
   final def dailyBudget: Signal[Money] =
-    freeMoney.combineWith(daysRemainingInPeriod).map { case (free, days) => if days > 0 then free / days else Money.zero(free.currency) }
+    freeMoney.combineWith(daysRemainingInPeriod).map { case (free, days) =>
+      if days > 0 then Money(free.amountCents / days, free.currency) else Money.zero(free.currency)
+    }
 }
 
 object DataService {

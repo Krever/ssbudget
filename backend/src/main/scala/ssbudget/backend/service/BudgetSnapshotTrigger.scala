@@ -18,7 +18,7 @@ import scala.concurrent.duration.*
   * Three properties make this safe to attach to every matched route:
   *   - it runs on the supervisor, so the response is never waiting on it;
   *   - it is throttled, so a page that fires a dozen API calls still does one pass;
-  *   - it swallows its errors after logging them. A snapshot that cannot be written must not turn someone's page load into a 500.
+  *   - a failure does not reach the request. It is logged, and the user sees it as a warning until a pass succeeds (see [[BackgroundHealth]]).
   */
 object BudgetSnapshotTrigger {
 
@@ -43,7 +43,8 @@ object BudgetSnapshotTrigger {
       _   <- IO.whenA(due) {
                supervisor
                  .supervise(
-                   service.ensureUpToDate.handleErrorWith(e => IO.println(s"Daily budget snapshot failed: ${e.getMessage}")),
+                   // The failure is logged and kept by `BackgroundHealth`; here it only must not end the fiber with an error.
+                   BackgroundHealth.track(BackgroundHealth.Task.DailyRecord)(service.ensureUpToDate).attempt.void,
                  )
                  .void
              }

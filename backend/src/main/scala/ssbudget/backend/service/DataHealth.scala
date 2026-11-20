@@ -17,7 +17,8 @@ object DataHealth {
       accounts   <- repos.accounts.findAll
       inLedger   <- repos.bankTransactions.currenciesInUse
       rates      <- repos.exchangeRates.findLatestTo(primary)
-    } yield missingRates(primary, accounts.map(_.currency) ++ inLedger, rates.map(_.fromCurrency).toSet)
+      background <- BackgroundHealth.warnings
+    } yield missingRates(primary, accounts.map(_.currency) ++ inLedger, rates.map(_.fromCurrency).toSet) ++ background
 
   /** A currency with no rate is counted 1 to 1 in every sum (see `BudgetQueries.primaryConverter`). */
   def missingRates(primary: Currency, inUse: List[Currency], withRate: Set[Currency]): List[DataWarning] =

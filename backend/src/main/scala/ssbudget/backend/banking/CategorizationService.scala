@@ -4,6 +4,7 @@ import cats.data.EitherT
 import cats.effect.IO
 import cats.implicits.*
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.db.repository.RuleWrite
 import ssbudget.shared.model.*
 import ssbudget.shared.rules.RuleMatcher
 
@@ -96,14 +97,15 @@ class CategorizationService(repos: Repositories, ruleEngine: RuleEngineService) 
   def applyChange(change: RuleChange): Result[Option[RuleWritten]] =
     (for {
       resolved <- EitherT[IO, String, Resolved](resolve(change))
+      // The order is written only when the change asks for a position: without one, the stored priorities already give `rulesAfter`. The rule
+      // and the order go in one transaction.
+      order     = Option.when(resolved.moved)(resolved.rulesAfter.map(_.id))
       _        <- EitherT.liftF((change, resolved.rule) match {
-                    case (_: RuleChange.Create, Some(rule)) => repos.classificationRules.create(rule)
-                    case (_: RuleChange.Update, Some(rule)) => repos.classificationRules.update(rule.id, rule.name, rule.categoryId, rule.criteria)
-                    case (RuleChange.Delete(id), _)         => repos.classificationRules.delete(id)
+                    case (_: RuleChange.Create, Some(rule)) => repos.classificationRules.write(RuleWrite.Create(rule), order)
+                    case (_: RuleChange.Update, Some(rule)) => repos.classificationRules.write(RuleWrite.Update(rule), order)
+                    case (RuleChange.Delete(id), _)         => repos.classificationRules.write(RuleWrite.Delete(id), order)
                     case _                                  => IO.unit
                   })
-      // The order is written only when the change asks for a position: without one, the stored priorities already give `rulesAfter`.
-      _        <- EitherT.liftF(IO.whenA(resolved.moved)(repos.classificationRules.reorder(resolved.rulesAfter.map(_.id))))
       _        <- EitherT.liftF(ruleEngine.applyRules())
     } yield resolved.rule.map { rule =>
       val position = resolved.rulesAfter.indexWhere(_.id == rule.id)

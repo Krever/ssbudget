@@ -1,6 +1,7 @@
 package ssbudget.backend.db.repository
 
 import cats.effect.IO
+import cats.implicits.*
 import doobie.*
 import doobie.implicits.*
 import ssbudget.backend.db.DoobieMeta.given
@@ -15,6 +16,11 @@ trait CategoryRepository {
 
   /** Makes ordinary categories of the transfer categories of `account`: for an account that is deleted, or is no longer an investment. */
   def clearTransferAccount(account: AccountId): IO[Unit]
+
+  /** Deletes the category and all that names it, in ONE transaction: its transactions lose the category, its rules and its budget overrides go. With
+    * separate commits, a failure in the middle left transactions with no category while the category and its budget were still there.
+    */
+  def deleteWithDependents(id: CategoryId): IO[Unit]
 }
 
 class CategoryRepositoryImpl(xa: Transactor[IO]) extends CategoryRepository {
@@ -22,14 +28,13 @@ class CategoryRepositoryImpl(xa: Transactor[IO]) extends CategoryRepository {
   private val columns =
     fr"id, name, color, budget_type, budget_method, budget_lookback_months, budget_fixed_cents, bill_payments, transfer_account_id"
 
-  override def create(category: Category): IO[Unit] =
-    sql"""INSERT INTO categories (id, name, color, budget_type, budget_method, budget_lookback_months, budget_fixed_cents, bill_payments,
-                                  transfer_account_id)
-          VALUES (${category.id}, ${category.name}, ${category.color}, ${category.budgetType},
-                  ${category.budget.method}, ${category.budget.lookbackMonths}, ${category.budget.fixedCents},
-                  ${category.billPayments}, ${category.transferAccount})""".update.run
-      .transact(xa)
-      .void
+  override def create(category: Category): IO[Unit] = CategoryRepositoryImpl.insert(category).transact(xa)
+
+  override def deleteWithDependents(id: CategoryId): IO[Unit] =
+    (sql"UPDATE bank_transactions SET category_id = NULL, category_source = NULL WHERE category_id = $id".update.run *>
+      sql"DELETE FROM classification_rules WHERE category_id = $id".update.run *>
+      sql"DELETE FROM category_budget_overrides WHERE category_id = $id".update.run *>
+      sql"DELETE FROM categories WHERE id = $id".update.run).transact(xa).void
 
   override def findAll: IO[List[Category]] =
     (fr"SELECT" ++ columns ++ fr"FROM categories ORDER BY name").query[Category].to[List].transact(xa)
@@ -52,4 +57,15 @@ class CategoryRepositoryImpl(xa: Transactor[IO]) extends CategoryRepository {
 
   override def clearTransferAccount(account: AccountId): IO[Unit] =
     sql"UPDATE categories SET transfer_account_id = NULL WHERE transfer_account_id = $account".update.run.transact(xa).void
+}
+
+object CategoryRepositoryImpl {
+
+  /** The insert of one category, as a step of a transaction: the rule import makes categories and rules together. */
+  private[repository] def insert(category: Category): ConnectionIO[Unit] =
+    sql"""INSERT INTO categories (id, name, color, budget_type, budget_method, budget_lookback_months, budget_fixed_cents, bill_payments,
+                                  transfer_account_id)
+          VALUES (${category.id}, ${category.name}, ${category.color}, ${category.budgetType},
+                  ${category.budget.method}, ${category.budget.lookbackMonths}, ${category.budget.fixedCents},
+                  ${category.billPayments}, ${category.transferAccount})""".update.run.void
 }

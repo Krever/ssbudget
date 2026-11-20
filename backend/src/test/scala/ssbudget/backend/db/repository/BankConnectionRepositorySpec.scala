@@ -144,14 +144,4 @@ class BankConnectionRepositorySpec extends RepositorySpec {
     } yield found shouldBe Some(synced)
   }
 
-  "deleteLinksByConnection removes all links for the connection" in {
-    val repo = new BankConnectionRepositoryImpl(xa)
-    for {
-      _    <- repo.create(connection("c-1"))
-      _    <- repo.createLink(link("l-1", "c-1", "uid-1", BankLinkTarget.Unlinked))
-      _    <- repo.createLink(link("l-2", "c-1", "uid-2", BankLinkTarget.Unlinked))
-      _    <- repo.deleteLinksByConnection(BankConnectionId("c-1"))
-      left <- repo.findLinksByConnection(BankConnectionId("c-1"))
-    } yield left shouldBe empty
-  }
 }

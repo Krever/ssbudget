@@ -10,12 +10,20 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerInterpreter
 import ssbudget.backend.analytics.AnalyticsService
 import ssbudget.backend.auth.SessionService
-import ssbudget.backend.banking.{BankingService, CategorizationService, ImportJobService, RuleChange, RuleEngineService, TransactionImportService}
+import ssbudget.backend.banking.{BankingService, CategorizationService, ImportJobService, RuleChange, RuleEngineService}
 import ssbudget.backend.db.{Database, Repositories}
 import ssbudget.backend.db.repository.{TransactionFilter, TransactionSearchRow}
 import ssbudget.backend.search.TransactionSearch
 import ssbudget.backend.service.BudgetQueries.*
-import ssbudget.backend.service.{BudgetSnapshotService, CategorySummaryService, CurrencyService, DataHealth, PeriodService, PeriodWindow}
+import ssbudget.backend.service.{
+  BackgroundHealth,
+  BudgetSnapshotService,
+  CategorySummaryService,
+  CurrencyService,
+  DataHealth,
+  PeriodService,
+  PeriodWindow,
+}
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 import ssbudget.shared.rules.RuleMatcher
@@ -38,7 +46,6 @@ object Routes {
       sessionService: SessionService,
       currencyService: CurrencyService,
       bankingService: BankingService,
-      importService: TransactionImportService,
       importJobService: ImportJobService,
       ruleEngine: RuleEngineService,
       categorization: CategorizationService,
@@ -136,7 +143,7 @@ object Routes {
       // The export is all the data and the import replaces it: the session alone is not sufficient for either.
       confirmedRoute(Endpoints.database.download)(_ => exportDatabase(xa, dbPath)),
       confirmedRoute(Endpoints.database.`import`)(bytes => importDatabase(xa, dbPath, bytes)),
-    ) ++ (if testMode then List(route(Endpoints.test.reset)(_ => resetDatabase)) else Nil)
+    )
 
     interpreter.toRoutes(routes)
   }
@@ -145,9 +152,9 @@ object Routes {
     val accountId = AccountId(UUID.randomUUID().toString)
     val now       = Instant.now()
     val account   = Account(accountId, dto.name, dto.currency, dto.role, 0L, BalanceSource.Manual, Some(now))
-    // Record the opening zero balance. Without it, the first balance set later becomes the account's period-start baseline, and money
-    // put into a new account never shows as a change in the period it was added.
-    (repos.accounts.create(account) *> repos.accounts.setBalance(accountId, 0L, BalanceSource.Manual, now)).as(Right(account))
+    // With the opening zero balance on record: without it, the first balance set later becomes the account's period-start baseline, and
+    // money put into a new account never shows as a change in the period it was added.
+    repos.accounts.createWithOpeningBalance(account, now).as(Right(account))
   }
 
   private def updateAccount(repos: Repositories)(id: AccountId, dto: UpdateAccount): Result[Account] = {
@@ -206,11 +213,7 @@ object Routes {
                   case Some(a) if !a.isManual =>
                     IO.pure(Left("This account's balance is driven by a bank link or card group; unlink it first, then delete."))
                   case _                      =>
-                    for {
-                      _ <- repos.balanceSnapshots.deleteByAccountId(id)
-                      _ <- repos.categories.clearTransferAccount(id)
-                      _ <- repos.accounts.delete(id)
-                    } yield Right(())
+                    repos.accounts.deleteWithHistory(id).as(Right(()))
                 }
     } yield result
   }
@@ -223,12 +226,9 @@ object Routes {
     */
   private def freeMoneyHistory(repos: Repositories, snapshots: BudgetSnapshotService): Result[FreeMoneyHistory] =
     for {
-      causes <- snapshots.ensureUpToDateWithCauses.handleErrorWith(e => IO.println(s"Daily budget snapshot failed: ${e.getMessage}").as(Nil))
+      causes <- BackgroundHealth.track(BackgroundHealth.Task.DailyRecord)(snapshots.ensureUpToDateWithCauses).handleError(_ => Nil)
       rows   <- repos.dailyBudgetSnapshots.findAll
     } yield Right(FreeMoneyHistory(rows, causes))
-
-  /** The test-mode reset endpoint. It answers and changes nothing: the e2e servers start each run on a new database. */
-  private def resetDatabase: Result[Unit] = IO.pure(Right(()))
 
   /** The newest rate of each currency to the primary currency. */
   private def getAllExchangeRates(repos: Repositories): Result[List[ExchangeRate]] =
@@ -399,14 +399,8 @@ object Routes {
     } yield result
 
   private def deleteCategory(repos: Repositories, ruleEngine: RuleEngineService)(id: CategoryId): Result[Unit] =
-    // Detach the category from any transactions and drop rules targeting it, delete it, then re-evaluate (rules for it are gone).
-    for {
-      _ <- repos.bankTransactions.clearCategory(id)
-      _ <- repos.classificationRules.deleteByCategory(id)
-      _ <- repos.categoryBudgetOverrides.deleteByCategory(id)
-      _ <- repos.categories.delete(id)
-      _ <- ruleEngine.applyRules()
-    } yield Right(())
+    // The category goes with all that names it, in one transaction; then the rules run again, because the rules for it are gone.
+    (repos.categories.deleteWithDependents(id) *> ruleEngine.applyRules()).as(Right(()))
 
   /** A rule create or update through the shared service; the REST answer is the rule itself. */
   private def ruleWrite(categorization: CategorizationService, change: RuleChange): Result[ClassificationRule] =
@@ -433,35 +427,31 @@ object Routes {
     */
   private def importRules(repos: Repositories, ruleEngine: RuleEngineService)(req: ImportRulesRequest): Result[ImportRulesResult] =
     for {
-      _                             <- if req.replace then repos.classificationRules.deleteAll else IO.unit
-      existingCats                  <- repos.categories.findAll
-      base                          <- if req.replace then IO.pure(0) else repos.classificationRules.nextPriority
-      now                           <- IO.realTimeInstant
-      // Resolve each referenced category by name (case-insensitive), creating the ones that don't exist yet.
-      resolved                      <- req.bundle.rules.map(_.categoryName).distinct.foldLeft(IO.pure((existingCats.map(c => c.name.toLowerCase -> c.id).toMap, 0))) {
-                                         (accIO, name) =>
-                                           accIO.flatMap { case (byName, created) =>
-                                             if byName.contains(name.toLowerCase) then IO.pure((byName, created))
-                                             else {
-                                               val cat = Category(CategoryId(UUID.randomUUID().toString), name, None)
-                                               repos.categories.create(cat).as((byName + (name.toLowerCase -> cat.id), created + 1))
-                                             }
-                                           }
-                                       }
-      (catByName, categoriesCreated) = resolved
-      toCreate                       = req.bundle.rules.zipWithIndex.map { case (r, idx) =>
-                                         ClassificationRule(
-                                           ClassificationRuleId(UUID.randomUUID().toString),
-                                           r.name,
-                                           catByName(r.categoryName.toLowerCase),
-                                           base + idx,
-                                           r.criteria,
-                                           now,
-                                         )
-                                       }
-      _                             <- toCreate.traverse_(repos.classificationRules.create)
-      _                             <- ruleEngine.applyRules()
-    } yield Right(ImportRulesResult(toCreate.size, categoriesCreated))
+      existingCats <- repos.categories.findAll
+      now          <- IO.realTimeInstant
+      // Each category that a rule names is found by name (case does not count). One that does not exist yet is made.
+      known         = existingCats.map(c => c.name.toLowerCase -> c.id).toMap
+      newCategories = req.bundle.rules
+                        .map(_.categoryName)
+                        .distinctBy(_.toLowerCase)
+                        .filterNot(name => known.contains(name.toLowerCase))
+                        .map(name => Category(CategoryId(UUID.randomUUID().toString), name, None))
+      catByName     = known ++ newCategories.map(c => c.name.toLowerCase -> c.id)
+      rulesFrom     = (base: Int) =>
+                        req.bundle.rules.zipWithIndex.map { case (r, idx) =>
+                          ClassificationRule(
+                            ClassificationRuleId(UUID.randomUUID().toString),
+                            r.name,
+                            catByName(r.categoryName.toLowerCase),
+                            base + idx,
+                            r.criteria,
+                            now,
+                          )
+                        }
+      // One transaction: a failure leaves the rules and the categories as they were (with `replace`, not an empty rule list).
+      _            <- repos.classificationRules.importAll(req.replace, newCategories, rulesFrom)
+      _            <- ruleEngine.applyRules()
+    } yield Right(ImportRulesResult(req.bundle.rules.size, newCategories.size))
 
   /** A consistent copy of the whole database, via SQLite's own backup API.
     *

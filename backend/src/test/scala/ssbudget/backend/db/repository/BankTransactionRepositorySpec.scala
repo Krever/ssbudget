@@ -99,7 +99,7 @@ class BankTransactionRepositorySpec extends RepositorySpec {
     }
   }
 
-  "setCategory assigns as manual and clearCategory detaches" in {
+  "setCategory assigns as manual, and None detaches" in {
     val repo    = new BankTransactionRepositoryImpl(xa)
     val catRepo = new CategoryRepositoryImpl(xa)
     for {
@@ -107,7 +107,7 @@ class BankTransactionRepositorySpec extends RepositorySpec {
       _        <- repo.insertNew(tx("t-1", "uid-1", "r-1"))
       _        <- repo.setCategory(BankTransactionId("t-1"), Some(CategoryId("cat-1")))
       assigned <- repo.findById(BankTransactionId("t-1"))
-      _        <- repo.clearCategory(CategoryId("cat-1"))
+      _        <- repo.setCategory(BankTransactionId("t-1"), None)
       cleared  <- repo.findById(BankTransactionId("t-1"))
     } yield {
       assigned.flatMap(_.categoryId) shouldBe Some(CategoryId("cat-1"))
@@ -283,7 +283,7 @@ class BankTransactionRepositorySpec extends RepositorySpec {
     } yield months shouldBe List("2026-03", "2026-01")
   }
 
-  "transactions of a transfer category are the moves of its investment account, and are not cash flow" in {
+  "transactions of a transfer category are the moves of its investment account" in {
     val repo     = new BankTransactionRepositoryImpl(xa)
     val catRepo  = new CategoryRepositoryImpl(xa)
     val accounts = new AccountRepositoryImpl(xa)
@@ -326,13 +326,15 @@ class BankTransactionRepositorySpec extends RepositorySpec {
       _         <- repo.insertNew(tx("t7", "uid-b", "r7", amountCents = -1500, bookedAt = inJan, connId = "conn-b", categoryId = Some(CategoryId("cat-b"))))
       transfers <- repo.transfersByAccountBetween(from, to)
       own       <- repo.netByAccountBetween(from, to)
-      flows     <- repo.flowsBetween(from, to)
+      daily     <- repo.dailyFlowsSince(from)
     } yield {
       // The sign of the bank side: a net 300 arrived from the broker. The row on the broker's own ledger is not in it.
       transfers shouldBe List((broker.id, Currency.PLN, 30000L))
       own.toSet shouldBe Set(("uid-1", Currency.PLN, 110000L), ("uid-b", Currency.PLN, -5500L))
-      // A card payment from the broker is spend: 100 of groceries plus 40. The transfer-category row is not cash flow.
-      flows shouldBe List((Currency.PLN, 90000L, 14000L))
+      // The daily flows give every entry that is not internal, with its category: the reader decides what a transfer category means.
+      daily.filter(_.category.contains(CategoryId("cat-1"))).map(_.outflow).sum shouldBe 10000L
+      daily.filter(_.category.isEmpty).map(f => (f.accountUid, f.inflow, f.outflow)).toSet shouldBe Set(("uid-1", 90000L, 0L), ("uid-b", 0L, 4000L))
+      daily.filter(_.category.contains(CategoryId("cat-b"))).map(_.net).sum shouldBe 35500L
     }
   }
 
@@ -382,13 +384,4 @@ class BankTransactionRepositorySpec extends RepositorySpec {
     }
   }
 
-  "deleteByConnection removes only that connection's transactions" in {
-    val repo = new BankTransactionRepositoryImpl(xa)
-    for {
-      _   <- repo.insertNew(tx("t-1", "uid-1", "r-1", connId = "conn-1"))
-      _   <- repo.insertNew(tx("t-2", "uid-2", "r-2", connId = "conn-2"))
-      _   <- repo.deleteByConnection(BankConnectionId("conn-1"))
-      all <- repo.list(None, None, None)
-    } yield all.map(_.id.value) shouldBe List("t-2")
-  }
 }

@@ -37,22 +37,6 @@ class AccountRepositorySpec extends RepositorySpec {
     } yield all shouldBe List(acc2, acc3, acc1)
   }
 
-  "findByRole returns only accounts of that role" in {
-    val repo = new AccountRepositoryImpl(xa)
-    val acc1 = spendingAccount("acc-1", "Spending", Currency.PLN)
-    val acc2 = savingsAccount("acc-2", "Savings", Currency.PLN, 5000)
-
-    for {
-      _        <- repo.create(acc1)
-      _        <- repo.create(acc2)
-      spending <- repo.findByRole(AccountRole.Spending)
-      savings  <- repo.findByRole(AccountRole.Savings)
-    } yield {
-      spending shouldBe List(acc1)
-      savings shouldBe List(acc2)
-    }
-  }
-
   "update modifies name and currency but not balance" in {
     val repo    = new AccountRepositoryImpl(xa)
     val account = savingsAccount("acc-1", "Old Name", Currency.PLN, 100000)

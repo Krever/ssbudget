@@ -19,6 +19,9 @@ class MetabaseClient(config: MetabaseConfig, backend: SttpBackend[IO, Any], toke
 
   private val base: Uri = uri"${config.baseUrl}"
 
+  /** Drops the cached session token: Metabase refused it. The next [[sessionToken]] logs in again. */
+  def forgetSession: IO[Unit] = tokenRef.set(None)
+
   /** The current session token, logging in if we don't have one. */
   def sessionToken: IO[Either[String, String]] =
     tokenRef.get.flatMap {

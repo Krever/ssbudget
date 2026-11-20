@@ -244,8 +244,11 @@ object BankingPage {
         loadAspsps()
         refreshJobs()
       },
-      // Poll job status while the page is open (~2.5s) so the current run + history stay live.
-      EventStream.periodic(2500) --> Observer[Int](_ => refreshJobs()),
+      // While a job runs, the list is read every 2.5 s so that the run stays live. With no job it is read every 30 s only, to see a run that
+      // was started somewhere else: before, an open page asked the server 24 times a minute for nothing.
+      EventStream.periodic(2500) --> Observer[Int] { tick =>
+        if jobsVar.now().exists(_.status == ImportJobStatus.Running) || tick % 12 == 0 then refreshJobs()
+      },
       div(
         cls := "d-flex justify-content-between align-items-center mb-4",
         h2(cls := "mb-0", "Bank Connections"),

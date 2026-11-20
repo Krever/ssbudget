@@ -86,21 +86,7 @@ class ClassificationRuleRepositorySpec extends RepositorySpec {
     }
   }
 
-  "nextPriority is max+1, or 0 when empty" in {
-    val repo = new ClassificationRuleRepositoryImpl(xa)
-    for {
-      _     <- withCategories
-      empty <- repo.nextPriority
-      _     <- repo.create(rule("a", 0, List(Direction(true))))
-      _     <- repo.create(rule("b", 5, List(Direction(false))))
-      next  <- repo.nextPriority
-    } yield {
-      empty shouldBe 0
-      next shouldBe 6
-    }
-  }
-
-  "delete and deleteByCategory" in {
+  "delete removes one rule" in {
     val repo = new ClassificationRuleRepositoryImpl(xa)
     for {
       _        <- withCategories
@@ -108,22 +94,6 @@ class ClassificationRuleRepositorySpec extends RepositorySpec {
       _        <- repo.create(rule("b", 1, List(Direction(false)), cat = "cat-2"))
       _        <- repo.delete(ClassificationRuleId("a"))
       afterDel <- repo.findAll
-      _        <- repo.deleteByCategory(CategoryId("cat-2"))
-      afterCat <- repo.findAll
-    } yield {
-      afterDel.map(_.id.value) shouldBe List("b")
-      afterCat shouldBe Nil
-    }
-  }
-
-  "deleteAll removes every rule" in {
-    val repo = new ClassificationRuleRepositoryImpl(xa)
-    for {
-      _     <- withCategories
-      _     <- repo.create(rule("a", 0, List(Direction(true))))
-      _     <- repo.create(rule("b", 1, List(Direction(false))))
-      _     <- repo.deleteAll
-      after <- repo.findAll
-    } yield after shouldBe Nil
+    } yield afterDel.map(_.id.value) shouldBe List("b")
   }
 }

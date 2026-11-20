@@ -118,8 +118,7 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
                                       case None        => IO.pure(List.empty[AccountId])
                                     }
                                   }
-                      _        <- repos.bankConnections.deleteLinksByConnection(prior.id)
-                      _        <- repos.bankConnections.delete(prior.id)
+                      _        <- repos.bankConnections.deleteWithLinks(prior.id)
                     } yield moved
                   }
       // Reconcile both the accounts we may have just re-linked and any old targets whose link is now gone (they revert to Manual).
@@ -393,8 +392,7 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
           links      <- repos.bankConnections.findLinksByConnection(id)
           targetAccts = links.flatMap(l => targetAccountId(l.target)).distinct
           _          <- revoke
-          _          <- repos.bankConnections.deleteLinksByConnection(id)
-          _          <- repos.bankConnections.delete(id)
+          _          <- repos.bankConnections.deleteWithLinks(id)
           _          <- targetAccts.traverse_(reconcileAccountSource)
           _          <- recomputeCardGroups
         } yield Right(())
