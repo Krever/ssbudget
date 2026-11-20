@@ -9,7 +9,7 @@ import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 import ssbudget.backend.db.DoobieMeta.given
 import ssbudget.backend.db.{Database, Repositories}
-import ssbudget.backend.service.PeriodService
+import ssbudget.backend.service.{AppClock, PeriodService}
 import ssbudget.shared.model.*
 
 import java.nio.file.Files
@@ -25,7 +25,7 @@ class PeriodServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
       .migrateAndTransactor(s"jdbc:sqlite:${file.toAbsolutePath}")
       .use { xa =>
         val repos = Repositories.fromTransactor(xa)
-        seed.transact(xa) *> test(new PeriodService(repos), repos, xa)
+        seed.transact(xa) *> test(new PeriodService(repos, AppClock.fixed(Instant.parse("2026-06-15T12:00:00Z"))), repos, xa)
       }
       .guarantee(IO.blocking(Files.deleteIfExists(file)).void)
   }
@@ -156,7 +156,9 @@ class PeriodServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
   // The lifecycle
   // ---------------------------------------------------------------------------------------------
 
-  private val today     = LocalDate.now(ZoneOffset.UTC)
+  // A fixed day, not the day of the test run: the rules below are then checked on the same date each time. The service gets a clock that
+  // stands at noon of it.
+  private val today     = LocalDate.parse("2026-06-15")
   private val openStart = today.minusDays(10)
 
   private def at(day: LocalDate, hour: Int): Instant = day.atStartOfDay(ZoneOffset.UTC).plusHours(hour.toLong).toInstant

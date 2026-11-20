@@ -44,10 +44,10 @@ final case class BalanceHistory(
 object BalanceHistory {
 
   /** All recorded balances and the full ledger of `accounts`. */
-  def load(repos: Repositories, accounts: List[Account]): IO[BalanceHistory] =
+  def load(repos: Repositories, accounts: List[Account], clock: AppClock = AppClock.system): IO[BalanceHistory] =
     for {
       snaps    <- accounts.traverse(a => repos.balanceSnapshots.findByAccount(a.id).map(a.id -> _)).map(_.toMap)
-      now      <- IO.realTimeInstant
+      now      <- clock.now
       daily    <- repos.bankTransactions.dailyNetByAccount(Instant.EPOCH, now)
       uidIndex <- accountUidIndex(repos)
     } yield BalanceHistory(snaps.view.mapValues(_.sortBy(_.recordedAt.toEpochMilli)).toMap, ledgerByAccount(daily, uidIndex))

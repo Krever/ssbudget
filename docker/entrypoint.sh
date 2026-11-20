@@ -11,6 +11,20 @@
 # worse than one that restarts.
 set -euo pipefail
 
+# The container starts as root for one reason: the data volume belongs to root when the platform mounts it, and files that an earlier
+# image wrote there belong to root too. Root gives the data directory to the service user, and then this script starts again as that
+# user. Everything below (the database copy, Metabase, the app) thus runs with no root rights: a fault in either JVM cannot change the
+# image or read what the user cannot.
+RUN_AS="ssbudget"
+if [[ "$(id -u)" == "0" ]]; then
+  data_dir="$(dirname "${SSBUDGET_DB_PATH:-/data/ssbudget.db}")"
+  mkdir -p "$data_dir"
+  chown -R "$RUN_AS:$RUN_AS" "$data_dir"
+  exec setpriv --reuid="$RUN_AS" --regid="$RUN_AS" --init-groups -- "$0" "$@"
+fi
+# The service user has no home directory; a JVM wants one that it can write.
+export HOME=/tmp
+
 MB_JAR="/opt/metabase/metabase.jar"
 MB_STATE_DIR="/data/metabase"
 MB_SECRETS="$MB_STATE_DIR/secrets.env"

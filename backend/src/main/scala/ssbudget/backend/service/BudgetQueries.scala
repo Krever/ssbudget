@@ -43,7 +43,7 @@ object BudgetQueries {
   * Lifted out of the route file because [[BudgetSnapshotService]] builds the same [[CategorySummary]] for days in the past. Keeping the shape in one
   * place is what stops "what a budget still expects" from meaning two different things depending on who asked.
   */
-class CategorySummaryService(repos: Repositories) {
+class CategorySummaryService(repos: Repositories, clock: AppClock = AppClock.system) {
 
   import BudgetQueries.*
 
@@ -64,7 +64,7 @@ class CategorySummaryService(repos: Repositories) {
       cats        <- repos.categories.findAll
       periods     <- repos.periods.findAll
       converter   <- primaryConverter(repos)
-      now          = java.time.LocalDate.now(java.time.ZoneOffset.UTC)
+      now         <- clock.today
       firstOfMonth = now.withDayOfMonth(1)
       currentMonth = firstOfMonth.atStartOfDay(java.time.ZoneOffset.UTC).toInstant
       currentOpt   = periods.find(_.endDate.isEmpty)

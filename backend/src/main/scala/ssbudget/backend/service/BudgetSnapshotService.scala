@@ -29,7 +29,7 @@ import java.time.{Instant, LocalDate, ZoneOffset}
   * transaction that the bank sent late moves the line on the days it belongs to, and does not show as one bad day on the day it was typed or
   * imported. The balances of those days stay as they were measured. A closed period keeps what it was recorded with.
   */
-class BudgetSnapshotService(repos: Repositories) {
+class BudgetSnapshotService(repos: Repositories, clock: AppClock = AppClock.system) {
 
   import BudgetSnapshotService.*
 
@@ -46,7 +46,7 @@ class BudgetSnapshotService(repos: Repositories) {
   /** One pass over the table. Gives back what it loaded, so that a caller can read more from it with no second load. */
   private def pass: IO[Option[World]] =
     for {
-      now     <- IO.realTimeInstant
+      now     <- clock.now
       today    = LocalDate.ofInstant(now, ZoneOffset.UTC)
       periods <- repos.periods.findAll
       due     <- daysDue(periods, today)
@@ -71,7 +71,7 @@ class BudgetSnapshotService(repos: Repositories) {
   /** One day's terms, computed but not stored — what the tests and any ad-hoc check go through. `None` outside the recorded span. */
   def componentsAsOf(date: LocalDate): IO[Option[DailyBudgetSnapshot]] =
     for {
-      now   <- IO.realTimeInstant
+      now   <- clock.now
       today  = LocalDate.ofInstant(now, ZoneOffset.UTC)
       world <- if date.isAfter(today) then IO.pure(None)
                else repos.periods.findAll.flatMap(load(_, List(date), balancesFor = List(date), today, now))

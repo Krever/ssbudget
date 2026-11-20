@@ -252,6 +252,10 @@ McpToken (table: mcp_tokens):
 - **An instant has one text form**: UTC with milliseconds, 24 characters (`DoobieMeta`, V32). The columns are compared as text, so
   raw SQL that writes an instant must use this form.
 - The tables of the removed planned items hold old rows that break a reference (`expense_records`). No code reads or writes them.
+- **A column of a fixed set** (a role, a status, a kind) accepts only the values of that set: two triggers for each such column (V34).
+  To add a case to such an enumeration, write a migration that makes the two triggers of its column again with the new list;
+  `EnumColumnsSpec` fails until the two lists are the same. A migration that makes one of these tables again must make its triggers
+  again.
 
 ## Analytics
 
@@ -365,6 +369,10 @@ sbt scalafmtAll           # format; CI checks it
 fly deploy --remote-only  # fly.io builds the image from those artifacts
 ```
 
+- The container starts as root only to give `/data` to the service user `ssbudget` (uid 10001); the database copy, Metabase and the
+  app then run as that user (`docker/entrypoint.sh`). `fly ssh console` is still root: a file that root makes in `/data` while the
+  app runs is not writable for the app until the next start.
+- The image build checks the SHA-256 of the Metabase jar (`Dockerfile`: change `METABASE_VERSION` and `METABASE_SHA256` together).
 - The app migrates its database at start (Flyway). The container copies the database to `/data/backups` before that
   (`docker/entrypoint.sh`, newest 5 kept), and the deploy waits for the health check in `fly.toml`.
 - `GET /api/health` answers `ok <commit>`: it says which build is live.
@@ -385,6 +393,9 @@ options that report unused values, because a ScalaTest test is a list of asserti
 
 **Tests to run for a change:** `sbt backend/test` (about 30 s) and `sbt e2e/test` (about 4 min, Chrome). Do not run two sbt commands
 at once in one checkout.
+
+**Time**: the money logic (period rules, the daily record, category figures, reports) reads the time from an `AppClock` that it is
+given, never from the system. A test gives it `AppClock.fixed(...)` and builds its data on a fixed date.
 
 **circe codecs**: Use `derives Codec.AsObject` for case classes. Only use manual `Encoder`/`Decoder` for:
 - AnyVal wrapper types (encode as the underlying type)

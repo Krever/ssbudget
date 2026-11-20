@@ -9,7 +9,7 @@ import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 import ssbudget.backend.db.DoobieMeta.given
 import ssbudget.backend.db.{Database, Repositories}
-import ssbudget.backend.service.BudgetSnapshotService
+import ssbudget.backend.service.{AppClock, BudgetSnapshotService}
 import ssbudget.shared.model.*
 
 import java.nio.file.Files
@@ -22,7 +22,9 @@ import java.time.{Instant, LocalDate, ZoneOffset}
   */
 class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
 
-  private val today       = LocalDate.now(ZoneOffset.UTC)
+  // A fixed day, not the day of the test run. Before, the fixture was built around the current date, so the same test ran on other data
+  // each day (a month boundary inside the period on some days and not on others). The service gets a clock that stands at 15:00 of it.
+  private val today       = LocalDate.parse("2026-06-15")
   private val periodStart = today.minusDays(10)
   // The period states its own expected end; nothing derives one from a payday.
   private val periodEnd   = periodStart.plusDays(30)
@@ -36,7 +38,7 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
       .migrateAndTransactor(s"jdbc:sqlite:${file.toAbsolutePath}")
       .use { xa =>
         val repos = Repositories.fromTransactor(xa)
-        seed(xa) *> test(new BudgetSnapshotService(repos), repos, xa)
+        seed(xa) *> test(new BudgetSnapshotService(repos, AppClock.fixed(at(today, 15))), repos, xa)
       }
       .guarantee(IO.blocking(Files.deleteIfExists(file)).void)
   }

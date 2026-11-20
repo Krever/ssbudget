@@ -12,7 +12,7 @@ import java.time.{Instant, LocalDate, ZoneOffset}
 import java.util.UUID
 
 /** The periods: their lifecycle (start, expected end, planned saving) and what the Periods page and the Dashboard report about them. */
-class PeriodService(repos: Repositories) {
+class PeriodService(repos: Repositories, clock: AppClock = AppClock.system) {
 
   import PeriodService.*
 
@@ -47,7 +47,7 @@ class PeriodService(repos: Repositories) {
   def startNew(asOf: Option[LocalDate]): IO[Either[String, Period]] =
     for {
       // To the millisecond, as the database stores an instant: the period that this call returns is then equal to the stored one.
-      now     <- IO.realTimeInstant.map(_.truncatedTo(java.time.temporal.ChronoUnit.MILLIS))
+      now     <- clock.now.map(_.truncatedTo(java.time.temporal.ChronoUnit.MILLIS))
       current <- repos.periods.findCurrent
       result  <- startInstant(asOf, now, current) match {
                    case Left(reason) => IO.pure(Left(reason))
@@ -76,7 +76,7 @@ class PeriodService(repos: Repositories) {
                      // recorded on sync, so this is usual for a new link) gets it from the ledger: see [[BalanceHistory]].
                      val window  = PeriodWindow.of(p)
                      for {
-                       history   <- BalanceHistory.load(repos, savings)
+                       history   <- BalanceHistory.load(repos, savings, clock)
                        converter <- primaryConverter(repos)
                        moved     <- movedToInvestments(converter._2)(window.from, window.until)
                      } yield savings.flatMap { acc =>
@@ -125,8 +125,8 @@ class PeriodService(repos: Repositories) {
       converter <- primaryConverter(repos)
       // Every period needs each account's balance at two instants. The history of each account is read ONCE here, and the boundaries are resolved
       // in memory.
-      history   <- BalanceHistory.load(repos, accounts)
-      now       <- IO.realTimeInstant
+      history   <- BalanceHistory.load(repos, accounts, clock)
+      now       <- clock.now
       // The entries of all listed periods are read ONCE too, and each period sums the rows of its own days. With a set of queries for each
       // period, a page of 16 periods ran about 200 statements on the one database connection.
       flows     <- periods.map(PeriodWindow.of(_).from).minOption.fold(IO.pure(List.empty[DailyFlow]))(repos.bankTransactions.dailyFlowsSince)

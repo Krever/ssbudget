@@ -16,6 +16,7 @@ import ssbudget.backend.db.repository.{TransactionFilter, TransactionSearchRow}
 import ssbudget.backend.search.TransactionSearch
 import ssbudget.backend.service.BudgetQueries.*
 import ssbudget.backend.service.{
+  AppClock,
   BackgroundHealth,
   BudgetSnapshotService,
   CategorySummaryService,
@@ -51,11 +52,12 @@ object Routes {
       categorization: CategorizationService,
       analyticsService: AnalyticsService,
       testMode: Boolean = false,
+      clock: AppClock = AppClock.system,
   ): HttpRoutes[IO] = {
     val interpreter       = Http4sServerInterpreter[IO]()
-    val categorySummaries = new CategorySummaryService(repos)
-    val budgetSnapshots   = new BudgetSnapshotService(repos)
-    val periods           = new PeriodService(repos)
+    val categorySummaries = new CategorySummaryService(repos, clock)
+    val budgetSnapshots   = new BudgetSnapshotService(repos, clock)
+    val periods           = new PeriodService(repos, clock)
 
     def validateSession(tokenOpt: Option[String]): IO[Either[String, Unit]] =
       AuthRoutes.validateSession(sessionService, tokenOpt, testMode)
@@ -70,9 +72,9 @@ object Routes {
     val routes = List(
       // Accounts (spending + savings, unified)
       route(Endpoints.accounts.list)(_ => repos.accounts.findAll.map(Right(_))),
-      route(Endpoints.accounts.create)(createAccount(repos)),
+      route(Endpoints.accounts.create)(createAccount(repos, clock)),
       route(Endpoints.accounts.update) { case (id, dto) => updateAccount(repos)(id, dto) },
-      route(Endpoints.accounts.updateBalance) { case (id, dto) => updateAccountBalance(repos)(id, dto) },
+      route(Endpoints.accounts.updateBalance) { case (id, dto) => updateAccountBalance(repos, clock)(id, dto) },
       route(Endpoints.accounts.delete)(deleteAccount(repos)),
       // Periods
       route(Endpoints.periods.list)(_ => repos.periods.findAll.map(Right(_))),
@@ -123,8 +125,10 @@ object Routes {
       route(Endpoints.categories.create)(createCategory(repos)),
       route(Endpoints.categories.update) { case (id, dto) => updateCategory(repos)(id, dto) },
       route(Endpoints.categories.delete)(deleteCategory(repos, ruleEngine)),
-      route(Endpoints.categories.setOverride) { case (id, dto) => setCategoryOverride(repos, categorySummaries)(id, Some(dto.remainingCents)) },
-      route(Endpoints.categories.clearOverride)(id => setCategoryOverride(repos, categorySummaries)(id, None)),
+      route(Endpoints.categories.setOverride) { case (id, dto) =>
+        setCategoryOverride(repos, categorySummaries, clock)(id, Some(dto.remainingCents))
+      },
+      route(Endpoints.categories.clearOverride)(id => setCategoryOverride(repos, categorySummaries, clock)(id, None)),
       // Classification rules
       route(Endpoints.rules.list)(_ => repos.classificationRules.findAll.map(Right(_))),
       route(Endpoints.rules.create)(dto => ruleWrite(categorization, RuleChange.Create(dto.name, dto.categoryId, dto.criteria))),
@@ -136,7 +140,7 @@ object Routes {
       route(Endpoints.rules.apply)(_ => ruleEngine.applyRules().map(n => Right(ApplyRulesResult(n)))),
       route(Endpoints.rules.preview)(previewRule(repos)),
       route(Endpoints.rules.exportRules)(_ => exportRules(repos)),
-      route(Endpoints.rules.importRules)(importRules(repos, ruleEngine)),
+      route(Endpoints.rules.importRules)(importRules(repos, ruleEngine, clock)),
       // Analytics (Metabase-backed; reports itself disabled when the deployment ships without it)
       route(Endpoints.analytics.config)(_ => analyticsService.status.map(Right(_))),
       // Database import/export
@@ -148,9 +152,8 @@ object Routes {
     interpreter.toRoutes(routes)
   }
 
-  private def createAccount(repos: Repositories)(dto: CreateAccount): Result[Account] = {
+  private def createAccount(repos: Repositories, clock: AppClock)(dto: CreateAccount): Result[Account] = clock.now.flatMap { now =>
     val accountId = AccountId(UUID.randomUUID().toString)
-    val now       = Instant.now()
     val account   = Account(accountId, dto.name, dto.currency, dto.role, 0L, BalanceSource.Manual, Some(now))
     // With the opening zero balance on record: without it, the first balance set later becomes the account's period-start baseline, and
     // money put into a new account never shows as a change in the period it was added.
@@ -189,7 +192,7 @@ object Routes {
     } yield result
   }
 
-  private def updateAccountBalance(repos: Repositories)(id: AccountId, dto: UpdateAccountBalance): Result[Account] = {
+  private def updateAccountBalance(repos: Repositories, clock: AppClock)(id: AccountId, dto: UpdateAccountBalance): Result[Account] = {
     for {
       existingOpt <- repos.accounts.findById(id)
       result      <- existingOpt match {
@@ -198,10 +201,11 @@ object Routes {
                        case Some(existing) if !existing.isManual =>
                          IO.pure(Left("This account's balance is driven by a bank sync and cannot be edited manually"))
                        case Some(existing)                       =>
-                         val now = Instant.now()
-                         repos.accounts
-                           .setBalance(id, dto.newBalanceCents, BalanceSource.Manual, now)
-                           .as(Right(existing.copy(balanceCents = dto.newBalanceCents, balanceUpdatedAt = Some(now))))
+                         clock.now.flatMap { now =>
+                           repos.accounts
+                             .setBalance(id, dto.newBalanceCents, BalanceSource.Manual, now)
+                             .as(Right(existing.copy(balanceCents = dto.newBalanceCents, balanceUpdatedAt = Some(now))))
+                         }
                      }
     } yield result
   }
@@ -379,7 +383,7 @@ object Routes {
     * [[CategoryBudgetType.remaining]]). 0 marks the budget as covered either way. `V17__category_budget_override.sql` predates income budgets and
     * comments the column as `>= 0`; the signed convention here supersedes it (the column itself has no constraint).
     */
-  private def setCategoryOverride(repos: Repositories, summaries: CategorySummaryService)(
+  private def setCategoryOverride(repos: Repositories, summaries: CategorySummaryService, clock: AppClock)(
       id: CategoryId,
       remainingCents: Option[Long],
   ): Result[List[CategorySummary]] =
@@ -391,7 +395,7 @@ object Routes {
                      case (_, None)               => IO.pure(Left("No active period"))
                      case (Some(_), Some(period)) =>
                        val write = remainingCents match {
-                         case Some(cents) => IO.realTimeInstant.flatMap(repos.categoryBudgetOverrides.upsert(period.id, id, cents, _))
+                         case Some(cents) => clock.now.flatMap(repos.categoryBudgetOverrides.upsert(period.id, id, cents, _))
                          case None        => repos.categoryBudgetOverrides.delete(period.id, id)
                        }
                        write >> summaries.summaries.map(Right(_))
@@ -425,10 +429,10 @@ object Routes {
 
   /** Import a rules bundle atomically: (optionally) clear existing rules, create any categories referenced by name, then create the rules in order.
     */
-  private def importRules(repos: Repositories, ruleEngine: RuleEngineService)(req: ImportRulesRequest): Result[ImportRulesResult] =
+  private def importRules(repos: Repositories, ruleEngine: RuleEngineService, clock: AppClock)(req: ImportRulesRequest): Result[ImportRulesResult] =
     for {
       existingCats <- repos.categories.findAll
-      now          <- IO.realTimeInstant
+      now          <- clock.now
       // Each category that a rule names is found by name (case does not count). One that does not exist yet is made.
       known         = existingCats.map(c => c.name.toLowerCase -> c.id).toMap
       newCategories = req.bundle.rules
