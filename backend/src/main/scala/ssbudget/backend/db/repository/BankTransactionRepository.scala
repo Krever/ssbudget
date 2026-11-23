@@ -179,8 +179,9 @@ trait BankTransactionRepository {
     */
   def applyCategoryUpdates(updates: List[(BankTransactionId, Option[CategoryId], Option[CategorySource])]): IO[Unit]
 
-  /** Built-in rule: flag a transaction as an internal transfer when its counterparty IBAN is one of the user's own linked accounts, OR its remittance
-    * matches a known own-movement descriptor (card repayment / auto-save, which carry no counterparty IBAN). Recomputes all rows; idempotent.
+  /** Built-in rule: flag a transaction as an internal transfer when its counterparty IBAN is one of the user's own linked accounts, OR it is the
+    * other side of a transaction that names the IBAN of its account (the opposite amount, some days apart at most), OR its remittance matches a known
+    * own-movement descriptor (card repayment / auto-save, which carry no counterparty IBAN). Recomputes all rows; idempotent.
     */
   def markInternalTransfers(): IO[Unit]
 }
@@ -416,12 +417,29 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
       fr"""(counterparty_account IS NOT NULL AND REPLACE(UPPER(counterparty_account), ' ', '') IN
             (SELECT REPLACE(UPPER(iban), ' ', '') FROM bank_account_links WHERE iban IS NOT NULL))"""
     val descriptorMatch = BankTransactionRepositoryImpl.internalRemittancePatterns.map(p => fr"remittance LIKE ${s"%$p%"}")
-    val isInternal      = (ownIbanMatch :: descriptorMatch).reduce(_ ++ fr" OR " ++ _)
+    // The other side of a transfer that names this account. Some banks send a transfer from a clearing IBAN that is not the IBAN of the sender
+    // (an express transfer from Revolut comes from an IBAN of Santander). The sending side names our IBAN, so we find the receiving side by it:
+    // the opposite amount in the same currency, on this account, some days apart at most.
+    val pairedSide      =
+      fr"""id IN (
+            SELECT t.id FROM bank_transactions t
+            JOIN bank_account_links l ON l.eb_account_uid = t.eb_account_uid AND l.iban IS NOT NULL
+            JOIN bank_transactions o ON o.eb_account_uid <> t.eb_account_uid
+              AND o.amount_cents = -t.amount_cents AND o.currency = t.currency
+              AND o.counterparty_account IS NOT NULL
+              AND REPLACE(UPPER(o.counterparty_account), ' ', '') = REPLACE(UPPER(l.iban), ' ', '')
+              AND ABS(julianday(date(o.booked_at)) - julianday(date(t.booked_at))) <= ${BankTransactionRepositoryImpl.transferMaxDaysApart})"""
+    val isInternal      = (ownIbanMatch :: pairedSide :: descriptorMatch).reduce(_ ++ fr" OR " ++ _)
     (fr"UPDATE bank_transactions SET is_internal = CASE WHEN (" ++ isInternal ++ fr") THEN 1 ELSE 0 END").update.run.transact(xa).void
   }
 }
 
 object BankTransactionRepositoryImpl {
+
+  /** The maximum number of days between the two sides of one transfer between own accounts. A transfer sent on a Friday can be booked on the next
+    * Monday or Tuesday.
+    */
+  val transferMaxDaysApart: Int = 4
 
   /** Bank descriptors that mark an internal money movement even when no counterparty IBAN is reported (PKO). Stored remittances are upper-case; LIKE
     * is case-insensitive for the ASCII parts and matches the Polish letters as-is. Extend as new patterns surface.

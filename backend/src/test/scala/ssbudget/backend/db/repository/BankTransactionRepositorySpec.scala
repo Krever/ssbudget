@@ -189,6 +189,48 @@ class BankTransactionRepositorySpec extends RepositorySpec {
     }
   }
 
+  "markInternalTransfers flags the other side of a transfer that names the account, when that side comes from a clearing IBAN" in {
+    val repo                                        = new BankTransactionRepositoryImpl(xa)
+    val connRepo                                    = new BankConnectionRepositoryImpl(xa)
+    def link(id: String, uid: String, iban: String) = BankAccountLink(
+      BankAccountLinkId(id),
+      BankConnectionId("conn-1"),
+      uid,
+      BankLinkTarget.Unlinked,
+      iban = Some(iban),
+      name = None,
+      currency = None,
+      product = None,
+      lastBalanceCents = None,
+      lastBalanceCurrency = None,
+      lastSyncedAt = None,
+    )
+    val sent                                        = Instant.parse("2026-10-30T00:00:00Z")
+    val clearing                                    = Some("PL58109028510000000147575158")
+    for {
+      _   <- connRepo.create(BankConnection(BankConnectionId("conn-1"), "PKO", "PL", Some("s"), ConnectionStatus.Active, None, None, importedAt))
+      _   <- connRepo.createLink(link("l-rev", "uid-rev", "PL12291000060000000003939139"))
+      _   <- connRepo.createLink(link("l-pko", "uid-pko", "PL51102018110000040203204047"))
+      // Revolut names the PKO account; PKO sees the clearing IBAN.
+      _   <- repo.insertNew(
+               tx("t-out", "uid-rev", "r-out", amountCents = -2879400, bookedAt = sent, counterpartyAccount = Some("PL51102018110000040203204047")),
+             )
+      _   <- repo.insertNew(tx("t-in", "uid-pko", "r-in", amountCents = 2879400, bookedAt = sent.plusSeconds(86400), counterpartyAccount = clearing))
+      // The same clearing IBAN with no matching side, and a matching amount too many days later: not internal.
+      _   <- repo.insertNew(tx("t-lone", "uid-pko", "r-lone", amountCents = 100000, bookedAt = sent, counterpartyAccount = clearing))
+      _   <- repo.insertNew(
+               tx("t-late", "uid-pko", "r-late", amountCents = 2879400, bookedAt = sent.plusSeconds(86400 * 10), counterpartyAccount = clearing),
+             )
+      _   <- repo.markInternalTransfers()
+      all <- repo.list(None, None, None)
+    } yield {
+      all.find(_.id.value == "t-out").map(_.internal) shouldBe Some(true)
+      all.find(_.id.value == "t-in").map(_.internal) shouldBe Some(true)
+      all.find(_.id.value == "t-lone").map(_.internal) shouldBe Some(false)
+      all.find(_.id.value == "t-late").map(_.internal) shouldBe Some(false)
+    }
+  }
+
   "markInternalTransfers flags own-movement descriptors that carry no counterparty IBAN (card repayment, auto-save)" in {
     val repo = new BankTransactionRepositoryImpl(xa)
     for {
