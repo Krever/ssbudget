@@ -250,7 +250,7 @@ object BankingPage {
         if jobsVar.now().exists(_.status == ImportJobStatus.Running) || tick % 12 == 0 then refreshJobs()
       },
       div(
-        cls := "d-flex justify-content-between align-items-center mb-4",
+        cls := "d-flex justify-content-between align-items-center mb-3",
         h4(cls := "mb-0", "Bank Connections"),
         button(
           cls  := "btn btn-primary",
@@ -262,7 +262,6 @@ object BankingPage {
           },
         ),
       ),
-      importActivityCard(jobsVar.signal, expandedJobs, showAllJobs),
       child.maybe <-- errorVar.signal.map(_.map { error =>
         div(
           cls := "alert alert-danger alert-dismissible",
@@ -277,34 +276,47 @@ object BankingPage {
           button(tpe := "button", cls := "btn-close", onClick --> { _ => successVar.set(None) }),
         )
       }),
-      connectCard(countryVar, aspspNameVar, aspspsVar, connectingVar, loadAspsps, connect),
-      cardGroupsCard(
-        cardGroupsVar.signal,
-        connectionsVar.signal,
-        accountsVar.signal,
-        createGroup,
-        deleteGroup,
-        linkGroup,
-        setGroupLimit,
-        createAndLinkGroup,
-      ),
-      child <-- loadingVar.signal.map { loading =>
-        if loading then div(cls := "text-center py-3", div(cls := "spinner-border text-primary"))
-        else
-          connectionsList(
+      // Two columns on a wide window. On the left the banks and their accounts, which is what the page is for. On the right the tools: what
+      // the last runs did, the card groups, and the form for a new bank. As one column each table was as wide as the window, and an account
+      // and its link were far apart. On a narrow window the right column goes below the left one.
+      div(
+        cls := "row g-3",
+        div(
+          cls := "col-xl-7",
+          child <-- loadingVar.signal.map { loading =>
+            if loading then div(cls := "text-center py-3", div(cls := "spinner-border text-primary"))
+            else
+              connectionsList(
+                connectionsVar.signal,
+                accountsVar.signal,
+                cardGroupsVar.signal,
+                syncingVar,
+                importingVar,
+                disconnect,
+                sync,
+                importTx,
+                renew,
+                link,
+                createAndLink,
+              )
+          },
+        ),
+        div(
+          cls := "col-xl-5",
+          importActivityCard(jobsVar.signal, expandedJobs, showAllJobs),
+          cardGroupsCard(
+            cardGroupsVar.signal,
             connectionsVar.signal,
             accountsVar.signal,
-            cardGroupsVar.signal,
-            syncingVar,
-            importingVar,
-            disconnect,
-            sync,
-            importTx,
-            renew,
-            link,
-            createAndLink,
-          )
-      },
+            createGroup,
+            deleteGroup,
+            linkGroup,
+            setGroupLimit,
+            createAndLinkGroup,
+          ),
+          connectCard(countryVar, aspspNameVar, aspspsVar, connectingVar, loadAspsps, connect),
+        ),
+      ),
     )
   }
 

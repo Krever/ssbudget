@@ -19,11 +19,12 @@ Bootstrap follows), the number face and the surfaces. A change of the general lo
 
 **Bank connections** (Banking page) - each bank is a card: the header has the bank, the state of its access (a mark only when it
 is not active) and the actions; the body is a ledger of its accounts with "Counts as" for the link. Accounts with no link and no
-balance fold into one line.
+balance fold into one line. On a wide window the page has two columns: the banks on the left, the tools (import activity, card
+groups, the form for a new bank) on the right.
 
 **The frame of a page** - every page is `container-fluid mt-3` with an `h4` title, and its cards have a plain title in the header.
 `app.css` gives every table the same quiet head and the same inset when it fills its card, and every card header one size. A page of
-forms (Settings) adds `page-narrow`. A status is shown only where it says something: one "open" mark on the Periods table, no badge
+forms or of one short table (Settings, Accounts) adds `page-narrow`, a centred column. A status is shown only where it says something: one "open" mark on the Periods table, no badge
 on each closed row.
 
 **Accounts ledger** (Dashboard) - one table of groups by account type (spending, on hold, savings, investments; a group with no
@@ -32,8 +33,9 @@ its totals, so there are no "Total" rows. Every amount is in the primary currenc
 foreign account is the small line under its balance. Spending accounts have no change figure. Spending accounts with a small balance fold into one line. The strip under the
 table holds what the period did: saved, market result, net worth.
 
-**Accounts page** - the same ledger, for the management of accounts: one table, a heading row for each account type (all four, also
-an empty one, each with its "+ Add"), one row for each account. An account shows in the group of its type, and the type is a field
+**Accounts page** - the same ledger, for the management of accounts: one table in a narrow centred column, a heading row for each
+account type that has an account (the spending group always), each with its "+ Add", and one row for each account. The add row has
+a Type field, so a type with no heading can still get its first account. An account shows in the group of its type, and the type is a field
 of its edit row. Every account can be edited (name, type); a field that the server is sure to refuse is locked with its reason.
 
 **Charts** - every chart is a `ChartKit.chart` (frontend components), so they are all drawn and read in one way: a plot at the real

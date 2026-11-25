@@ -13,7 +13,7 @@ import scala.concurrent.Future
   *
   * It is the ledger of the Dashboard's Accounts card, with the same groups in the same order (`accounts-ledger` in `app.css`): one table, a heading
   * row for each account type with the total of the group, and one row for each account. An account shows in the group of its type, so the type has no
-  * column; it is a field of the edit row. Every group is shown, also an empty one, because this is the page where its first account is made.
+  * column; it is a field of the edit row. A type with no account has no heading.
   */
 object AccountsPage {
 
@@ -47,7 +47,10 @@ object AccountsPage {
       .combineWith(dataService.primaryCurrency)
       .combineWith(dataService.exchangeRates)
       .map { case (accounts, editingId, addingTo, currencies, primary, rates) =>
-        groups.flatMap { role =>
+        // A type with no account has no heading, as on the Dashboard: an empty "On hold" row said nothing. Each "+ Add" can make an account
+        // of any type (the add row has a Type field), so a hidden group can still get its first account. The spending group always shows,
+        // so that an empty page has an "+ Add".
+        groups.filter(role => role == AccountRole.Spending || addingTo.contains(role) || accounts.exists(_.role == role)).flatMap { role =>
           val inGroup = accounts.filter(_.role == role).sortBy(_.name.toLowerCase)
           val total   = DataService.sumInPrimary(inGroup.map(a => Money(a.balanceCents, a.currency)), rates, primary)
           groupRow(role, inGroup.size, total, adding) ::
@@ -60,7 +63,8 @@ object AccountsPage {
       }
 
     div(
-      cls := "container-fluid mt-3",
+      // A narrow column: at the full width of the window the name of an account and its balance were too far apart to read as one row.
+      cls := "container-fluid mt-3 page-narrow",
       h4("Accounts"),
       div(
         cls              := "card",

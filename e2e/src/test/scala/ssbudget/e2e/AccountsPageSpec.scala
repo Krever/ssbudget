@@ -14,11 +14,13 @@ class AccountsPageSpec extends E2ESpec {
 
   private def editRow = accountsCard.findElement(By.cssSelector("tbody tr.table-warning"))
 
-  "Accounts page" should "show a group for each account type" in {
+  "Accounts page" should "show a group only for a type that has an account, and the spending group always" in {
+    addSavingsAccount("Group Test Savings")
     open()
-    List("spending" -> "Spending", "holding" -> "On hold", "savings" -> "Savings", "investment" -> "Investments").foreach { case (key, label) =>
-      accountsGroup(key).getText should include(label)
-    }
+    accountsGroup("spending").getText should include("Spending")
+    accountsGroup("savings").getText should include("Savings")
+    // No account is on hold: that type has no heading row.
+    withoutImplicitWait(accountsCard.findElements(By.cssSelector("tr[data-group='holding']")).size()) shouldBe 0
   }
 
   // ============ Spending accounts ============
@@ -73,12 +75,12 @@ class AccountsPageSpec extends E2ESpec {
     editRow.findElement(By.cssSelector("select[data-field='type'] option[value='holding']")).click()
     click(editRow, "Save")
 
-    // The account now stands after the heading of "On hold" and before the heading of "Savings".
+    // The heading of "On hold" is there now, and the account is the row after it.
     eventually {
-      val names = rows(accountsCard).map(_.getText)
-      val at    = names.indexWhere(_.contains("Becomes On Hold"))
-      at should be > names.indexWhere(_.startsWith("On hold"))
-      at should be < names.indexWhere(_.startsWith("Savings"))
+      val names   = rows(accountsCard).map(_.getText)
+      val heading = names.indexWhere(_.startsWith("On hold"))
+      heading should be >= 0
+      names.indexWhere(_.contains("Becomes On Hold")) shouldBe heading + 1
     }
   }
 
@@ -86,25 +88,24 @@ class AccountsPageSpec extends E2ESpec {
 
   it should "add a new savings account" in {
     open()
-    val initialCount = rows(accountsCard).size
-    click(accountsGroup("savings"), "+ Add")
+    openAccountAddRow("savings")
 
     accountAddRow.findElement(By.cssSelector("input[type='text']")).sendKeys("New Savings")
     click(accountAddRow, "Add")
 
-    eventually(rows(accountsCard).size shouldBe (initialCount + 1))
-    // The row for a new account starts with the type of the group whose "+ Add" opened it.
+    // The account is in the savings group, whatever group the row was opened from.
     eventually {
-      val names = rows(accountsCard).map(_.getText)
-      names.indexWhere(_.contains("New Savings")) should be > names.indexWhere(_.startsWith("Savings"))
+      val names   = rows(accountsCard).map(_.getText)
+      val heading = names.indexWhere(_.startsWith("Savings"))
+      heading should be >= 0
+      names.indexWhere(_.contains("New Savings")) should be > heading
     }
   }
 
   it should "cancel adding savings account" in {
     open()
     val initialCount = rows(accountsCard).size
-    click(accountsGroup("savings"), "+ Add")
-    eventually(rows(accountsCard).size shouldBe (initialCount + 1))
+    openAccountAddRow("savings")
     click(accountAddRow, "Cancel")
 
     eventually(rows(accountsCard).size shouldBe initialCount)

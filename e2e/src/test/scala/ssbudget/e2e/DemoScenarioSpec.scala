@@ -408,10 +408,12 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     injectDemoStyles()
 
     List("Emergency Fund", "Vacation Fund").foreach { name =>
-      demoClickButton(accountsPageGroup("savings"), "+ Add")
+      // A type with no account has no heading row: the row is opened from the spending group, and the type is set in it.
+      demoClickButton(accountsPageGroup("spending"), "+ Add")
       pause(shortPause)
 
       val addRow    = accountsPageAddRow
+      addRow.findElement(By.cssSelector("select[data-field='type'] option[value='savings']")).click()
       val nameInput = addRow.findElement(By.cssSelector("input[type='text']"))
       demoClick(nameInput)
       typeSlowly(nameInput, name)

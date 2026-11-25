@@ -99,6 +99,15 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   /** The open row for a new account on the Accounts page. */
   protected def accountAddRow: WebElement = accountsCard.findElement(By.cssSelector("tbody tr.table-primary"))
 
+  /** Opens the row for a new account of a type ("spending", "holding", "savings", "investment"). A type with no account has no heading row, so the
+    * row is opened from the spending group, which is always there, and the type is set in the row.
+    */
+  protected def openAccountAddRow(accountType: String): WebElement = {
+    click(accountsGroup("spending"), "+ Add")
+    accountAddRow.findElement(By.cssSelector(s"select[data-field='type'] option[value='$accountType']")).click()
+    accountAddRow
+  }
+
   protected def findCardByDiv(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//div[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
@@ -242,9 +251,7 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
-    click(accountsGroup("savings"), "+ Add")
-
-    val addRow = accountAddRow
+    val addRow = openAccountAddRow("savings")
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
     click(addRow, "Add")
     eventually(accountsCard.getText should include(name))

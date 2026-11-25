@@ -79,7 +79,8 @@ body {
 /* A page of forms and short lists reads badly at the full width of the window. */
 .page-narrow {
   max-width: 980px;
-  margin-left: 0;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .badge {
