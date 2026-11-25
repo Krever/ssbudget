@@ -370,6 +370,7 @@ ssbudget/
 sbt backend/test          # the fast test loop (a plain `sbt test` also starts the browser tests)
 sbt e2e/test              # browser tests (Chrome)
 sbt scalafmtAll           # format; CI checks it
+sbt dependencyUpdates     # lists newer versions of the libraries (the sbt-updates plugin)
 
 ./build.sh --no-image     # release artifacts: backend/stage, optimized frontend, docker/VERSION (the commit)
 fly deploy --remote-only  # fly.io builds the image from those artifacts
@@ -379,6 +380,10 @@ fly deploy --remote-only  # fly.io builds the image from those artifacts
   app then run as that user (`docker/entrypoint.sh`). `fly ssh console` is still root: a file that root makes in `/data` while the
   app runs is not writable for the app until the next start.
 - The image build checks the SHA-256 of the Metabase jar (`Dockerfile`: change `METABASE_VERSION` and `METABASE_SHA256` together).
+- Library updates have two limits. Scala stays at 3.5.2 (see the decisions log), so a library that is built for a newer Scala cannot be
+  used: `scala-java-time` above 2.6.0 and `waypoint` above 10.0.0-M1 are such. And a JavaScript-side library can need a newer Scala.js
+  linker: then `sbt-scalajs` in `project/plugins.sbt` goes up with it. The link step shows that fault, the compile step does not, so run
+  `sbt frontend/fastLinkJS` (or the browser tests) after an update.
 - The app migrates its database at start (Flyway). The container copies the database to `/data/backups` before that
   (`docker/entrypoint.sh`, newest 5 kept), and the deploy waits for the health check in `fly.toml`.
 - `GET /api/health` answers `ok <commit>`: it says which build is live.

@@ -5,11 +5,11 @@ ThisBuild / scalaVersion := "3.5.2"
 ThisBuild / organization := "org.ssbudget"
 
 // Dependency versions (only for deps used in multiple modules)
-val http4sVersion = "0.23.30"
-val tapirVersion  = "1.11.11"
-val circeVersion  = "0.14.10"
-val doobieVersion = "1.0.0-RC6"
-val sttpVersion   = "3.10.2"
+val http4sVersion = "0.23.39"
+val tapirVersion  = "1.11.50"
+val circeVersion  = "0.14.17"
+val doobieVersion = "1.0.0-RC12"
+val sttpVersion   = "3.10.3"
 
 // The SQLite driver unpacks its native library to a NEW temporary file in each JVM. macOS checks a new library file before it loads it, and on
 // a busy machine that check takes minutes (measured on 2026-11-19: about 200 s for the first connection, against about 30 s with a stable
@@ -64,9 +64,9 @@ lazy val e2e = (project in file("e2e"))
   .settings(
     name         := "e2e",
     libraryDependencies ++= Seq(
-      "org.scalatest"          %% "scalatest"        % "3.2.19" % Test,
-      "org.seleniumhq.selenium" % "selenium-java"    % "4.27.0" % Test,
-      "io.github.bonigarcia"    % "webdrivermanager" % "5.9.2"  % Test,
+      "org.scalatest"          %% "scalatest"        % "3.2.20" % Test,
+      "org.seleniumhq.selenium" % "selenium-java"    % "4.54.0" % Test,
+      "io.github.bonigarcia"    % "webdrivermanager" % "5.9.3"  % Test,
     ),
     testCodeOptions,
     Test / fork  := true,
@@ -104,7 +104,7 @@ lazy val backend = (project in file("backend"))
     Compile / mainClass  := Some("ssbudget.backend.Main"),
     executableScriptName := "ssbudget",
     libraryDependencies ++= Seq(
-      "org.typelevel"                 %% "cats-effect"                   % "3.5.7",
+      "org.typelevel"                 %% "cats-effect"                   % "3.7.1",
       "org.http4s"                    %% "http4s-ember-server"           % http4sVersion,
       "org.http4s"                    %% "http4s-dsl"                    % http4sVersion,
       "org.http4s"                    %% "http4s-circe"                  % http4sVersion,
@@ -112,19 +112,19 @@ lazy val backend = (project in file("backend"))
       "com.softwaremill.sttp.tapir"   %% "tapir-json-circe"              % tapirVersion,
       "com.softwaremill.sttp.client3" %% "fs2"                           % sttpVersion,
       "io.circe"                      %% "circe-generic"                 % circeVersion,
-      "ch.qos.logback"                 % "logback-classic"               % "1.5.15",
+      "ch.qos.logback"                 % "logback-classic"               % "1.5.38",
       // Database
       "org.tpolecat"                  %% "doobie-core"                   % doobieVersion,
       "org.tpolecat"                  %% "doobie-hikari"                 % doobieVersion,
-      "org.xerial"                     % "sqlite-jdbc"                   % "3.47.2.0",
+      "org.xerial"                     % "sqlite-jdbc"                   % "3.54.1.0",
       "org.flywaydb"                   % "flyway-core"                   % "10.22.0",
       // Authentication
-      "de.mkammerer"                   % "argon2-jvm"                    % "2.11",
-      "com.yubico"                     % "webauthn-server-core"          % "2.5.3",
+      "de.mkammerer"                   % "argon2-jvm"                    % "2.12",
+      "com.yubico"                     % "webauthn-server-core"          % "2.5.4",
       // Testing
-      "org.scalatest"                 %% "scalatest"                     % "3.2.19" % Test,
-      "org.typelevel"                 %% "cats-effect-testing-scalatest" % "1.6.0"  % Test,
-      "org.wiremock"                   % "wiremock-standalone"           % "3.9.1"  % Test,
+      "org.scalatest"                 %% "scalatest"                     % "3.2.20" % Test,
+      "org.typelevel"                 %% "cats-effect-testing-scalatest" % "1.8.0"  % Test,
+      "org.wiremock"                   % "wiremock-standalone"           % "3.9.2"  % Test,
     ),
     testCodeOptions,
     Compile / run / fork := true,
@@ -147,7 +147,7 @@ lazy val frontend = (project in file("frontend"))
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.ESModule) },
     scalaJSUseMainModuleInitializer := true,
     libraryDependencies ++= Seq(
-      "com.raquo"                     %%% "laminar"           % "17.2.0",
+      "com.raquo"                     %%% "laminar"           % "17.2.1",
       "com.raquo"                     %%% "waypoint"          % "10.0.0-M1",
       "com.softwaremill.sttp.tapir"   %%% "tapir-sttp-client" % tapirVersion,
       "com.softwaremill.sttp.client3" %%% "core"              % sttpVersion,

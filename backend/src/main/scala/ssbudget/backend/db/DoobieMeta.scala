@@ -2,7 +2,6 @@ package ssbudget.backend.db
 
 import cats.implicits.*
 import doobie.*
-import doobie.implicits.*
 import io.circe.parser.decode
 import io.circe.syntax.*
 import ssbudget.shared.model.*

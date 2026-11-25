@@ -10,9 +10,9 @@
   },
   "devDependencies": {
     "@scala-js/vite-plugin-scalajs": "^1.0.0",
-    "vite": "^6.0.0"
+    "vite": "^6.4.6"
   },
   "dependencies": {
-    "bootstrap": "^5.3.3"
+    "bootstrap": "^5.3.9"
   }
 }
