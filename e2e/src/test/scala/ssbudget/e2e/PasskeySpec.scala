@@ -80,7 +80,7 @@ class PasskeySpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with 
     waitFor.until(ExpectedConditions.visibilityOfElementLocated(By.className("navbar")))
     // Use link text or contains href since absoluteUrlForPage returns full URL
     driver.findElement(By.linkText("Settings")).click()
-    waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h2"), "Settings"))
+    waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h4"), "Settings"))
     Thread.sleep(300)
   }
 

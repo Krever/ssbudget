@@ -52,7 +52,7 @@ class DatabaseSpec extends E2ESpec {
 
     // Go to settings and click export
     driver.get(s"$baseUrl/settings")
-    waitFor.until(_ => driver.findElement(By.tagName("h2")).getText.contains("Settings"))
+    waitForPage("Settings")
 
     val dataCard   = findCardByH5("Data")
     val exportLink = dataCard.findElement(By.xpath(".//button[contains(.,'Export Database')]"))
@@ -89,7 +89,7 @@ class DatabaseSpec extends E2ESpec {
 
     // Step 2: Export the database
     driver.get(s"$baseUrl/settings")
-    waitFor.until(_ => driver.findElement(By.tagName("h2")).getText.contains("Settings"))
+    waitForPage("Settings")
 
     val dataCard   = findCardByH5("Data")
     val exportLink = dataCard.findElement(By.xpath(".//button[contains(.,'Export Database')]"))
@@ -120,7 +120,7 @@ class DatabaseSpec extends E2ESpec {
 
     // Step 4: Import the backup
     driver.get(s"$baseUrl/settings")
-    waitFor.until(_ => driver.findElement(By.tagName("h2")).getText.contains("Settings"))
+    waitForPage("Settings")
 
     val dataCardAgain = findCardByH5("Data")
     val fileInput     = dataCardAgain.findElement(By.cssSelector("input[type='file']"))
@@ -145,7 +145,7 @@ class DatabaseSpec extends E2ESpec {
 
   it should "show error for invalid file" in {
     driver.get(s"$baseUrl/settings")
-    waitFor.until(_ => driver.findElement(By.tagName("h2")).getText.contains("Settings"))
+    waitForPage("Settings")
 
     // Create an invalid file (not SQLite)
     val invalidFile = Files.createTempFile(downloadDir, "invalid", ".db")

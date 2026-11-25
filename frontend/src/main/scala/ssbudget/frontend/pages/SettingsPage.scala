@@ -101,9 +101,9 @@ object SettingsPage {
     }
 
     div(
-      cls := "container py-4",
+      cls := "container-fluid mt-3 page-narrow",
       onMountCallback { _ => loadPasskeys() },
-      h2(cls := "mb-4", "Settings"),
+      h4(cls := "mb-3", "Settings"),
 
       // Messages
       child.maybe <-- errorVar.signal.map(_.map { error =>
@@ -166,10 +166,10 @@ object SettingsPage {
                           div(
                             strong(key.displayName.getOrElse("Unnamed passkey")),
                             br(),
-                            small(cls := "text-muted", s"Added: ${key.createdAt.toString.take(10)}"),
+                            small(cls := "text-muted", s"Added ${Formatting.formatDate(key.createdAt)}"),
                             key.lastUsedAt
                               .map { used =>
-                                small(cls := "text-muted ms-2", s"Last used: ${used.toString.take(10)}")
+                                small(cls := "text-muted ms-2", s"last used ${Formatting.formatDate(used)}")
                               }
                               .getOrElse(emptyNode),
                           ),

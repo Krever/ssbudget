@@ -236,7 +236,7 @@ object BankingPage {
     }
 
     div(
-      cls := "container py-4",
+      cls := "container-fluid mt-3",
       onMountCallback { _ =>
         loadConnections()
         loadCardGroups()
@@ -251,7 +251,7 @@ object BankingPage {
       },
       div(
         cls := "d-flex justify-content-between align-items-center mb-4",
-        h2(cls := "mb-0", "Bank Connections"),
+        h4(cls := "mb-0", "Bank Connections"),
         button(
           cls  := "btn btn-primary",
           disabled <-- anyJobRunning.combineWith(connectionsVar.signal).map { case (running, conns) => running || conns.isEmpty },

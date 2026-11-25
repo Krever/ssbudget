@@ -75,7 +75,7 @@ class PeriodsPageSpec extends E2ESpec {
     loadedHistoryRows().size should be >= 1
 
     val card = findCardByDiv("Period History")
-    card.findElements(By.xpath(".//span[contains(@class,'badge') and contains(text(),'Active')]")).size() shouldBe 1
+    card.findElements(By.cssSelector("[data-period='open']")).size() shouldBe 1
   }
 
   it should "report what happened in each period" in {
@@ -115,7 +115,7 @@ class PeriodsPageSpec extends E2ESpec {
       val history = findCardByDiv("Period History")
       history.getText should not include "Loading period history"
       rows(history).size shouldBe (initialCount + 1)
-      history.findElements(By.xpath(".//span[contains(@class,'badge') and contains(text(),'Active')]")).size() shouldBe 1
+      history.findElements(By.cssSelector("[data-period='open']")).size() shouldBe 1
     }
   }
 

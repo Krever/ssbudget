@@ -17,6 +17,11 @@ Think "Google Sheets for personal budget" not "enterprise dashboard with cards e
 **Look** - Bootstrap, plus one stylesheet of our own: `frontend/styles/app.css`. It sets the scale (root size 14px, so all of
 Bootstrap follows), the number face and the surfaces. A change of the general look goes there, not into page code.
 
+**The frame of a page** - every page is `container-fluid mt-3` with an `h4` title, and its cards have a plain title in the header.
+`app.css` gives every table the same quiet head and the same inset when it fills its card, and every card header one size. A page of
+forms (Settings) adds `page-narrow`. A status is shown only where it says something: one "open" mark on the Periods table, no badge
+on each closed row.
+
 **Accounts ledger** (Dashboard) - one table of groups by account type (spending, on hold, savings, investments; a group with no
 account is not shown). The heading row of a group carries
 its totals, so there are no "Total" rows. Every amount is in the primary currency so that a column reads down; the own currency of a

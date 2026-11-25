@@ -337,7 +337,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     showPhase("💱 Configuring Currencies")
 
     driver.get(s"$baseUrl/settings")
-    waitFor.until(_ => driver.findElement(By.tagName("h2")).getText.contains("Settings"))
+    waitForPage("Settings")
     injectDemoStyles()
     pause()
 

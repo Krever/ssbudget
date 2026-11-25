@@ -288,7 +288,8 @@ object PeriodsPage {
         ),
         td(
           cls  := "pe-3 text-end",
-          if s.ongoing then span(cls := "badge text-bg-success", "Active") else span(cls := "badge text-bg-secondary", "Closed"),
+          // Only the open period is marked. A badge on each closed row was fifteen grey boxes that said nothing.
+          if s.ongoing then span(cls := "small text-success", dataAttr("period") := "open", "open") else emptyNode,
         ),
       ),
       if isExpanded then tr(td(colSpan := historyColumns, cls := "p-0", detailPanel(s, linkWindow, points))) else emptyNode,

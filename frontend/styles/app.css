@@ -45,26 +45,48 @@ body {
   border-bottom-color: var(--ss-rule);
 }
 
+/* The head of every table: small and quiet, so that the eye goes to the figures. */
 .table > thead > tr > th {
-  font-weight: 600;
-  border-bottom-color: #ced4da;
-}
-
-/* ---- Dashboard: the accounts ledger ---- */
-
-.accounts-ledger > thead > tr > th {
   font-size: 0.82rem;
   font-weight: 400;
   color: var(--ss-muted);
+  border-bottom-color: #ced4da;
 }
 
-.accounts-ledger > * > tr > :first-child {
+/* A table that fills its card from edge to edge: its first and last cells keep the inset of the card header. */
+.card-body.p-0 > .table > * > tr > :first-child {
   padding-left: 1rem;
 }
 
-.accounts-ledger > * > tr > :last-child {
+.card-body.p-0 > .table > * > tr > :last-child {
   padding-right: 1rem;
 }
+
+/* ---- The frame of a page ---- */
+
+/* The title of a card has one size, whatever element holds it. */
+.card-header {
+  padding: 0.5rem 1rem;
+}
+
+.card-header h5,
+.card-header h6 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+/* A page of forms and short lists reads badly at the full width of the window. */
+.page-narrow {
+  max-width: 980px;
+  margin-left: 0;
+}
+
+.badge {
+  font-weight: 500;
+}
+
+/* ---- Dashboard: the accounts ledger ---- */
 
 .accounts-ledger td {
   vertical-align: baseline;
