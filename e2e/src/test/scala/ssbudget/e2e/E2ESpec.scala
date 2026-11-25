@@ -88,6 +88,17 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
   protected def findCard(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//span[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
+  /** The one card of the Accounts page: a ledger with a heading row for each account type. Found again on each call. */
+  protected def accountsCard: WebElement = driver.findElement(By.cssSelector("[data-card='accounts']"))
+
+  /** The heading row of an account type on the Accounts page ("spending", "holding", "savings", "investment"). Its "+ Add" opens the row for a new
+    * account of that type.
+    */
+  protected def accountsGroup(group: String): WebElement = accountsCard.findElement(By.cssSelector(s"tr[data-group='$group']"))
+
+  /** The open row for a new account on the Accounts page. */
+  protected def accountAddRow: WebElement = accountsCard.findElement(By.cssSelector("tbody tr.table-primary"))
+
   protected def findCardByDiv(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//div[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
@@ -213,10 +224,9 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
-    val bankCard = findCard("Bank Accounts")
-    click(bankCard, "+ Add")
+    click(accountsGroup("spending"), "+ Add")
 
-    val addRow = bankCard.findElement(By.cssSelector("tbody tr.table-primary"))
+    val addRow = accountAddRow
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
     // Select currency if not PLN
     if currency != "PLN" then {
@@ -224,7 +234,7 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
       select.findElement(By.xpath(s".//option[text()='$currency']")).click()
     }
     click(addRow, "Add")
-    eventually(findCard("Bank Accounts").getText should include(name))
+    eventually(accountsCard.getText should include(name))
   }
 
   /** Add a savings account */
@@ -232,13 +242,12 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
-    val savingsCard = findCard("Savings & Investments")
-    click(savingsCard, "+ Add")
+    click(accountsGroup("savings"), "+ Add")
 
-    val addRow = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
+    val addRow = accountAddRow
     addRow.findElement(By.cssSelector("input[type='text']")).sendKeys(name)
     click(addRow, "Add")
-    eventually(findCard("Savings & Investments").getText should include(name))
+    eventually(accountsCard.getText should include(name))
   }
 
   /** One entry of the Dashboard's Plan, found by name: the block holding its bar, state line and buttons. Re-found on each call, because Laminar

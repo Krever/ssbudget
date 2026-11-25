@@ -116,8 +116,7 @@ class DatabaseSpec extends E2ESpec {
     // Verify the new data exists
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
-    val bankCardBefore = findCard("Bank Accounts")
-    bankCardBefore.getText should include("New Account After Backup")
+    accountsCard.getText should include("New Account After Backup")
 
     // Step 4: Import the backup
     driver.get(s"$baseUrl/settings")
@@ -139,9 +138,8 @@ class DatabaseSpec extends E2ESpec {
     waitForPage("Accounts")
 
     eventually {
-      val bankCardAfter = findCard("Bank Accounts")
-      bankCardAfter.getText should include("Original Account")
-      bankCardAfter.getText should not include "New Account After Backup"
+      accountsCard.getText should include("Original Account")
+      accountsCard.getText should not include "New Account After Backup"
     }
   }
 

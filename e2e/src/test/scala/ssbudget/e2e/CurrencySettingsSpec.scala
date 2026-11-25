@@ -168,10 +168,9 @@ class CurrencySettingsSpec extends E2ESpec {
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
 
-    val bankCard = findCard("Bank Accounts")
-    click(bankCard, "+ Add")
+    click(accountsGroup("spending"), "+ Add")
 
-    val addRow   = bankCard.findElement(By.cssSelector("tbody tr.table-primary"))
+    val addRow   = accountAddRow
     val dropdown = addRow.findElement(By.cssSelector("select"))
     val options  = dropdown.findElements(By.tagName("option")).asScala.map(_.getText).toList
 

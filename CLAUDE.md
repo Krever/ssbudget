@@ -23,6 +23,10 @@ its totals, so there are no "Total" rows. Every amount is in the primary currenc
 foreign account is the small line under its balance. Spending accounts have no change figure. Spending accounts with a small balance fold into one line. The strip under the
 table holds what the period did: saved, market result, net worth.
 
+**Accounts page** - the same ledger, for the management of accounts: one table, a heading row for each account type (all four, also
+an empty one, each with its "+ Add"), one row for each account. An account shows in the group of its type, and the type is a field
+of its edit row. Every account can be edited (name, type); a field that the server is sure to refuse is locked with its reason.
+
 **Charts** - every chart is a `ChartKit.chart` (frontend components), so they are all drawn and read in one way: a plot at the real
 pixel width of its container, one labelled scale, a pointer readout that snaps to the nearest position (arrow keys do the same), a
 legend with line keys, and the same figures as a table below. The kit owns that mechanism; a chart gives it only its series, how a

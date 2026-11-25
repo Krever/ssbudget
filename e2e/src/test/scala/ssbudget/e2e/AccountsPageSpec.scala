@@ -1,157 +1,139 @@
 package ssbudget.e2e
 
 import org.openqa.selenium.By
-import scala.jdk.CollectionConverters.*
 
+/** The Accounts page: one ledger with a heading row for each account type, as the Accounts card of the Dashboard has. */
 class AccountsPageSpec extends E2ESpec {
 
-  // ============ Bank Accounts ============
-
-  "Accounts page" should "load and show bank accounts card" in {
+  private def open(): Unit = {
     driver.get(s"$baseUrl/accounts")
     waitForPage("Accounts")
-
-    val cardTexts = driver.findElements(By.cssSelector(".card")).asScala.map(_.getText).toList
-    cardTexts.exists(_.contains("Bank Accounts")) shouldBe true
   }
 
+  private def rowOf(name: String) = accountsCard.findElement(By.xpath(s".//tr[.//td[contains(text(),'$name')]]"))
+
+  private def editRow = accountsCard.findElement(By.cssSelector("tbody tr.table-warning"))
+
+  "Accounts page" should "show a group for each account type" in {
+    open()
+    List("spending" -> "Spending", "holding" -> "On hold", "savings" -> "Savings", "investment" -> "Investments").foreach { case (key, label) =>
+      accountsGroup(key).getText should include(label)
+    }
+  }
+
+  // ============ Spending accounts ============
+
   it should "add a new bank account" in {
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
+    open()
+    val initialCount = rows(accountsCard).size
+    click(accountsGroup("spending"), "+ Add")
 
-    val bankCard     = findCard("Bank Accounts")
-    val initialCount = rows(bankCard).size
-    click(bankCard, "+ Add")
+    accountAddRow.findElement(By.cssSelector("input[type='text']")).sendKeys("Test Account")
+    click(accountAddRow, "Add")
 
-    val addRow = bankCard.findElement(By.cssSelector("tbody tr.table-primary"))
-    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("Test Account")
-    click(addRow, "Add")
-
-    eventually(rows(bankCard).size shouldBe (initialCount + 1))
+    eventually(rows(accountsCard).size shouldBe (initialCount + 1))
+    rowShouldExist(accountsCard, "Test Account")
   }
 
   it should "cancel adding bank account" in {
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
+    open()
+    val initialCount = rows(accountsCard).size
+    click(accountsGroup("spending"), "+ Add")
+    eventually(rows(accountsCard).size shouldBe (initialCount + 1))
+    click(accountAddRow, "Cancel")
 
-    val bankCard     = findCard("Bank Accounts")
-    val initialCount = rows(bankCard).size
-    click(bankCard, "+ Add")
-    click(bankCard.findElement(By.cssSelector("tbody tr.table-primary")), "Cancel")
-
-    rows(bankCard).size shouldBe initialCount
+    eventually(rows(accountsCard).size shouldBe initialCount)
   }
 
   it should "enter and cancel edit mode for bank account" in {
     addBankAccount("Edit Test Account")
+    open()
 
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
+    click(rowOf("Edit Test Account"), "Edit")
+    editRow.isDisplayed shouldBe true
+    editRow.findElement(By.cssSelector("input[type='text']")).getAttribute("value") shouldBe "Edit Test Account"
 
-    val bankCard    = findCard("Bank Accounts")
-    val firstRow    = bankCard.findElement(By.cssSelector("tbody tr"))
-    val initialName = firstRow.findElement(By.cssSelector("td:first-child")).getText
-
-    click(firstRow, "Edit")
-    bankCard.findElement(By.cssSelector("tbody tr.table-warning")).isDisplayed shouldBe true
-
-    click(bankCard.findElement(By.cssSelector("tbody tr.table-warning")), "Cancel")
-    bankCard.findElement(By.cssSelector("tbody tr td:first-child")).getText shouldBe initialName
+    click(editRow, "Cancel")
+    rowShouldExist(accountsCard, "Edit Test Account")
   }
 
-  it should "show total balance in footer" in {
+  it should "show the total of a group in its heading row" in {
     addBankAccount("Footer Test Account")
+    open()
 
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
-
-    val bankCard   = findCard("Bank Accounts")
-    val footerText = bankCard.findElement(By.cssSelector(".card-footer")).getText
-    footerText should include("Total:")
+    // Every balance is zero here; the heading still carries the total, in the primary currency.
+    eventually(accountsGroup("spending").getText should include("PLN"))
   }
 
-  // ============ Savings Accounts ============
+  it should "move an account to the group of its new type" in {
+    addBankAccount("Becomes On Hold")
+    open()
 
-  it should "show savings accounts section" in {
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
+    click(rowOf("Becomes On Hold"), "Edit")
+    editRow.findElement(By.cssSelector("select[data-field='type'] option[value='holding']")).click()
+    click(editRow, "Save")
 
-    val savingsCard = findCard("Savings & Investments")
-    savingsCard.isDisplayed shouldBe true
+    // The account now stands after the heading of "On hold" and before the heading of "Savings".
+    eventually {
+      val names = rows(accountsCard).map(_.getText)
+      val at    = names.indexWhere(_.contains("Becomes On Hold"))
+      at should be > names.indexWhere(_.startsWith("On hold"))
+      at should be < names.indexWhere(_.startsWith("Savings"))
+    }
   }
+
+  // ============ Savings accounts ============
 
   it should "add a new savings account" in {
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
+    open()
+    val initialCount = rows(accountsCard).size
+    click(accountsGroup("savings"), "+ Add")
 
-    val savingsCard  = findCard("Savings & Investments")
-    val initialCount = rows(savingsCard).size
-    click(savingsCard, "+ Add")
+    accountAddRow.findElement(By.cssSelector("input[type='text']")).sendKeys("New Savings")
+    click(accountAddRow, "Add")
 
-    val addRow = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
-    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("New Savings")
-    click(addRow, "Add")
-
-    eventually(rows(savingsCard).size shouldBe (initialCount + 1))
-    rowShouldExist(savingsCard, "New Savings")
+    eventually(rows(accountsCard).size shouldBe (initialCount + 1))
+    // The row for a new account starts with the type of the group whose "+ Add" opened it.
+    eventually {
+      val names = rows(accountsCard).map(_.getText)
+      names.indexWhere(_.contains("New Savings")) should be > names.indexWhere(_.startsWith("Savings"))
+    }
   }
 
   it should "cancel adding savings account" in {
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
+    open()
+    val initialCount = rows(accountsCard).size
+    click(accountsGroup("savings"), "+ Add")
+    eventually(rows(accountsCard).size shouldBe (initialCount + 1))
+    click(accountAddRow, "Cancel")
 
-    val savingsCard  = findCard("Savings & Investments")
-    val initialCount = rows(savingsCard).size
-    click(savingsCard, "+ Add")
-    click(savingsCard.findElement(By.cssSelector("tbody tr.table-success")), "Cancel")
-
-    rows(savingsCard).size shouldBe initialCount
+    eventually(rows(accountsCard).size shouldBe initialCount)
   }
 
   it should "rename a savings account" in {
     addSavingsAccount("Edit Savings Test")
+    open()
 
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
-
-    val savingsCard = findCard("Savings & Investments")
-    val targetRow   = savingsCard.findElement(By.xpath(".//tr[.//td[contains(text(),'Edit Savings Test')]]"))
-    click(targetRow, "Edit")
-
-    val editRow = savingsCard.findElement(By.cssSelector("tbody tr.table-warning"))
-    editRow.isDisplayed shouldBe true
-
+    click(rowOf("Edit Savings Test"), "Edit")
     val nameInput = editRow.findElement(By.cssSelector("input[type='text']"))
     nameInput.clear()
     nameInput.sendKeys("Renamed Savings")
     click(editRow, "Save")
 
-    textShouldAppear(savingsCard, "Renamed Savings")
+    textShouldAppear(accountsCard, "Renamed Savings")
   }
 
   it should "delete savings account" in {
-    driver.get(s"$baseUrl/accounts")
-    waitForPage("Accounts")
+    addSavingsAccount("To Delete")
+    open()
+    val countBefore = rows(accountsCard).size
 
-    // First add an account to delete
-    val savingsCard = findCard("Savings & Investments")
-    click(savingsCard, "+ Add")
-
-    val addRow = savingsCard.findElement(By.cssSelector("tbody tr.table-success"))
-    addRow.findElement(By.cssSelector("input[type='text']")).sendKeys("To Delete")
-    click(addRow, "Add")
-
-    rowShouldExist(savingsCard, "To Delete")
-    val countAfterAdd = rows(savingsCard).size
-
-    // Now delete it
-    val toDelete = savingsCard.findElement(By.xpath(".//tr[.//td[contains(text(),'To Delete')]]"))
-    click(toDelete, "Edit")
-    click(savingsCard.findElement(By.cssSelector("tbody tr.table-warning")), "Del")
+    click(rowOf("To Delete"), "Edit")
+    click(editRow, "Del")
     // A delete takes two clicks: the first one arms the button.
-    click(savingsCard.findElement(By.cssSelector("tbody tr.table-warning")), "Sure?")
+    click(editRow, "Sure?")
 
-    eventually(rows(savingsCard).size shouldBe (countAfterAdd - 1))
-    rowShouldNotExist(savingsCard, "To Delete")
+    eventually(rows(accountsCard).size shouldBe (countBefore - 1))
+    rowShouldNotExist(accountsCard, "To Delete")
   }
 }

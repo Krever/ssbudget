@@ -252,6 +252,11 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   private def findCard(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//span[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
+  // The Accounts page: one ledger card, a heading row for each account type, and one open row for a new account.
+  private def accountsPageCard: WebElement                 = driver.findElement(By.cssSelector("[data-card='accounts']"))
+  private def accountsPageGroup(group: String): WebElement = accountsPageCard.findElement(By.cssSelector(s"tr[data-group='$group']"))
+  private def accountsPageAddRow: WebElement               = accountsPageCard.findElement(By.cssSelector("tbody tr.table-primary"))
+
   private def findCardByDiv(headerText: String): WebElement =
     driver.findElement(By.xpath(s"//div[text()='$headerText']/ancestor::div[contains(@class,'card')]"))
 
@@ -369,8 +374,8 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause()
 
     // Add main bank account (PLN)
-    def bankCard = findCard("Bank Accounts")
-    demoClickButton(bankCard, "+ Add")
+    def bankCard = accountsPageCard
+    demoClickButton(accountsPageGroup("spending"), "+ Add")
     pause(shortPause)
 
     val bankAddRow    = bankCard.findElement(By.cssSelector("tbody tr.table-primary"))
@@ -384,7 +389,7 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     pause()
 
     // Add EUR account
-    demoClickButton(bankCard, "+ Add")
+    demoClickButton(accountsPageGroup("spending"), "+ Add")
     pause(shortPause)
 
     val eurAddRow    = bankCard.findElement(By.cssSelector("tbody tr.table-primary"))
@@ -403,18 +408,18 @@ class DemoScenarioSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     injectDemoStyles()
 
     List("Emergency Fund", "Vacation Fund").foreach { name =>
-      demoClickButton(findCard("Savings & Investments"), "+ Add")
+      demoClickButton(accountsPageGroup("savings"), "+ Add")
       pause(shortPause)
 
-      val addRow    = findCard("Savings & Investments").findElement(By.cssSelector("tbody tr.table-success"))
+      val addRow    = accountsPageAddRow
       val nameInput = addRow.findElement(By.cssSelector("input[type='text']"))
       demoClick(nameInput)
       typeSlowly(nameInput, name)
       pause(shortPause)
       demoClickButton(addRow, "Add")
       await {
-        val card = findCard("Savings & Investments")
-        card.getText.contains(name) && countIn(card, "tbody tr.table-success") == 0
+        val card = accountsPageCard
+        card.getText.contains(name) && countIn(card, "tbody tr.table-primary") == 0
       }
       pause()
     }
