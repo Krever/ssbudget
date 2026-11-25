@@ -213,13 +213,14 @@ object CategorizationService {
     */
   def impact(rulesAfter: List[ClassificationRule], candidate: Option[ClassificationRule], txs: List[BankTransaction]): RuleImpact = {
     // One engine decision per transaction that a rule can change; both lists below come from it.
-    val winners = txs.flatMap(tx => RuleEngineService.winner(rulesAfter, tx).map(tx -> _))
+    val decide  = RuleEngineService.decision(rulesAfter)
+    val winners = txs.flatMap(tx => decide(tx).map(tx -> _))
     val changes = winners.collect { case (tx, rule) if rule.map(_.categoryId) != tx.categoryId => (tx, rule.map(_.categoryId)) }
     candidate match {
       case None       => RuleImpact(Nil, changes, Nil, Nil, 0)
       case Some(rule) =>
-        def matches(tx: BankTransaction) = RuleMatcher.matches(rule.criteria, tx)
-        val matched                      = txs.filter(matches)
+        val matches = RuleMatcher.compile(rule.criteria)
+        val matched = txs.filter(matches)
         RuleImpact(
           matched = matched,
           changes = changes,

@@ -188,8 +188,11 @@ trait BankTransactionRepository {
 
 class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionRepository {
 
+  // What a read gives. The payload of the bank (`raw_json`) is NOT read: it is kept in the table as the record of what the bank sent, and
+  // no code uses it after the import. It is most of the size of a row (about 5 MB for 6,000 rows), and the rule engine, the rule preview and
+  // the transaction list each read many rows, some of them on each rule change. A row that was read thus has an empty `rawJson`.
   private val columns =
-    fr"id, connection_id, eb_account_uid, entry_reference, dedup_key, amount_cents, currency, status, booked_at, counterparty_name, counterparty_account, remittance, bank_transaction_code, category_id, raw_json, imported_at, is_internal, category_source, note"
+    fr"id, connection_id, eb_account_uid, entry_reference, dedup_key, amount_cents, currency, status, booked_at, counterparty_name, counterparty_account, remittance, bank_transaction_code, category_id, '' AS raw_json, imported_at, is_internal, category_source, note"
 
   override def insertNew(tx: BankTransaction): IO[Boolean] = {
     val program = for {
@@ -430,7 +433,11 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
               AND REPLACE(UPPER(o.counterparty_account), ' ', '') = REPLACE(UPPER(l.iban), ' ', '')
               AND ABS(julianday(date(o.booked_at)) - julianday(date(t.booked_at))) <= ${BankTransactionRepositoryImpl.transferMaxDaysApart})"""
     val isInternal      = (ownIbanMatch :: pairedSide :: descriptorMatch).reduce(_ ++ fr" OR " ++ _)
-    (fr"UPDATE bank_transactions SET is_internal = CASE WHEN (" ++ isInternal ++ fr") THEN 1 ELSE 0 END").update.run.transact(xa).void
+    // Only the rows whose answer changed are written. This runs at each start and after each import; before, it wrote every row each time,
+    // and the whole table went through the write-ahead log for nothing.
+    (fr"UPDATE bank_transactions SET is_internal = 1 - is_internal WHERE is_internal <> CASE WHEN (" ++ isInternal ++ fr") THEN 1 ELSE 0 END").update.run
+      .transact(xa)
+      .void
   }
 }
 

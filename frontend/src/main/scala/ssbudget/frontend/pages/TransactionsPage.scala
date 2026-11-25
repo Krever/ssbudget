@@ -517,6 +517,16 @@ object TransactionsPage {
     * and [[RuleMatcher.firstMatch]] reproduces it here from the rules the page already holds. The name goes in the tooltip rather than the badge to
     * keep the column narrow; clicking opens the rule for inspection (and editing) in the same modal the rules card uses.
     */
+  // The rule list made ready for matching, kept for as long as the page holds that same list. Each rule-categorized row asks for its rule; with
+  // no memory, each row made all the rules ready again (up to 500 rows times some hundreds of rules, on each reload of the rules).
+  private var readyRules: Option[(List[ClassificationRule], BankTransaction => Option[ClassificationRule])] = None
+  private def ruleOf(rules: List[ClassificationRule]): BankTransaction => Option[ClassificationRule]        =
+    readyRules.collect { case (forRules, find) if forRules eq rules => find }.getOrElse {
+      val find = RuleMatcher.compileRules(rules)
+      readyRules = Some((rules, find))
+      find
+    }
+
   private def ruleBadge(
       t: BankTransaction,
       rules: Signal[List[ClassificationRule]],
@@ -527,7 +537,7 @@ object TransactionsPage {
     if !t.categorySource.contains(ssbudget.shared.model.CategorySource.Rule) then emptyNode
     else
       child <-- rules.map { rs =>
-        RuleMatcher.firstMatch(rs, t) match {
+        ruleOf(rs)(t) match {
           case Some(rule) =>
             button(
               tpe   := "button",

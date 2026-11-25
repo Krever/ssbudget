@@ -1,5 +1,6 @@
 package ssbudget.backend.db.repository
 
+import doobie.implicits.*
 import ssbudget.shared.model.*
 
 import java.time.Instant
@@ -114,6 +115,20 @@ class BankTransactionRepositorySpec extends RepositorySpec {
       assigned.flatMap(_.categorySource) shouldBe Some(CategorySource.Manual)
       cleared.flatMap(_.categoryId) shouldBe None
       cleared.flatMap(_.categorySource) shouldBe None
+    }
+  }
+
+  "the payload of the bank stays in the table, and a read does not load it" in {
+    val repo = new BankTransactionRepositoryImpl(xa)
+    for {
+      _      <- repo.insertNew(tx("t-1", "uid-1", "r-1").copy(rawJson = """{"entry":"as the bank sent it"}"""))
+      read   <- repo.findById(BankTransactionId("t-1"))
+      listed <- repo.list(None, None, None)
+      stored <- sql"SELECT raw_json FROM bank_transactions WHERE id = 't-1'".query[String].unique.transact(xa)
+    } yield {
+      stored shouldBe """{"entry":"as the bank sent it"}"""
+      read.map(_.rawJson) shouldBe Some("")
+      listed.map(_.rawJson) shouldBe List("")
     }
   }
 

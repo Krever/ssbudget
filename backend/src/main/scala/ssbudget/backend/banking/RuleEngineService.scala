@@ -23,8 +23,9 @@ class RuleEngineService(repos: Repositories) {
     for {
       rules  <- repos.classificationRules.findAll // ascending priority
       txs    <- repos.bankTransactions.list(None, None, None)
+      decide  = RuleEngineService.decision(rules)
       updates = txs.flatMap { tx =>
-                  RuleEngineService.winner(rules, tx).flatMap { rule =>
+                  decide(tx).flatMap { rule =>
                     val desired = (rule.map(_.categoryId), rule.map(_ => CategorySource.Rule))
                     Option.when(desired != ((tx.categoryId, tx.categorySource)))((tx.id, desired._1, desired._2))
                   }
@@ -40,6 +41,11 @@ object RuleEngineService {
     * transaction is internal), so it must have no category; `Some(Some(rule))` = this rule sets the category. [[RuleEngineService.applyRules]] writes
     * this decision and the rule-change preview in [[CategorizationService]] reads it, so the two cannot disagree.
     */
-  def winner(rulesByPriority: List[ClassificationRule], tx: BankTransaction): Option[Option[ClassificationRule]] =
-    if tx.categorySource.contains(CategorySource.Manual) then None else Some(RuleMatcher.firstMatch(rulesByPriority, tx))
+  def winner(rulesByPriority: List[ClassificationRule], tx: BankTransaction): Option[Option[ClassificationRule]] = decision(rulesByPriority)(tx)
+
+  /** [[winner]] for many transactions: the rule list is made ready one time. */
+  def decision(rulesByPriority: List[ClassificationRule]): BankTransaction => Option[Option[ClassificationRule]] = {
+    val firstMatch = RuleMatcher.compileRules(rulesByPriority)
+    tx => if tx.categorySource.contains(CategorySource.Manual) then None else Some(firstMatch(tx))
+  }
 }

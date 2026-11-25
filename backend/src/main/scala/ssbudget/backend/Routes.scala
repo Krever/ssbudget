@@ -338,7 +338,7 @@ object Routes {
   /** Live rule preview: run the shared matcher over all stored transactions server-side (the browser no longer holds them). */
   private def previewRule(repos: Repositories)(req: RulePreviewRequest): Result[RulePreviewResponse] =
     repos.bankTransactions.list(None, None, None).map { all =>
-      val matched = if req.criteria.isEmpty then Nil else all.filter(t => RuleMatcher.matches(req.criteria, t))
+      val matched = if req.criteria.isEmpty then Nil else all.filter(RuleMatcher.compile(req.criteria))
       Right(RulePreviewResponse(matched.size, all.size, matched.take(200)))
     }
 

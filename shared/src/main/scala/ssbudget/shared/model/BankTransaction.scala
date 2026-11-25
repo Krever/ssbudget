@@ -47,7 +47,7 @@ final case class BankTransaction(
     remittance: Option[String],             // remittance_information, joined
     bankTransactionCode: Option[String],
     categoryId: Option[CategoryId],         // None = uncategorized
-    rawJson: String,                        // full Enable Banking payload, always retained
+    rawJson: String,                        // the payload of the bank, for the import to store. Empty on a transaction that was read: see the repository
     importedAt: Instant,
     internal: Boolean,                      // true when this is a transfer between the user's own accounts (built-in rule)
     categorySource: Option[CategorySource], // who set categoryId (Manual wins over Rule); None when uncategorized
