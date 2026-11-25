@@ -159,12 +159,12 @@ object PlanCard {
 
   /** Name, plus the badges that say what kind of entry this is: its budget type, and `override` when the remaining amount was set by hand. */
   private def header(line: Line): HtmlElement = {
-    val s        = line.summary
-    val bt       = s.category.budgetType.getOrElse(CategoryBudgetType.Steady)
+    val s    = line.summary
+    val bt   = s.category.budgetType.getOrElse(CategoryBudgetType.Steady)
     span(
-      cls       := "fw-semibold user-select-none",
-      styleAttr := "cursor: pointer",
-      title     := "Show the transactions behind this spend",
+      cls   := "fw-semibold user-select-none",
+      cls   := "clickable",
+      title := "Show the transactions behind this spend",
       onClick --> { _ => toggleBudgetExpansion(s.category.id) },
       span(cls := "text-muted me-1", child.text <-- rowExpanded(s.category.id).map(if _ then "▾" else "▸")),
       s.category.name,
@@ -302,9 +302,9 @@ object PlanCard {
     )
 
     div(
-      cls       := "progress position-relative",
-      styleAttr := "height: 1.1rem",
-      title     := state.planTitle,
+      cls   := "progress position-relative",
+      cls   := "bar-plan",
+      title := state.planTitle,
       bands.flatMap(splitAtPlan(_, state.planPct)),
       // A clean cut where the plan's bar ends, so the shoulder is crisp even when both sides of it are filled the same way.
       Option.when(state.overran)(shoulder(state.planPct, state.planTitle)),
@@ -400,9 +400,9 @@ object PlanCard {
   private def editorRow(label: String, amountInput: HtmlElement, buttons: HtmlElement*): HtmlElement =
     div(
       cls := "d-flex align-items-center gap-2 mt-1",
-      span(cls      := "small text-muted text-nowrap", label),
-      div(styleAttr := "width: 7rem", amountInput),
-      div(cls       := "btn-group btn-group-sm", buttons.toList),
+      span(cls := "small text-muted text-nowrap", label),
+      div(cls  := "w-rem-7", amountInput),
+      div(cls  := "btn-group btn-group-sm", buttons.toList),
     )
 
   private def cancelButton(onCancel: () => Unit): HtmlElement =

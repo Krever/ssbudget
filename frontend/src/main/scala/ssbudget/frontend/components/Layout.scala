@@ -13,8 +13,8 @@ object Layout {
       BankRenewalBanner(apiClient),
       NoticeStrip(apiClient),
       div(
-        cls       := "main-content mx-auto pb-4",
-        styleAttr := "max-width: 1600px",
+        cls := "main-content mx-auto pb-4",
+        cls := "page-max",
         // Keyed on the page KIND, not the page: the Transactions page carries its filters in the URL, and a filter change must not remount it.
         child <-- Router.currentPageSignal.distinctBy(Page.kindOf).map(page => renderPage(page, apiClient)),
       ),

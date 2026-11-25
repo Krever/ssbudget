@@ -165,8 +165,8 @@ object DashboardPage {
         case Some(period) =>
           div(
             div(
-              cls       := "progress",
-              styleAttr := "height: 3px",
+              cls := "progress",
+              cls := "bar-3",
               div(
                 cls       := "progress-bar bg-secondary",
                 role      := "progressbar",
@@ -174,7 +174,7 @@ object DashboardPage {
               ),
             ),
             div(
-              cls       := "d-flex justify-content-between small text-muted mt-1",
+              cls := "d-flex justify-content-between small text-muted mt-1",
               span(s"Period started ${Formatting.formatDate(period.startDate)} · day ${period.dayOfPeriod(DataService.today)}"),
               a(
                 cls := "text-muted text-decoration-none",
@@ -284,7 +284,7 @@ object DashboardPage {
         case false =>
           span(
             cls                        := "text-decoration-underline",
-            styleAttr                  := "cursor: pointer; text-decoration-style: dotted",
+            cls                        := "clickable dotted",
             role                       := "button",
             title                      := (if period.plannedSavingCents <= 0 then "Click to plan a saving for this period"
                       else s"Planned saving: ${MoneyFormatter.formatBare(period.plannedSavingCents)}. Click to change it."),
@@ -299,7 +299,7 @@ object DashboardPage {
             .moneyInput(Option.when(period.plannedSavingCents > 0)(period.plannedSavingCents), placeholderText = "0", autoFocus = true)
             .amend(
               cls                              := "d-inline-block py-0",
-              styleAttr                        := "width: 7rem",
+              cls                              := "w-rem-7",
               dataAttr("planned-saving-input") := "",
               InlineEdit.commitOnEnter,
               onKeyDown.filter(_.key == "Escape") --> { _ =>

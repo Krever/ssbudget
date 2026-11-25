@@ -138,9 +138,9 @@ object RuleModal {
 
     div(
       div(
-        cls       := "modal d-block",
-        tabIndex  := -1,
-        styleAttr := "background: rgba(0,0,0,0.5)",
+        cls      := "modal d-block",
+        tabIndex := -1,
+        cls      := "dim-behind",
         div(
           cls := "modal-dialog modal-lg modal-dialog-scrollable",
           div(
@@ -368,8 +368,8 @@ object RuleModal {
         case (true, Some(r)) =>
           Some(
             div(
-              cls       := "mt-2",
-              styleAttr := "max-height: 12rem; overflow-y: auto",
+              cls := "mt-2",
+              cls := "scroll-list",
               if r.sample.isEmpty then span(cls := "small text-muted", "No matches.")
               else
                 table(

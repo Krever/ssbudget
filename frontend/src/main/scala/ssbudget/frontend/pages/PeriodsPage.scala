@@ -60,7 +60,7 @@ object PeriodsPage {
       input(
         tpe          := "date",
         cls          := "form-control form-control-sm py-0",
-        styleAttr    := "width: 9.5rem",
+        cls          := "w-rem-9h",
         title        := "The day the new period starts. Today means now; an earlier day gives the days since then to the new period.",
         defaultValue := DataService.today.toString,
         maxAttr      := DataService.today.toString,
@@ -84,7 +84,7 @@ object PeriodsPage {
           case Some(period) =>
             div(
               div(
-                cls       := "d-flex flex-wrap align-items-end justify-content-between gap-3 mb-2",
+                cls := "d-flex flex-wrap align-items-end justify-content-between gap-3 mb-2",
                 div(
                   cls := "d-flex flex-wrap gap-4",
                   stat("Started", Formatting.formatDate(period.startDate)),
@@ -96,8 +96,8 @@ object PeriodsPage {
                 startControl("End Period & Start New", "btn btn-warning btn-sm", Some(period)),
               ),
               div(
-                cls       := "progress",
-                styleAttr := "height: 6px",
+                cls := "progress",
+                cls := "bar-6",
                 div(
                   cls       := "progress-bar",
                   role      := "progressbar",
@@ -125,7 +125,7 @@ object PeriodsPage {
     input(
       tpe          := "date",
       cls          := "form-control form-control-sm py-0 fw-semibold",
-      styleAttr    := "width: 9.5rem",
+      cls          := "w-rem-9h",
       defaultValue := period.expectedEnd.toString,
       // `change` rather than `input`: a date picker emits a half-typed year as you go, and each one would be a request. A cleared or half-typed
       // field parses to nothing and is simply ignored, leaving the period on the date it already had.
@@ -144,7 +144,7 @@ object PeriodsPage {
       .moneyInput(Option.when(period.plannedSavingCents > 0)(period.plannedSavingCents), placeholderText = "0")
       .amend(
         cls                        := "py-0 fw-semibold",
-        styleAttr                  := "width: 7rem",
+        cls                        := "w-rem-7",
         dataAttr("planned-saving") := period.plannedSavingCents.toString,
         InlineEdit.commitOnEnter,
         // `change`, as for the expected end: one request for a finished amount, not one for each key.
@@ -255,9 +255,9 @@ object PeriodsPage {
 
     tbody(
       tr(
-        cls       := (if s.ongoing then "table-active" else ""),
-        styleAttr := "cursor: pointer",
-        title     := "Show where this period's spend went",
+        cls   := (if s.ongoing then "table-active" else ""),
+        cls   := "clickable",
+        title := "Show where this period's spend went",
         onClick --> { _ => expanded.update(set => if set.contains(s.period.id) then set - s.period.id else set + s.period.id) },
         td(
           cls  := "ps-3 text-nowrap",
@@ -311,9 +311,9 @@ object PeriodsPage {
       // The second line is shown for a closed period too: it shows on which days the period went worse than its usual day.
       FreeMoneyChart(points, projection, FreeMoneyTrend.projectionHistory(s.period, points), s.currency, ChartKit.lightSurface).map { chart =>
         div(
-          cls       := "mb-3",
+          cls := "mb-3",
           // A width limit, because the plot takes the full width of its container: at the width of the table the line becomes too flat to read.
-          styleAttr := "max-width: 40rem",
+          cls := "mw-rem-40",
           div(
             cls   := "text-muted small text-uppercase mb-1",
             title := "Free money without savings transfers and unplanned income, so the line shows only what the plan lost",
@@ -360,13 +360,13 @@ object PeriodsPage {
     div(
       cls := "mb-1",
       div(
-        cls       := "d-flex justify-content-between small",
+        cls := "d-flex justify-content-between small",
         span(c.category.name),
         span(cls := "font-monospace", money(c.spentCents)),
       ),
       div(
-        cls       := "progress",
-        styleAttr := "height: 4px",
+        cls := "progress",
+        cls := "bar-4",
         div(cls := "progress-bar", role := "progressbar", styleAttr := s"width: $pct%; background-color: $color"),
       ),
     )

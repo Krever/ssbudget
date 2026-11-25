@@ -437,7 +437,7 @@ object ChartKit {
     details(
       cls := "small",
       onToggle --> (ev => opened.set(ev.target.asInstanceOf[js.Dynamic].open.asInstanceOf[Boolean])),
-      summary(cls := "text-muted", styleAttr := "cursor: pointer; width: fit-content", "Table"),
+      summary(cls := "text-muted", cls := "clickable fit-content", "Table"),
       child <-- opened.signal.distinct.map {
         case false => emptyNode
         case true  => L.table(cls := "table table-sm small mb-0 w-auto", thead(tr(cells(th, head))), tbody(rows.map(row => tr(cells(td, row)))))

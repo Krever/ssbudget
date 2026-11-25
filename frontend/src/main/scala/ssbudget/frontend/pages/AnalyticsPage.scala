@@ -35,14 +35,14 @@ object AnalyticsPage {
   private def dashboard(embedUrl: String, exploreUrl: Option[String]): HtmlElement =
     div(
       div(
-        cls       := "d-flex justify-content-between align-items-center mb-2",
+        cls := "d-flex justify-content-between align-items-center mb-2",
         h5(cls := "mb-0", "Analytics"),
         exploreLink(exploreUrl),
       ),
       iframe(
-        src       := embedUrl,
-        cls       := "w-100 border rounded",
-        styleAttr := "height: calc(100vh - 140px);",
+        src := embedUrl,
+        cls := "w-100 border rounded",
+        cls := "analytics-frame",
       ),
     )
 

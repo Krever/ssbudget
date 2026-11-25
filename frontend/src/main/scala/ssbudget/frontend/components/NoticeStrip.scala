@@ -16,8 +16,8 @@ object NoticeStrip {
       // Read on mount and on each page change: a rate refresh or a sync elsewhere can make a warning true or false. With no answer the strip
       // stays as it was.
       Router.currentPageSignal.distinctBy(Page.kindOf) --> { _ => apiClient.warnings.list().foreach(Notices.warnings.set) },
-      cls       := "notice-strip mx-auto",
-      styleAttr := "max-width: 1600px",
+      cls := "notice-strip mx-auto",
+      cls := "page-max",
       children <-- Notices.failures.signal.map(_.map { failure =>
         div(
           cls                := "alert alert-danger d-flex align-items-center py-1 px-2 mb-1 small",

@@ -331,7 +331,7 @@ object TransactionsPage {
             idAttr      := "tx-search",
             tpe         := "search",
             placeholder := "counterparty, description, note, amount…",
-            styleAttr   := "background-image: none",     // form-select paints a dropdown caret we don't want on a text box
+            cls         := "no-caret",                   // form-select paints a dropdown caret we don't want on a text box
             value <-- search.signal,
             onInput.mapToValue --> search.writer,
             // Escape clears the box, which also restores the category filter the search widened.
@@ -340,9 +340,9 @@ object TransactionsPage {
           child.maybe <-- search.signal.map(v =>
             Option.when(v.nonEmpty)(
               button(
-                tpe       := "button",
-                cls       := "btn-close position-absolute top-50 translate-middle-y",
-                styleAttr := "right: 0.5rem; font-size: 0.6rem",
+                tpe := "button",
+                cls := "btn-close position-absolute top-50 translate-middle-y",
+                cls := "corner-mark",
                 onClick --> { _ => search.set("") },
               ),
             ),
@@ -434,8 +434,8 @@ object TransactionsPage {
 
     def sortableTh(key: String, label: String, extraCls: String): HtmlElement =
       th(
-        cls       := s"user-select-none $extraCls",
-        styleAttr := "cursor: pointer",
+        cls := s"user-select-none $extraCls",
+        cls := "clickable",
         onClick --> { _ => onHeader(key) },
         label,
         child.text <-- arrow(key),
@@ -478,9 +478,9 @@ object TransactionsPage {
                       tr(
                         cls := "table-light",
                         td(
-                          colSpan   := 6,
-                          cls       := "text-muted small py-1",
-                          styleAttr := "letter-spacing: 0.03em",
+                          colSpan := 6,
+                          cls     := "text-muted small py-1",
+                          cls     := "spaced",
                           s"${approximate.size} similar ${if approximate.size == 1 then "match" else "matches"} — not counted in the sum",
                         ),
                       ),
@@ -596,9 +596,9 @@ object TransactionsPage {
         t.note match {
           case Some(n) =>
             div(
-              cls       := "small fst-italic text-body-secondary",
-              styleAttr := "cursor:pointer",
-              title     := "Click to edit note",
+              cls   := "small fst-italic text-body-secondary",
+              cls   := "clickable",
+              title := "Click to edit note",
               onClick --> { _ => editingNote.set(true) },
               "💬 ",
               n,
@@ -614,17 +614,17 @@ object TransactionsPage {
     }
 
     tr(
-      td(cls      := "text-muted small text-nowrap", Formatting.formatDate(t.bookedAt)),
-      td(cls      := "small", accountLabel(conns, t.ebAccountUid)),
+      td(cls := "text-muted small text-nowrap", Formatting.formatDate(t.bookedAt)),
+      td(cls := "small", accountLabel(conns, t.ebAccountUid)),
       td(
         div(t.description, if t.internal then span(cls := "badge text-bg-light text-muted ms-2", "internal") else emptyNode),
         t.remittance.filter(r => !t.counterpartyName.contains(r)).map(r => small(cls := "text-muted d-block", r)).getOrElse(emptyNode),
         noteBlock,
       ),
-      td(cls      := s"text-end font-monospace $amountCls", MoneyFormatter.formatSimple(t.amountCents, t.currency)),
+      td(cls := s"text-end font-monospace $amountCls", MoneyFormatter.formatSimple(t.amountCents, t.currency)),
       td(statusBadge),
       td(
-        styleAttr := "min-width: 12rem",
+        cls  := "minw-rem-12",
         div(
           cls := "d-flex align-items-center gap-1",
           div(
@@ -855,7 +855,7 @@ object TransactionsPage {
         minAttr     := "1",
         maxAttr     := CategoryBudget.maxLookbackMonths.toString,
         stepAttr    := "1",
-        styleAttr   := "width: 5rem",
+        cls         := "w-rem-5",
         placeholder := "all",
         title       := s"Completed months the average/median looks back over; blank = all history (at most ${CategoryBudget.maxLookbackMonths})",
         disabled <-- cat.map(!_.budget.derivesFromHistory),
@@ -867,13 +867,13 @@ object TransactionsPage {
     /** How many payments a Bill expects per period. Only a Bill counts payments, hence disabled for the other types. */
     def paymentsInput(id: CategoryId, cat: Signal[Category]): HtmlElement =
       input(
-        cls       := "form-control form-control-sm text-center",
-        tpe       := "number",
-        minAttr   := "1",
-        maxAttr   := Category.maxBillPayments.toString,
-        stepAttr  := "1",
-        styleAttr := "width: 4rem",
-        title     := "Payments expected per period; each one that lands releases its equal share of the budget",
+        cls      := "form-control form-control-sm text-center",
+        tpe      := "number",
+        minAttr  := "1",
+        maxAttr  := Category.maxBillPayments.toString,
+        stepAttr := "1",
+        cls      := "w-rem-4",
+        title    := "Payments expected per period; each one that lands releases its equal share of the budget",
         disabled <-- cat.map(!_.budgetType.contains(CategoryBudgetType.Bill)),
         stored(cat)(_.billPayments)(_.toString),
         onBlur.mapToValue --> { v =>
@@ -899,9 +899,9 @@ object TransactionsPage {
           // No placeholder: the strip already labels this field, and "Amount" inside an "Amount" box just says it twice.
           .moneyInput(None, placeholderText = "")
           .amend(
-            cls       := "font-monospace",
-            styleAttr := "width: 8rem",
-            title     := "Monthly figure for this category (negative if the money comes in)",
+            cls   := "font-monospace",
+            cls   := "w-rem-8",
+            title := "Monthly figure for this category (negative if the money comes in)",
             disabled <-- cat.map(_.budget.derivesFromHistory),
             value <-- storedText,
             onInput.mapToValue --> draft.writer,
@@ -910,8 +910,8 @@ object TransactionsPage {
             storedText --> draft.writer,
           ),
         button(
-          tpe         := "button",
-          cls         := "btn btn-sm btn-outline-primary",
+          tpe     := "button",
+          cls     := "btn btn-sm btn-outline-primary",
           "Save",
           // Keep the focus in the field: a blur would save first, and the click would then send the same edit again.
           onMouseDown.preventDefault --> { _ => () },
@@ -956,12 +956,12 @@ object TransactionsPage {
       * them.
       */
     def categoryRow(c: Category, summary: Option[CategorySummary], isOpen: Boolean): HtmlElement = {
-      val currency                         = summary.map(_.currency)
-      def money(cents: Long): String       =
+      val currency                   = summary.map(_.currency)
+      def money(cents: Long): String =
         currency.map(cur => MoneyFormatter.formatSimple(cents, cur)).getOrElse("—")
       tr(
-        cls       := "budget-toggle",
-        styleAttr := "cursor: pointer",
+        cls := "budget-toggle",
+        cls := "clickable",
         onClick --> { _ => expanded.update(ids => if ids(c.id) then ids - c.id else ids + c.id) },
         td(
           div(
@@ -972,7 +972,7 @@ object TransactionsPage {
               onClick.stopPropagation --> { _ => () },
               child <-- editingId.signal.map { editing =>
                 if editing.contains(c.id) then input(
-                  cls         := "form-control form-control-sm",
+                  cls     := "form-control form-control-sm",
                   controlled(value <-- editName.signal, onInput.mapToValue --> editName.writer),
                   onBlur --> { _ => renameCategory(c) },
                   onKeyDown.filter(_.key == "Enter") --> { _ => renameCategory(c) },
@@ -981,8 +981,8 @@ object TransactionsPage {
                 )
                 else
                   span(
-                    styleAttr := "cursor: pointer",
-                    title     := "Click to rename",
+                    cls   := "clickable",
+                    title := "Click to rename",
                     onClick --> { _ => editName.set(c.name); editingId.set(Some(c.id)) },
                     c.name,
                   )
@@ -1052,8 +1052,8 @@ object TransactionsPage {
       div(
         cls := "card-footer py-2",
         div(
-          cls       := "input-group input-group-sm",
-          styleAttr := "max-width: 24rem",
+          cls := "input-group input-group-sm",
+          cls := "mw-rem-24",
           input(
             cls         := "form-control",
             placeholder := "New category (e.g. Groceries)",
@@ -1070,8 +1070,8 @@ object TransactionsPage {
       div(
         cls := "card-header py-2 d-flex justify-content-between align-items-center",
         span(
-          cls       := "user-select-none",
-          styleAttr := "cursor: pointer; flex-grow: 1",
+          cls := "user-select-none",
+          cls := "clickable flex-grow-1",
           onClick --> { _ => collapsed.update(!_) },
           child.text <-- collapsed.signal.map(c => if c then "▸ " else "▾ "),
           "Categories & monthly budgets",
@@ -1161,7 +1161,7 @@ object TransactionsPage {
     }
 
     // Hidden file picker; the "Import" button wires its onchange and triggers it. Confirm asks whether to replace or merge.
-    val fileInput = input(tpe := "file", accept := ".json,application/json", styleAttr := "display: none")
+    val fileInput = input(tpe := "file", accept := ".json,application/json", cls := "d-none")
 
     div(
       cls := "card mb-3",
@@ -1169,15 +1169,15 @@ object TransactionsPage {
       div(
         cls := "card-header py-2 d-flex justify-content-between align-items-center",
         span(
-          cls       := "user-select-none",
-          styleAttr := "cursor: pointer; flex-grow: 1",
+          cls := "user-select-none",
+          cls := "clickable flex-grow-1",
           onClick --> { _ => expanded.update(!_) },
           child.text <-- expanded.signal.map(e => if e then "▾ " else "▸ "),
           "Categorization rules",
           child.text <-- rulesVar.signal.map(rs => if rs.isEmpty then "" else s" (${rs.size})"),
         ),
         div(
-          cls       := "btn-group btn-group-sm",
+          cls := "btn-group btn-group-sm",
           button(tpe := "button", cls := "btn btn-outline-secondary", "Re-apply", onClick --> { _ => reapply() }),
           button(tpe := "button", cls := "btn btn-outline-secondary", "Export", onClick --> { _ => exportRules() }),
           button(

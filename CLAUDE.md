@@ -14,7 +14,9 @@ Personal budget tracker for tracking monthly expenses, bank balances, and calcul
 
 Think "Google Sheets for personal budget" not "enterprise dashboard with cards everywhere".
 
-**Look** - Bootstrap, plus one stylesheet of our own: `frontend/styles/app.css`. It sets the scale (root size 14px, so all of
+**Look** - Bootstrap, plus one stylesheet of our own: `frontend/styles/app.css`. A style that is always the same is a class there
+(`clickable`, `w-rem-7`, `bar-3`, ...); a `styleAttr` in page code is only for a value that is computed (the width of a bar, the
+colour of a series). It sets the scale (root size 14px, so all of
 Bootstrap follows), the number face and the surfaces. A change of the general look goes there, not into page code.
 
 **Bank connections** (Banking page) - each bank is a card: the header has the bank, the state of its access (a mark only when it
@@ -349,7 +351,8 @@ background task that failed (`BackgroundHealth`: the daily record), until it suc
 **Errors of the API** - an error is an `ApiError(kind, message)` (shared): on the wire the HTTP status is the kind and the body is
 the message. The kinds are invalid (400), unauthorized (401), needs confirmation (403), not found (404) and failed (500). A handler
 refuses with a text (that is "invalid") or with an `ApiError` that names its kind; an exception in a handler becomes "failed" with
-a text, and the cause goes to the log. The client acts on the kind, never on the words.
+a text, and the cause goes to the log. The client acts on the kind, never on the words. A failure of the bank API or of the rate
+source is "failed", not "invalid": it is not a wrong request of the user.
 
 **Routes and services** - `Routes.scala` only connects an endpoint to a service method (`route` for a handler that can refuse,
 `read` for one that cannot, `confirmedRoute` for one that needs a recent proof of identity). The rules are in the services:

@@ -111,7 +111,8 @@ object ServerBuilder {
         val currencyService  = new CurrencyService(repos, sttpBackend)
         val bankingService   = new BankingService(repos, ebClientOpt)
         val importService    = new TransactionImportService(repos, ebClientOpt, ruleEngine)
-        val importJobService = new ImportJobService(repos, supervisor, bankingService, importService, currencyService.refreshRates().map(_.void))
+        val importJobService =
+          new ImportJobService(repos, supervisor, bankingService, importService, currencyService.refreshRates().map(_.void.left.map(_.message)))
 
         val mcpTokens      = new McpTokenService(repos.mcpTokens)
         val categorization = new CategorizationService(repos, ruleEngine)

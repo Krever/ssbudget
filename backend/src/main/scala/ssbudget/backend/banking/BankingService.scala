@@ -25,17 +25,18 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
 
   private val notConfigured = "Enable Banking integration is not configured"
 
-  private def withClient[A](f: EnableBankingApi => IO[Either[String, A]]): IO[Either[String, A]] =
+  private def withClient[A](f: EnableBankingApi => IO[Either[ApiError, A]]): IO[Either[ApiError, A]] =
     clientOpt match {
       case Some(client) => f(client)
-      case None         => IO.pure(Left(notConfigured))
+      case None         => IO.pure(Left(ApiError.invalid(notConfigured)))
     }
 
-  def listAspsps(country: Option[String]): IO[Either[String, List[Aspsp]]] =
-    withClient(_.listAspsps(country))
+  def listAspsps(country: Option[String]): IO[Either[ApiError, List[Aspsp]]] =
+    // What the bank API refuses or fails at is a failure of the app, not a wrong request of the user.
+    withClient(_.listAspsps(country).map(_.left.map(ApiError.failed)))
 
   /** Creates a Pending connection with a CSRF state nonce, then asks Enable Banking for the redirect URL. */
-  def connect(req: ConnectBankRequest): IO[Either[String, ConnectBankResponse]] =
+  def connect(req: ConnectBankRequest): IO[Either[ApiError, ConnectBankResponse]] =
     withClient { client =>
       for {
         now   <- clock.now
@@ -46,19 +47,19 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
         res   <- client.startAuthorization(req.aspspName, req.aspspCountry, state)
         out   <- res match {
                    case Right(url) => IO.pure(Right(ConnectBankResponse(url)))
-                   case Left(err)  => repos.bankConnections.delete(connId).as(Left(err))
+                   case Left(err)  => repos.bankConnections.delete(connId).as(Left(ApiError.failed(err)))
                  }
       } yield out
     }
 
   /** Validates the returned state against a stored Pending connection, exchanges the code for a session, and persists the (unlinked) accounts. */
-  def callback(req: BankCallbackRequest): IO[Either[String, BankConnectionView]] =
+  def callback(req: BankCallbackRequest): IO[Either[ApiError, BankConnectionView]] =
     withClient { client =>
       repos.bankConnections.findByAuthState(req.state).flatMap {
-        case None       => IO.pure(Left("Unknown or expired authorization state"))
+        case None       => IO.pure(Left(ApiError.invalid("Unknown or expired authorization state")))
         case Some(conn) =>
           client.createSession(req.code).flatMap {
-            case Left(err)      => IO.pure(Left(err))
+            case Left(err)      => IO.pure(Left(ApiError.failed(err)))
             case Right(session) =>
               val links   = session.accounts.map { a =>
                 BankAccountLink(
@@ -131,9 +132,9 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
   /** Point a bank account link at a new [[BankLinkTarget]] (or `Unlinked`), then reconcile the provenance of both the old and new target accounts.
     * Returns the refreshed connection list.
     */
-  def linkAccount(linkId: BankAccountLinkId, req: LinkAccountRequest): IO[Either[String, List[BankConnectionView]]] =
+  def linkAccount(linkId: BankAccountLinkId, req: LinkAccountRequest): IO[Either[ApiError, List[BankConnectionView]]] =
     repos.bankConnections.findLinkById(linkId).flatMap {
-      case None           => IO.pure(Left("Bank account link not found"))
+      case None           => IO.pure(Left(ApiError.notFound("Bank account link not found")))
       case Some(existing) =>
         validateBankTarget(linkId, existing.currency, req.target).flatMap {
           case Left(err) => IO.pure(Left(err))
@@ -151,22 +152,22 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
   /** A direct target must reference an existing app account not already driven by a card group or another bank link, and whose currency matches the
     * bank account's (when known) — otherwise the synced amount would be mislabeled.
     */
-  private def validateBankTarget(linkId: BankAccountLinkId, linkCurrency: Option[Currency], target: BankLinkTarget): IO[Either[String, Unit]] =
+  private def validateBankTarget(linkId: BankAccountLinkId, linkCurrency: Option[Currency], target: BankLinkTarget): IO[Either[ApiError, Unit]] =
     target match {
       case BankLinkTarget.Unlinked            => IO.pure(Right(()))
       case BankLinkTarget.CardGroupMember(id) =>
-        repos.cardGroups.findById(id).map(o => Either.cond(o.isDefined, (), "Card group not found"))
+        repos.cardGroups.findById(id).map(o => Either.cond(o.isDefined, (), ApiError.notFound("Card group not found")))
       case BankLinkTarget.Account(id)         =>
         for {
           acctOpt   <- repos.accounts.findById(id)
           groupOpt  <- repos.cardGroups.findByAccount(id)
           otherLink <- repos.bankConnections.findLinkByAccount(id)
         } yield acctOpt match {
-          case None                                            => Left("App account not found")
-          case Some(_) if groupOpt.isDefined                   => Left("That account already mirrors a card group; pick another.")
-          case Some(_) if otherLink.exists(_.id != linkId)     => Left("That account is already linked to another bank account.")
+          case None                                            => Left(ApiError.notFound("App account not found"))
+          case Some(_) if groupOpt.isDefined                   => Left(ApiError.invalid("That account already mirrors a card group; pick another."))
+          case Some(_) if otherLink.exists(_.id != linkId)     => Left(ApiError.invalid("That account is already linked to another bank account."))
           case Some(a) if linkCurrency.exists(_ != a.currency) =>
-            Left(s"Currency mismatch: the bank account is ${linkCurrency.get.code} but the app account is ${a.currency.code}.")
+            Left(ApiError.invalid(s"Currency mismatch: the bank account is ${linkCurrency.get.code} but the app account is ${a.currency.code}."))
           case Some(_)                                         => Right(())
         }
     }
@@ -207,9 +208,9 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
   def listCardGroups: IO[List[CardGroup]] = repos.cardGroups.findAll
 
   /** Creates an (initially unlinked) card group. Link it to an app account afterwards via [[linkCardGroup]] to feed the budget. */
-  def createCardGroup(req: CreateCardGroup): IO[Either[String, CardGroup]] =
+  def createCardGroup(req: CreateCardGroup): IO[Either[ApiError, CardGroup]] =
     CardGroup.validLimit(req.limitCents) match {
-      case Left(err)    => IO.pure(Left(err))
+      case Left(err)    => IO.pure(Left(ApiError.invalid(err)))
       case Right(limit) =>
         val group = CardGroup(CardGroupId(UUID.randomUUID().toString), req.name, limit, req.currency, None)
         repos.cardGroups.create(group).as(Right(group))
@@ -218,9 +219,9 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
   /** Links (or unlinks, when accountId is None) a card group to a user-chosen app account whose balance mirrors the remaining limit. Linking makes
     * that account CardGroup-driven; unlinking (or re-linking elsewhere) reverts the previous account to Manual so the user can edit it again.
     */
-  def linkCardGroup(id: CardGroupId, req: LinkCardGroupRequest): IO[Either[String, List[CardGroup]]] =
+  def linkCardGroup(id: CardGroupId, req: LinkCardGroupRequest): IO[Either[ApiError, List[CardGroup]]] =
     repos.cardGroups.findById(id).flatMap {
-      case None        => IO.pure(Left("Card group not found"))
+      case None        => IO.pure(Left(ApiError.notFound("Card group not found")))
       case Some(group) =>
         validateCardGroupAccount(id, group.currency, req.accountId).flatMap {
           case Left(err) => IO.pure(Left(err))
@@ -238,12 +239,12 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
   /** Sets a card group's shared limit and recomputes the mirror account from the cached member balances, so the fix shows without a new sync. The
     * bank does not give the limit to us, so the user must change it here each time the bank changes it.
     */
-  def updateCardGroupLimit(id: CardGroupId, req: UpdateCardGroupLimit): IO[Either[String, List[CardGroup]]] =
+  def updateCardGroupLimit(id: CardGroupId, req: UpdateCardGroupLimit): IO[Either[ApiError, List[CardGroup]]] =
     CardGroup.validLimit(req.limitCents) match {
-      case Left(err)    => IO.pure(Left(err))
+      case Left(err)    => IO.pure(Left(ApiError.invalid(err)))
       case Right(limit) =>
         repos.cardGroups.findById(id).flatMap {
-          case None    => IO.pure(Left("Card group not found"))
+          case None    => IO.pure(Left(ApiError.notFound("Card group not found")))
           case Some(_) =>
             for {
               _  <- repos.cardGroups.setLimit(id, limit)
@@ -254,7 +255,7 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
     }
 
   /** The mirror account must exist, not already be driven by another group or a bank link, and share the group's currency. */
-  private def validateCardGroupAccount(groupId: CardGroupId, groupCurrency: Currency, accountId: Option[AccountId]): IO[Either[String, Unit]] =
+  private def validateCardGroupAccount(groupId: CardGroupId, groupCurrency: Currency, accountId: Option[AccountId]): IO[Either[ApiError, Unit]] =
     accountId match {
       case None        => IO.pure(Right(()))
       case Some(accId) =>
@@ -263,11 +264,11 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
           otherGroup <- repos.cardGroups.findByAccount(accId)
           linkOpt    <- repos.bankConnections.findLinkByAccount(accId)
         } yield acctOpt match {
-          case None                                          => Left("App account not found")
-          case Some(_) if otherGroup.exists(_.id != groupId) => Left("That account already mirrors another card group.")
-          case Some(_) if linkOpt.isDefined                  => Left("That account is already linked to a bank account.")
+          case None                                          => Left(ApiError.notFound("App account not found"))
+          case Some(_) if otherGroup.exists(_.id != groupId) => Left(ApiError.invalid("That account already mirrors another card group."))
+          case Some(_) if linkOpt.isDefined                  => Left(ApiError.invalid("That account is already linked to a bank account."))
           case Some(a) if a.currency != groupCurrency        =>
-            Left(s"Currency mismatch: the card group is ${groupCurrency.code} but the app account is ${a.currency.code}.")
+            Left(ApiError.invalid(s"Currency mismatch: the card group is ${groupCurrency.code} but the app account is ${a.currency.code}."))
           case Some(_)                                       => Right(())
         }
     }
@@ -275,9 +276,9 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
   /** Removes a card group: detaches member links, deletes the group, then reconciles the previously-linked account (back to Manual unless a bank link
     * still drives it). The account itself is left intact.
     */
-  def deleteCardGroup(id: CardGroupId): IO[Either[String, Unit]] =
+  def deleteCardGroup(id: CardGroupId): IO[Either[ApiError, Unit]] =
     repos.cardGroups.findById(id).flatMap {
-      case None        => IO.pure(Left("Card group not found"))
+      case None        => IO.pure(Left(ApiError.notFound("Card group not found")))
       case Some(group) =>
         for {
           _ <- repos.bankConnections.clearCardGroupMembers(id)
@@ -316,11 +317,11 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
   /** The only operation that queries the bank: fetch details + current balance for every account of a connection, cache them on each link, and apply
     * the balance to a directly-linked account. Card-group members feed [[recomputeCardGroups]]. Returns the refreshed connection list.
     */
-  def sync(connectionId: BankConnectionId): IO[Either[String, BankSyncOutcome]] =
+  def sync(connectionId: BankConnectionId): IO[Either[ApiError, BankSyncOutcome]] =
     withClient { client =>
       repos.bankConnections.findById(connectionId).flatMap {
-        case None                                 => IO.pure(Left("Connection not found"))
-        case Some(conn) if conn.sessionId.isEmpty => IO.pure(Left("Connection is not authorized yet"))
+        case None                                 => IO.pure(Left(ApiError.notFound("Connection not found")))
+        case Some(conn) if conn.sessionId.isEmpty => IO.pure(Left(ApiError.invalid("Connection is not authorized yet")))
         case Some(_)                              =>
           for {
             now      <- clock.now
@@ -381,9 +382,9 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], c
     * when the user disconnects the stale connection first — must never wipe months of categorized spend. The rows are kept as history; a later
     * reconnect re-keys them onto the new account uids via [[absorbPriorConnections]].
     */
-  def disconnect(id: BankConnectionId): IO[Either[String, Unit]] =
+  def disconnect(id: BankConnectionId): IO[Either[ApiError, Unit]] =
     repos.bankConnections.findById(id).flatMap {
-      case None       => IO.pure(Left("Connection not found"))
+      case None       => IO.pure(Left(ApiError.notFound("Connection not found")))
       case Some(conn) =>
         val revoke = (clientOpt, conn.sessionId) match {
           case (Some(client), Some(sid)) => client.deleteSession(sid).attempt.void

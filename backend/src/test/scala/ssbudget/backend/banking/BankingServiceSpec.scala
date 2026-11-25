@@ -117,7 +117,7 @@ class BankingServiceSpec extends RepositorySpec {
       res <- svc.linkAccount(BankAccountLinkId("l-1"), LinkAccountRequest(BankLinkTarget.Account(AccountId("acc-1"))))
     } yield {
       res.isLeft shouldBe true
-      res.swap.getOrElse("") should include("Currency mismatch")
+      res.left.toOption.fold("")(_.message) should include("Currency mismatch")
     }
   }
 
@@ -132,7 +132,7 @@ class BankingServiceSpec extends RepositorySpec {
       res <- svc.linkAccount(BankAccountLinkId("l-2"), LinkAccountRequest(BankLinkTarget.Account(AccountId("acc-1"))))
     } yield {
       res.isLeft shouldBe true
-      res.swap.getOrElse("") should include("already linked")
+      res.left.toOption.fold("")(_.message) should include("already linked")
     }
   }
 
@@ -148,7 +148,7 @@ class BankingServiceSpec extends RepositorySpec {
       res <- svc.linkAccount(BankAccountLinkId("l-1"), LinkAccountRequest(BankLinkTarget.Account(AccountId("acc-1"))))
     } yield {
       res.isLeft shouldBe true
-      res.swap.getOrElse("") should include("card group")
+      res.left.toOption.fold("")(_.message) should include("card group")
     }
   }
 
@@ -205,7 +205,7 @@ class BankingServiceSpec extends RepositorySpec {
       res <- svc.linkCardGroup(gid, LinkCardGroupRequest(Some(AccountId("acc-1"))))
     } yield {
       res.isLeft shouldBe true
-      res.swap.getOrElse("") should include("Currency mismatch")
+      res.left.toOption.fold("")(_.message) should include("Currency mismatch")
     }
   }
 

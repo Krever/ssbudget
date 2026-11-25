@@ -108,7 +108,7 @@ object CategoryCombobox {
                   e.label,
                 )
               }
-          div(cls := "list-group position-absolute w-100 shadow-sm", styleAttr := "z-index: 1080; max-height: 12rem; overflow-y: auto", body)
+          div(cls := "list-group position-absolute w-100 shadow-sm", cls := "scroll-list over-modal", body)
         }
       },
     )

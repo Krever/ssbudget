@@ -394,8 +394,8 @@ object BankingPage {
   private def jobTbody(id: ImportJobId, job: Signal[ImportJob], expandedJobs: Var[Set[ImportJobId]]): HtmlElement =
     tbody(
       tr(
-        cls       := "table-row-clickable",
-        styleAttr := "cursor: pointer",
+        cls := "table-row-clickable",
+        cls := "clickable",
         onClick --> { _ => expandedJobs.update(s => if s.contains(id) then s - id else s + id) },
         td(
           cls  := "ps-3 text-muted small text-nowrap",
@@ -496,10 +496,10 @@ object BankingPage {
           cls     := "row g-2 align-items-end",
           div(
             cls := "col-auto",
-            label(cls   := "form-label small mb-1", "Country"),
+            label(cls := "form-label small mb-1", "Country"),
             input(
-              cls       := "form-control",
-              styleAttr := "max-width: 6rem",
+              cls     := "form-control",
+              cls     := "mw-rem-6",
               controlled(value <-- countryVar.signal, onInput.mapToValue --> countryVar.writer),
               onBlur --> { _ => loadAspsps() },
             ),
@@ -596,17 +596,17 @@ object BankingPage {
             label(cls     := "form-label small mb-1", "Shared limit"),
             input(
               cls         := "form-control",
-              styleAttr   := "max-width: 9rem",
+              cls         := "mw-rem-9",
               placeholder := "10000",
               controlled(value <-- limitVar.signal, onInput.mapToValue --> limitVar.writer),
             ),
           ),
           div(
             cls   := "col-auto",
-            label(cls   := "form-label small mb-1", "Currency"),
+            label(cls := "form-label small mb-1", "Currency"),
             input(
-              cls       := "form-control",
-              styleAttr := "max-width: 6rem",
+              cls     := "form-control",
+              cls     := "mw-rem-6",
               controlled(value <-- currencyVar.signal, onInput.mapToValue --> currencyVar.writer),
             ),
           ),
@@ -638,8 +638,8 @@ object BankingPage {
         cls  := "text-end",
         // Edit in place: the bank does not report the limit, so a change at the bank must be typed here. Saves on blur or Enter.
         div(
-          cls       := "d-inline-block",
-          styleAttr := "width: 6.5rem",
+          cls := "d-inline-block",
+          cls := "w-rem-6h",
           InlineEdit
             .moneyInput(Some(g.limitCents), placeholderText = "Limit")
             .amend(
@@ -746,8 +746,8 @@ object BankingPage {
         div(
           cls := "d-flex flex-wrap align-items-center gap-2",
           div(
-            cls       := "input-group input-group-sm",
-            styleAttr := "width: auto",
+            cls := "input-group input-group-sm",
+            cls := "w-auto",
             select(
               cls := "form-select form-select-sm",
               onChange.mapToValue --> monthsVar.writer,
@@ -771,7 +771,7 @@ object BankingPage {
             ),
           ),
           div(
-            cls       := "btn-group btn-group-sm",
+            cls := "btn-group btn-group-sm",
             button(
               cls := "btn btn-outline-primary",
               disabled <-- syncingVar.signal.map(_.contains(conn.id.value)),
@@ -803,7 +803,7 @@ object BankingPage {
           cls := "card-body p-0",
           table(
             cls := "table table-sm align-middle mb-0 accounts-ledger",
-            thead(tr(th("Bank account"), th(cls := "text-end", "Balance"), th(styleAttr := "width: 42%", "Counts as"))),
+            thead(tr(th("Bank account"), th(cls := "text-end", "Balance"), th(cls := "w-pct-42", "Counts as"))),
             tbody(
               shown.map(rowOf),
               children <-- shownIdle.signal.map(_.contains(conn.id.value)).map { open =>

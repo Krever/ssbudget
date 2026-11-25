@@ -165,7 +165,7 @@ class ImportJobService(
                            val bank = conn.aspspName
                            // Sync + import are attempted independently so one failing doesn't suppress the other; problems become warnings.
                            for {
-                             syncE <- bankingService.sync(conn.id).handleError(t => Left(t.getMessage))
+                             syncE <- bankingService.sync(conn.id).map(_.left.map(_.message)).handleError(t => Left(t.getMessage))
                              _     <- syncE match {
                                         case Left(e)        => reporter.warn(bank, s"balance sync — $e")
                                         case Right(outcome) => outcome.warnings.traverse_(w => reporter.warn(bank, s"balance — $w"))

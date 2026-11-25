@@ -181,3 +181,49 @@ body {
   font-size: 0.72rem;
   letter-spacing: 0.06em;
 }
+
+/* ---- Small fixed rules, by name ----
+   A style that is always the same is a class here, and not a `style` attribute in the page code. A `style` attribute stays only where the
+   value is computed: the width of a bar, the colour of a series, the place of a marker. */
+
+.clickable { cursor: pointer; }
+.dotted { text-decoration-style: dotted; }
+.fit-content { width: fit-content; }
+.spaced { letter-spacing: 0.03em; }
+.no-caret { background-image: none; }
+.table-fixed { table-layout: fixed; }
+.raw-text { white-space: pre-wrap; word-break: break-all; }
+
+/* Fixed widths of fields and columns, in rem. */
+.w-rem-4 { width: 4rem; }
+.w-rem-5 { width: 5rem; }
+.w-rem-6h { width: 6.5rem; }
+.w-rem-7 { width: 7rem; }
+.w-rem-8 { width: 8rem; }
+.w-rem-9h { width: 9.5rem; }
+.w-rem-18 { width: 18rem; }
+.w-pct-42 { width: 42%; }
+.mw-rem-6 { max-width: 6rem; }
+.mw-rem-9 { max-width: 9rem; }
+.mw-rem-24 { max-width: 24rem; }
+.mw-rem-40 { max-width: 40rem; }
+.minw-rem-12 { min-width: 12rem; }
+
+/* The widest a page gets. */
+.page-max { max-width: 1600px; }
+
+/* Heights of the progress bars: the hairline of the period, the thin bars of the lists, the bar of a plan entry. */
+.bar-3 { height: 3px; }
+.bar-4 { height: 4px; }
+.bar-6 { height: 6px; }
+.bar-plan { height: 1.1rem; }
+
+/* A list that scrolls inside its box, and the same list above an open dialog. */
+.scroll-list { max-height: 12rem; overflow-y: auto; }
+.over-modal { z-index: 1080; }
+
+/* The dimmed page behind a dialog. */
+.dim-behind { background: rgba(0, 0, 0, 0.45); }
+
+.corner-mark { right: 0.5rem; font-size: 0.6rem; }
+.analytics-frame { height: calc(100vh - 140px); }

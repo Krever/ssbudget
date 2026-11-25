@@ -49,20 +49,20 @@ object TriageCard {
 
     def row(t: BankTransaction): HtmlElement =
       tr(
-        td(cls      := "text-muted small text-nowrap", styleAttr := "width: 6.5rem", Formatting.formatDate(t.bookedAt)),
+        td(cls  := "text-muted small text-nowrap", cls := "w-rem-6h", Formatting.formatDate(t.bookedAt)),
         // No width: it takes what the fixed layout leaves over, and truncates rather than wrapping a long bank description over three lines.
         td(
-          title     := t.description,
+          title := t.description,
           div(cls := "text-truncate", t.description),
           t.remittance.filter(r => !t.counterpartyName.contains(r)).map(r => small(cls := "text-muted d-block text-truncate", r)).getOrElse(emptyNode),
         ),
         td(
-          cls       := s"text-end font-monospace text-nowrap ${if t.amountCents < 0 then "text-danger" else "text-success"}",
-          styleAttr := "width: 7rem",
+          cls   := s"text-end font-monospace text-nowrap ${if t.amountCents < 0 then "text-danger" else "text-success"}",
+          cls   := "w-rem-7",
           MoneyFormatter.formatSimple(t.amountCents, t.currency),
         ),
         td(
-          styleAttr := "width: 18rem",
+          cls   := "w-rem-18",
           div(
             cls := "d-flex align-items-center gap-1",
             div(
@@ -107,8 +107,8 @@ object TriageCard {
           cls := "card-body p-0",
           // Fixed layout so the per-column widths above actually hold and the description truncates instead of squeezing the picker.
           table(
-            cls       := "table table-sm table-hover align-middle mb-0",
-            styleAttr := "table-layout: fixed",
+            cls := "table table-sm table-hover align-middle mb-0",
+            cls := "table-fixed",
             tbody(children <-- txVar.signal.split(_.id)((_, t, _) => row(t))),
           ),
         ),

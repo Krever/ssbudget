@@ -422,7 +422,7 @@ object SettingsPage {
           div(
             cls := "alert alert-success",
             div(
-              cls       := "d-flex justify-content-between align-items-start",
+              cls := "d-flex justify-content-between align-items-start",
               div(
                 strong(s"Token \"${created.info.name}\" is ready. "),
                 "Run this command to add the server to Claude Code. The token is not shown again.",
@@ -430,20 +430,20 @@ object SettingsPage {
               button(tpe := "button", cls := "btn-close", onClick --> { _ => createdVar.set(None) }),
             ),
             pre(
-              cls       := "bg-body border rounded p-2 mt-2 mb-2 small user-select-all",
-              styleAttr := "white-space: pre-wrap; word-break: break-all;",
+              cls := "bg-body border rounded p-2 mt-2 mb-2 small user-select-all",
+              cls := "raw-text",
               command(created),
             ),
             button(
-              tpe       := "button",
-              cls       := "btn btn-sm btn-outline-success",
+              tpe := "button",
+              cls := "btn btn-sm btn-outline-success",
               child.text <-- copiedVar.signal.map(if _ then "Copied" else "Copy command"),
               onClick --> { _ =>
                 dom.window.navigator.clipboard.writeText(command(created)).toFuture.foreach(_ => copiedVar.set(true))
               },
             ),
             small(
-              cls       := "text-muted ms-2",
+              cls := "text-muted ms-2",
               "Then start the work in Claude Code with ",
               code("/mcp__ssbudget__categorize_transactions"),
               ".",
@@ -692,7 +692,7 @@ object SettingsPage {
       child.maybe <-- waitingVar.signal.map(_.map { _ =>
         div(
           cls                          := "modal d-block",
-          styleAttr                    := "background: rgba(0, 0, 0, 0.4)",
+          cls                          := "dim-behind",
           dataAttr("confirm-identity") := "open",
           div(
             cls := "modal-dialog modal-dialog-centered modal-sm",

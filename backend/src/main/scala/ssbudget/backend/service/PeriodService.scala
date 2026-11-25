@@ -21,18 +21,18 @@ class PeriodService(repos: Repositories, clock: AppClock = AppClock.system) {
   /** Correct when a period is expected to end. The date is the period's own — nothing re-derives it — so this is the whole of "the paycheck came a
     * few days early", "it came late", or "the pay cycle changed shape".
     */
-  def setExpectedEnd(id: PeriodId, expectedEnd: LocalDate): IO[Either[String, Period]] =
+  def setExpectedEnd(id: PeriodId, expectedEnd: LocalDate): IO[Either[ApiError, Period]] =
     repos.periods.findById(id).flatMap {
-      case None           => IO.pure(Left(s"Period not found: ${id.value}"))
+      case None           => IO.pure(Left(ApiError.notFound(s"Period not found: ${id.value}")))
       case Some(existing) => repos.periods.updateExpectedEnd(id, expectedEnd).as(Right(existing.copy(expectedEnd = expectedEnd)))
     }
 
   /** Set how much a period plans to move to savings. A negative amount has no meaning and is refused. */
-  def setPlannedSaving(id: PeriodId, plannedSavingCents: Long): IO[Either[String, Period]] =
-    if plannedSavingCents < 0 then IO.pure(Left("Planned saving cannot be negative"))
+  def setPlannedSaving(id: PeriodId, plannedSavingCents: Long): IO[Either[ApiError, Period]] =
+    if plannedSavingCents < 0 then IO.pure(Left(ApiError.invalid("Planned saving cannot be negative")))
     else {
       repos.periods.findById(id).flatMap {
-        case None           => IO.pure(Left(s"Period not found: ${id.value}"))
+        case None           => IO.pure(Left(ApiError.notFound(s"Period not found: ${id.value}")))
         case Some(existing) =>
           repos.periods.updatePlannedSaving(id, plannedSavingCents).as(Right(existing.copy(plannedSavingCents = plannedSavingCents)))
       }
@@ -44,7 +44,7 @@ class PeriodService(repos: Repositories, clock: AppClock = AppClock.system) {
     * the period was closed: the new period then starts at the beginning of that day, and the days from it on, which were recorded for the old period,
     * are given to the new one. The next pass of [[BudgetSnapshotService]] computes their terms again.
     */
-  def startNew(asOf: Option[LocalDate]): IO[Either[String, Period]] =
+  def startNew(asOf: Option[LocalDate]): IO[Either[ApiError, Period]] =
     for {
       // To the millisecond, as the database stores an instant: the period that this call returns is then equal to the stored one.
       now     <- clock.now.map(_.truncatedTo(java.time.temporal.ChronoUnit.MILLIS))
@@ -249,15 +249,15 @@ object PeriodService {
     * a period opens are of the new period. The day must be after the day the open period started (a period has one day at least), and it cannot be in
     * the future.
     */
-  def startInstant(asOf: Option[LocalDate], now: Instant, current: Option[Period]): Either[String, Instant] = {
+  def startInstant(asOf: Option[LocalDate], now: Instant, current: Option[Period]): Either[ApiError, Instant] = {
     val today = LocalDate.ofInstant(now, ZoneOffset.UTC)
     asOf.filter(_ != today) match {
       case None                            => Right(now)
-      case Some(day) if day.isAfter(today) => Left("A period cannot start in the future")
+      case Some(day) if day.isAfter(today) => Left(ApiError.invalid("A period cannot start in the future"))
       case Some(day)                       =>
         current match {
           case Some(open) if !day.isAfter(open.startDay) =>
-            Left(s"The new period must start after ${open.startDay}, the day the open period started")
+            Left(ApiError.invalid(s"The new period must start after ${open.startDay}, the day the open period started"))
           case _                                         => Right(day.atStartOfDay(ZoneOffset.UTC).toInstant)
         }
     }
