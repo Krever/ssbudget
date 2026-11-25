@@ -653,7 +653,7 @@ object DashboardPage {
       .foreach { _ =>
         copyButtonText.set("Copied!")
         dom.window.setTimeout(() => copyButtonText.set("Copy Summary"), 2000)
-      }(scala.concurrent.ExecutionContext.global)
+      }(using scala.concurrent.ExecutionContext.global)
   }
 
   private def shareViaWhatsApp(): Unit = {

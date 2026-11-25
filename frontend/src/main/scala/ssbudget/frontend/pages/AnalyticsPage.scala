@@ -2,7 +2,6 @@ package ssbudget.frontend.pages
 
 import com.raquo.laminar.api.L.*
 import ssbudget.frontend.services.{AnalyticsState, ApiClient}
-import ssbudget.shared.api.AnalyticsConfig
 
 import scala.concurrent.ExecutionContext.Implicits.global
 

@@ -68,9 +68,9 @@ object LoginPage {
                     errorVar.set(None)
 
                     apiClient.auth.login(password).onComplete {
-                      case Success(_)  =>
+                      case Success(_) =>
                         AuthState.setLoggedIn()
-                      case Failure(ex) =>
+                      case Failure(_) =>
                         isSubmittingVar.set(false)
                         errorVar.set(Some("Invalid password"))
                     }

@@ -8,8 +8,8 @@ echo "=== Building frontend (Scala.js) ==="
 sbt frontend/fullLinkJS
 
 echo "=== Building frontend (Vite) ==="
-# SCALAJS_STAGE=full: bundle the fullLinkJS output from the step above (see frontend/vite.config.mjs).
-cd frontend && npm ci --no-audit --no-fund && SCALAJS_STAGE=full npm run build
+# A production build of vite bundles the fullLinkJS output from the step above (see frontend/main.js).
+cd frontend && npm ci --no-audit --no-fund && npm run build
 cd ..
 
 echo "=== Stamping the version ==="

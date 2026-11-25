@@ -192,7 +192,7 @@ projection) and on the Periods page (a row sparkline, and a chart in the expande
 
 | Layer       | Technology                               |
 |-------------|------------------------------------------|
-| Language    | Scala 3.5.2                              |
+| Language    | Scala 3.9.0                              |
 | Backend     | cats-effect, tapir, http4s               |
 | Frontend    | Laminar (Scala.js SPA)                   |
 | API         | tapir (shared endpoint definitions)      |
@@ -384,10 +384,11 @@ fly deploy --remote-only  # fly.io builds the image from those artifacts
   app then run as that user (`docker/entrypoint.sh`). `fly ssh console` is still root: a file that root makes in `/data` while the
   app runs is not writable for the app until the next start.
 - The image build checks the SHA-256 of the Metabase jar (`Dockerfile`: change `METABASE_VERSION` and `METABASE_SHA256` together).
-- Library updates have two limits. Scala stays at 3.5.2 (see the decisions log), so a library that is built for a newer Scala cannot be
-  used: `scala-java-time` above 2.6.0 and `waypoint` above 10.0.0-M1 are such. And a JavaScript-side library can need a newer Scala.js
-  linker: then `sbt-scalajs` in `project/plugins.sbt` goes up with it. The link step shows that fault, the compile step does not, so run
-  `sbt frontend/fastLinkJS` (or the browser tests) after an update.
+- After a library or Scala update, run `sbt frontend/fastLinkJS` and the browser tests, not only the compile: a JavaScript-side library
+  can need a newer Scala.js linker (`sbt-scalajs` in `project/plugins.sbt`), and only the link step shows that. `waypoint` stays at
+  10.0.0-M1: its newer milestones bring a milestone of Laminar.
+- The page loads the linked code through `frontend/main.js` (`import 'scalajs:main.js'`), never by a path under `target/`: that path
+  holds the Scala version, and after a Scala update the page would keep the output of the old compiler.
 - The app migrates its database at start (Flyway). The container copies the database to `/data/backups` before that
   (`docker/entrypoint.sh`, newest 5 kept), and the deploy waits for the health check in `fly.toml`.
 - `GET /api/health` answers `ok <commit>`: it says which build is live.
@@ -428,7 +429,7 @@ given, never from the system. A test gives it `AppClock.fixed(...)` and builds i
 | Historical data    | Per-update                | Track each balance update with timestamp         |
 | Expense recurrence | Monthly only              | Keep simple                                      |
 | HTTP client        | tapir-sttp-client         | Type-safe, shares endpoint defs with backend     |
-| Scala version      | 3.5.2                     | Scala 3.8.1 has Scala.js compiler bug (js.async) |
+| Scala version      | 3.9.0                     | Was pinned at 3.5.2 for a Scala.js compiler bug in 3.8.1; 3.9.0 passes all tests |
 | UI philosophy      | Spreadsheet-like          | Concise, direct edit, minimal clicks             |
 | Savings accounts   | Same table, `role` flag   | Just buckets with a balance; excluded from spendable, no targets  |
 

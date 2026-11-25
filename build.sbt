@@ -1,7 +1,7 @@
 import org.scalajs.linker.interface.ModuleKind
 
 ThisBuild / version      := "0.1.0-SNAPSHOT"
-ThisBuild / scalaVersion := "3.5.2"
+ThisBuild / scalaVersion := "3.9.0"
 ThisBuild / organization := "org.ssbudget"
 
 // Dependency versions (only for deps used in multiple modules)
@@ -92,7 +92,7 @@ lazy val shared = crossProject(JSPlatform, JVMPlatform)
   )
   .jsSettings(
     libraryDependencies ++= Seq(
-      "io.github.cquiroz" %%% "scala-java-time" % "2.6.0",
+      "io.github.cquiroz" %%% "scala-java-time" % "2.11.0",
     ),
   )
 
@@ -117,7 +117,7 @@ lazy val backend = (project in file("backend"))
       "org.tpolecat"                  %% "doobie-core"                   % doobieVersion,
       "org.tpolecat"                  %% "doobie-hikari"                 % doobieVersion,
       "org.xerial"                     % "sqlite-jdbc"                   % "3.54.1.0",
-      "org.flywaydb"                   % "flyway-core"                   % "10.22.0",
+      "org.flywaydb"                   % "flyway-core"                   % "13.13.0",
       // Authentication
       "de.mkammerer"                   % "argon2-jvm"                    % "2.12",
       "com.yubico"                     % "webauthn-server-core"          % "2.5.4",

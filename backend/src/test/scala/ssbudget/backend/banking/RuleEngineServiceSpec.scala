@@ -15,7 +15,7 @@ class RuleEngineServiceSpec extends RepositorySpec {
 
   private def tx(
       id: String,
-      name: String = "Biedronka",
+      name: String,
       amountCents: Long = -1000,
       internal: Boolean = false,
       categoryId: Option[CategoryId] = None,

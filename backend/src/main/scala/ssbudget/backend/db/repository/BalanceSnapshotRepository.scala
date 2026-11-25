@@ -6,8 +6,6 @@ import doobie.implicits.*
 import ssbudget.backend.db.DoobieMeta.given
 import ssbudget.shared.model.*
 
-import java.time.Instant
-
 trait BalanceSnapshotRepository {
   def create(snapshot: BalanceSnapshot): IO[Unit]
   def findById(id: BalanceSnapshotId): IO[Option[BalanceSnapshot]]

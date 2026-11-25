@@ -12,24 +12,8 @@ const https = fs.existsSync(certKey) && fs.existsSync(certCrt)
   ? { key: fs.readFileSync(certKey), cert: fs.readFileSync(certCrt) }
   : undefined
 
-// index.html loads the output of `sbt frontend/fastLinkJS`: the fast link that the dev server and a quick local build use.
-// A release build sets SCALAJS_STAGE=full, and the page then loads the output of `sbt frontend/fullLinkJS` (the optimized link).
-// Without this, a release bundled the fast output of whatever was last compiled, and it failed on a fresh checkout.
-const scalaJSStage = () => ({
-  name: 'ssbudget-scalajs-stage',
-  transformIndexHtml: {
-    order: 'pre',
-    handler: (html) => {
-      if (process.env.SCALAJS_STAGE !== 'full') return html
-      if (!html.includes('/frontend-fastopt/')) throw new Error('index.html does not load frontend-fastopt/main.js; update scalaJSStage')
-      return html.replace('/frontend-fastopt/', '/frontend-opt/')
-    }
-  }
-})
-
 export default defineConfig(({ mode }) => ({
   plugins: [
-    scalaJSStage(),
     scalaJSPlugin({
       cwd: "..",
       projectID: "frontend"

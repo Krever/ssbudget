@@ -41,7 +41,7 @@ jobs:
 
       - name: Build frontend (Vite, release mode)
         working-directory: frontend
-        run: SCALAJS_STAGE=full npm run build
+        run: npm run build
 
       - name: Build the image (without Metabase)
         run: |

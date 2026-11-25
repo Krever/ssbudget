@@ -2,7 +2,6 @@ package ssbudget.backend.db
 
 import cats.effect.{IO, Resource}
 import com.zaxxer.hikari.HikariConfig
-import doobie.*
 import doobie.hikari.HikariTransactor
 import doobie.util.ExecutionContexts
 import org.flywaydb.core.Flyway

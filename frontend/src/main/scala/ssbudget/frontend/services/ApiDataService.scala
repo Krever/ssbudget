@@ -5,7 +5,7 @@ import ssbudget.frontend.services.DataService.sumInPrimary
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 
-import java.time.{Instant, LocalDate}
+import java.time.LocalDate
 import scala.concurrent.{ExecutionContext, Future}
 
 class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends DataService {
@@ -243,7 +243,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
   }
 
   override def refreshExchangeRates(): Future[Unit] = {
-    client.currencies.refreshRates().flatMap { response =>
+    client.currencies.refreshRates().flatMap { _ =>
       client.exchangeRates.getAll().map { rates =>
         exchangeRatesVar.set(rates.map(r => r.fromCurrency -> r.rateAsDouble).toMap)
       }

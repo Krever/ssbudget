@@ -25,7 +25,7 @@ class McpRoutesSpec extends RepositorySpec {
   private def tx(
       id: String,
       name: String,
-      day: Int = 10,
+      day: Int,
       internal: Boolean = false,
       categoryId: Option[CategoryId] = None,
       categorySource: Option[CategorySource] = None,

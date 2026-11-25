@@ -316,13 +316,13 @@ object Routes {
       ordering      = if sort == "amount" then Ordering.by[TransactionSearchRow, Long](_.amountCents)
                       else Ordering.by[TransactionSearchRow, Instant](_.bookedAt)
       order         = if asc then ordering else ordering.reverse
-      exactRows     = exact.map(_._1).sorted(order)
+      exactRows     = exact.map(_._1).sorted(using order)
       // The cap is a display budget for the whole page: exact matches claim it first, and near matches get whatever is left. When they get nothing,
       // only the count of them is wanted, and a count doesn't need an order.
       shownExact    = exactRows.take(cap)
       nearBudget    = cap - shownExact.size
       nearRows      = near.map(_._1)
-      shownNear     = if nearBudget == 0 then Nil else nearRows.sorted(order).take(nearBudget)
+      shownNear     = if nearBudget == 0 then Nil else nearRows.sorted(using order).take(nearBudget)
       full         <- repos.bankTransactions.findByIds((shownExact ++ shownNear).map(_.id))
       byId          = full.map(t => t.id -> t).toMap
       // Totals cover the exact tier only, and the FULL exact match rather than the capped page.
