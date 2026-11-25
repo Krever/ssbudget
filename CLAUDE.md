@@ -17,6 +17,10 @@ Think "Google Sheets for personal budget" not "enterprise dashboard with cards e
 **Look** - Bootstrap, plus one stylesheet of our own: `frontend/styles/app.css`. It sets the scale (root size 14px, so all of
 Bootstrap follows), the number face and the surfaces. A change of the general look goes there, not into page code.
 
+**Bank connections** (Banking page) - each bank is a card: the header has the bank, the state of its access (a mark only when it
+is not active) and the actions; the body is a ledger of its accounts with "Counts as" for the link. Accounts with no link and no
+balance fold into one line.
+
 **The frame of a page** - every page is `container-fluid mt-3` with an `h4` title, and its cards have a plain title in the header.
 `app.css` gives every table the same quiet head and the same inset when it fills its card, and every card header one size. A page of
 forms (Settings) adds `page-narrow`. A status is shown only where it says something: one "open" mark on the Periods table, no badge
@@ -376,7 +380,8 @@ ssbudget/
 ./dev.sh                  # the whole stack locally: Vite on https://localhost:3000, backend on :8080, Scala.js watch, Metabase
 ./dev.sh --no-analytics   # the same without Metabase
 
-sbt backend/test          # the fast test loop (a plain `sbt test` also starts the browser tests)
+sbt unitTests             # the fast test loop: the shared logic on the JVM and as JavaScript (Node), then the backend
+sbt backend/test          # the backend only (a plain `sbt test` also starts the browser tests)
 sbt e2e/test              # browser tests (Chrome)
 sbt scalafmtAll           # format; CI checks it
 sbt dependencyUpdates     # lists newer versions of the libraries (the sbt-updates plugin)
@@ -412,11 +417,14 @@ set (GitHub Actions sets it; locally use `SBT_TPOLECAT_CI=1 sbt Test/compile`) a
 warnings: remove an unused import, and write `val _ = expr` when a result is dropped on purpose. Test code compiles without the two
 options that report unused values, because a ScalaTest test is a list of assertions.
 
-**Tests to run for a change:** `sbt backend/test` (about 30 s) and `sbt e2e/test` (about 4 min, Chrome). Do not run two sbt commands
+**Tests to run for a change:** `sbt unitTests` (about 30 s) and `sbt e2e/test` (about 4 min, Chrome). A test of logic in `shared`
+goes in `shared/src/test`: it then runs on the JVM and, compiled by Scala.js, on Node, which is the form the browser runs. Do not run two sbt commands
 at once in one checkout.
 
-**Time**: the money logic (period rules, the daily record, category figures, reports) reads the time from an `AppClock` that it is
-given, never from the system. A test gives it `AppClock.fixed(...)` and builds its data on a fixed date.
+**Time**: a service reads the time from an `AppClock` that it is given, never from the system: the money logic (period rules, the
+daily record, category figures, reports), the sessions, the bank services and the MCP tokens. A test gives it `AppClock.fixed(...)`,
+or a clock that it moves (`AppClock(ref.get)`), and builds its data on a fixed date. Still on the system time: the signing of the
+bank API token, the passkey records and the currency service.
 
 **circe codecs**: Use `derives Codec.AsObject` for case classes. Only use manual `Encoder`/`Decoder` for:
 - AnyVal wrapper types (encode as the underlying type)

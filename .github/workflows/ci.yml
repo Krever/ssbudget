@@ -33,7 +33,7 @@ jobs:
       # One sbt start for all of it. Test/compile also compiles the e2e specs, which `compile` does not. The last two tasks are the
       # release path of build.sh, so a release that cannot build fails here and not on the day of a deploy.
       - name: Format check, compile, backend tests, release artifacts
-        run: sbt scalafmtCheckAll scalafmtSbtCheck Test/compile backend/test backend/stage frontend/fullLinkJS
+        run: sbt scalafmtCheckAll scalafmtSbtCheck Test/compile unitTests backend/stage frontend/fullLinkJS
 
       - name: Install frontend dependencies
         working-directory: frontend

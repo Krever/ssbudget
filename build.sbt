@@ -51,6 +51,11 @@ val testCodeOptions = Seq(
   Test / tpolecatExcludeOptions ++= Set(ScalacOptions.warnNonUnitStatement, ScalacOptions.warnValueDiscard),
 )
 
+// The tests with no browser. The shared logic (money, periods, budgets, the rule matcher, the free-money trend) runs in the browser as
+// JavaScript, so its tests run two times: on the JVM and, compiled by Scala.js, on Node. A fault that shows only in the JavaScript form of
+// that logic (a number that overflows a JS integer, a java.time part that Scala.js does not have) would pass the JVM run.
+addCommandAlias("unitTests", "sharedJVM/test; sharedJS/test; backend/test")
+
 lazy val root = (project in file("."))
   .aggregate(shared.jvm, shared.js, backend, frontend, e2e)
   .settings(
@@ -88,7 +93,9 @@ lazy val shared = crossProject(JSPlatform, JVMPlatform)
       "com.softwaremill.sttp.tapir" %%% "tapir-core"       % tapirVersion,
       "com.softwaremill.sttp.tapir" %%% "tapir-json-circe" % tapirVersion,
       "io.circe"                    %%% "circe-core"       % circeVersion,
+      "org.scalatest"               %%% "scalatest"        % "3.2.20" % Test,
     ),
+    testCodeOptions,
   )
   .jsSettings(
     libraryDependencies ++= Seq(

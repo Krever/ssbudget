@@ -5,6 +5,7 @@ import cats.implicits.*
 import org.slf4j.LoggerFactory
 import ssbudget.backend.banking.EnableBankingClient.EbTransaction
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.service.AppClock
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 
@@ -25,7 +26,12 @@ private enum Outcome {
   case Imported, Known, Pending, Unreadable
 }
 
-class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBankingApi], ruleEngine: RuleEngineService) {
+class TransactionImportService(
+    repos: Repositories,
+    clientOpt: Option[EnableBankingApi],
+    ruleEngine: RuleEngineService,
+    clock: AppClock = AppClock.system,
+) {
 
   private val log = LoggerFactory.getLogger(classOf[TransactionImportService])
 
@@ -51,7 +57,7 @@ class TransactionImportService(repos: Repositories, clientOpt: Option[EnableBank
           case Some(conn) if conn.sessionId.isEmpty => IO.pure(Left("Connection is not authorized yet"))
           case Some(_)                              =>
             for {
-              now     <- IO.realTimeInstant
+              now     <- clock.now
               today    = LocalDate.ofInstant(now, ZoneOffset.UTC)
               links   <- repos.bankConnections.findLinksByConnection(connectionId)
               scope    = req.monthsBack.fold("incremental (new only)")(n => s"backfill last $n month(s)")

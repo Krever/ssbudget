@@ -1,4 +1,4 @@
-package ssbudget.backend
+package ssbudget.shared
 
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers

@@ -3,6 +3,7 @@ package ssbudget.backend.banking
 import cats.effect.IO
 import cats.implicits.*
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.service.AppClock
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 
@@ -20,7 +21,7 @@ final case class BankSyncOutcome(views: List[BankConnectionView], warnings: List
   * [[clientOpt]] is None when the integration is not configured, in which case network operations return a friendly error while the app keeps
   * running.
   */
-class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
+class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi], clock: AppClock = AppClock.system) {
 
   private val notConfigured = "Enable Banking integration is not configured"
 
@@ -37,7 +38,7 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
   def connect(req: ConnectBankRequest): IO[Either[String, ConnectBankResponse]] =
     withClient { client =>
       for {
-        now   <- IO.realTimeInstant
+        now   <- clock.now
         state  = UUID.randomUUID().toString
         connId = BankConnectionId(UUID.randomUUID().toString)
         conn   = BankConnection(connId, req.aspspName, req.aspspCountry, None, ConnectionStatus.Pending, None, Some(state), now)
@@ -194,7 +195,7 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
                         case (Some(cents), Some(cur)) =>
                           for {
                             acctOpt <- repos.accounts.findById(accountId)
-                            now     <- IO.realTimeInstant
+                            now     <- clock.now
                             _       <- acctOpt.filter(_.currency == cur).traverse_(_ => repos.accounts.setBalance(accountId, cents, BalanceSource.Bank, now))
                           } yield ()
                         case _                        => IO.unit
@@ -290,7 +291,7 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
     */
   private def recomputeCardGroups: IO[Unit] =
     for {
-      now    <- IO.realTimeInstant
+      now    <- clock.now
       groups <- repos.cardGroups.findAll
       _      <- groups.traverse_ { group =>
                   group.accountId match {
@@ -322,7 +323,7 @@ class BankingService(repos: Repositories, clientOpt: Option[EnableBankingApi]) {
         case Some(conn) if conn.sessionId.isEmpty => IO.pure(Left("Connection is not authorized yet"))
         case Some(_)                              =>
           for {
-            now      <- IO.realTimeInstant
+            now      <- clock.now
             links    <- repos.bankConnections.findLinksByConnection(connectionId)
             warnings <- links.flatTraverse(link => syncLink(client, link, now))
             _        <- recomputeCardGroups // card-group mirror accounts depend on freshly-synced member balances

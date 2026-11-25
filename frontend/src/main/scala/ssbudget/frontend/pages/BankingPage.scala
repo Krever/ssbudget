@@ -666,6 +666,10 @@ object BankingPage {
     )
   }
 
+  // The connections whose idle accounts are shown. Kept outside the card: a card is built again each time the connections load (after a link,
+  // after a sync), and a fold that was opened must stay open.
+  private val shownIdle = Var(Set.empty[String])
+
   private def connectionsList(
       connections: Signal[List[BankConnectionView]],
       accounts: Signal[List[Account]],
@@ -702,84 +706,116 @@ object BankingPage {
     val conn      = view.connection
     val health    = conn.health(Instant.now())
     val monthsVar = Var("0") // "0" = incremental (new only); otherwise months to backfill
+
+    // A bank gives every currency pocket and every old sub-account as an account. One that is not linked and holds nothing is noise in the
+    // table (a multi-currency account alone gives six of them), so those fold into one line, as the small balances of the Dashboard do.
+    def idle(l: BankAccountLink): Boolean = l.target == BankLinkTarget.Unlinked && l.lastBalanceCents.forall(_ == 0L)
+    val (folded, shown)                   = view.accounts.partition(idle)
+    def rowOf(l: BankAccountLink)         = accountRow(l, accounts, cardGroups, link, createAndLink)
+
     div(
-      cls := "card mb-3",
+      cls                    := "card mb-3",
+      dataAttr("connection") := conn.aspspName,
+      // The header is the bank: its name, what state the access is in, and what can be done with the whole connection.
       div(
-        cls := "card-body",
+        cls := "card-header d-flex flex-wrap justify-content-between align-items-center gap-2",
         div(
-          cls := "d-flex justify-content-between align-items-start",
+          span(cls := "fw-semibold", conn.aspspName),
+          span(cls := "text-muted small ms-2", conn.aspspCountry),
+          // "Active" is the usual state and says nothing; only another state gets a mark.
+          if conn.status == ConnectionStatus.Active then emptyNode else span(cls := "ms-2", statusBadge(conn.status)),
+          consentNote(conn, health),
+          view.accounts
+            .flatMap(_.lastSyncedAt)
+            .maxOption
+            .map(t => small(cls := "text-muted ms-2", s"· synced ${Formatting.formatDateTime(t)}"))
+            .getOrElse(emptyNode),
+        ),
+        div(
+          cls := "d-flex flex-wrap align-items-center gap-2",
           div(
-            h5(cls := "mb-1", conn.aspspName, span(cls := "text-muted small ms-2", conn.aspspCountry)),
-            statusBadge(conn.status),
-            consentNote(conn, health),
-            view.accounts
-              .flatMap(_.lastSyncedAt)
-              .maxOption
-              .map(t => small(cls := "text-muted ms-2", s"Last synced ${Formatting.formatDateTime(t)}"))
-              .getOrElse(emptyNode),
+            cls       := "input-group input-group-sm",
+            styleAttr := "width: auto",
+            select(
+              cls := "form-select form-select-sm",
+              onChange.mapToValue --> monthsVar.writer,
+              option(value := "0", "New only"),
+              option(value := "1", "1 month"),
+              option(value := "3", "3 months"),
+              option(value := "6", "6 months"),
+              option(value := "12", "12 months"),
+            ),
+            button(
+              cls := "btn btn-outline-secondary text-nowrap",
+              disabled <-- importingVar.signal.map(_.contains(conn.id.value)),
+              child <-- importingVar.signal.map(_.contains(conn.id.value)).map { importing =>
+                if importing then span(span(cls := "spinner-border spinner-border-sm me-1"), "Importing...")
+                else span("Import tx")
+              },
+              onClick --> { _ =>
+                val m = monthsVar.now()
+                importTx(conn.id, if m == "0" then None else Some(m.toInt))
+              },
+            ),
           ),
           div(
-            cls := "d-flex flex-column align-items-end gap-2",
-            div(
-              cls       := "btn-group btn-group-sm",
-              button(
-                cls := "btn btn-outline-primary",
-                disabled <-- syncingVar.signal.map(_.contains(conn.id.value)),
-                child <-- syncingVar.signal.map(_.contains(conn.id.value)).map { syncing =>
-                  if syncing then span(span(cls := "spinner-border spinner-border-sm me-1"), "Syncing...")
-                  else span("Sync balances")
-                },
-                onClick --> { _ => sync(conn.id) },
-              ),
-              if health != ConnectionHealth.Ok then button(
-                cls   := "btn btn-warning",
-                title := "Log in to the bank again; history and links are kept",
-                "Renew",
-                onClick --> { _ => renew(conn) },
-              )
-              else emptyNode,
-              Loading.confirmActionButton(
-                "Disconnect",
-                () => Future.successful(disconnect(conn.id)),
-                btnClass = "btn btn-outline-danger",
-                hint = "Removes the connection and the transactions that came through it",
-              ),
+            cls       := "btn-group btn-group-sm",
+            button(
+              cls := "btn btn-outline-primary",
+              disabled <-- syncingVar.signal.map(_.contains(conn.id.value)),
+              child <-- syncingVar.signal.map(_.contains(conn.id.value)).map { syncing =>
+                if syncing then span(span(cls := "spinner-border spinner-border-sm me-1"), "Syncing...")
+                else span("Sync balances")
+              },
+              onClick --> { _ => sync(conn.id) },
             ),
-            div(
-              cls       := "input-group input-group-sm",
-              styleAttr := "width: auto",
-              select(
-                cls := "form-select form-select-sm",
-                onChange.mapToValue --> monthsVar.writer,
-                option(value := "0", "New only"),
-                option(value := "1", "1 month"),
-                option(value := "3", "3 months"),
-                option(value := "6", "6 months"),
-                option(value := "12", "12 months"),
-              ),
-              button(
-                cls := "btn btn-outline-secondary text-nowrap",
-                disabled <-- importingVar.signal.map(_.contains(conn.id.value)),
-                child <-- importingVar.signal.map(_.contains(conn.id.value)).map { importing =>
-                  if importing then span(span(cls := "spinner-border spinner-border-sm me-1"), "Importing...")
-                  else span("Import tx")
-                },
-                onClick --> { _ =>
-                  val m = monthsVar.now()
-                  importTx(conn.id, if m == "0" then None else Some(m.toInt))
-                },
-              ),
+            if health != ConnectionHealth.Ok then button(
+              cls   := "btn btn-warning",
+              title := "Log in to the bank again; history and links are kept",
+              "Renew",
+              onClick --> { _ => renew(conn) },
+            )
+            else emptyNode,
+            Loading.confirmActionButton(
+              "Disconnect",
+              () => Future.successful(disconnect(conn.id)),
+              btnClass = "btn btn-outline-danger",
+              hint = "Removes the connection and its links; the transactions that came through it stay",
             ),
           ),
         ),
-        if view.accounts.isEmpty then emptyNode
-        else
-          table(
-            cls := "table table-sm align-middle mt-3 mb-0",
-            thead(tr(th("Account"), th(cls := "text-end", "Balance"), th("Linked app account"))),
-            tbody(view.accounts.map(l => accountRow(l, accounts, cardGroups, link, createAndLink))),
-          ),
       ),
+      if view.accounts.isEmpty then emptyNode
+      else
+        div(
+          cls := "card-body p-0",
+          table(
+            cls := "table table-sm align-middle mb-0 accounts-ledger",
+            thead(tr(th("Bank account"), th(cls := "text-end", "Balance"), th(styleAttr := "width: 42%", "Counts as"))),
+            tbody(
+              shown.map(rowOf),
+              children <-- shownIdle.signal.map(_.contains(conn.id.value)).map { open =>
+                if folded.isEmpty then Nil
+                else {
+                  val toggle = tr(
+                    td(
+                      colSpan := 3,
+                      button(
+                        tpe              := "button",
+                        cls              := "btn btn-link btn-sm p-0 text-muted",
+                        dataAttr("fold") := "idle",
+                        if open then "hide them"
+                        else s"${folded.size} more ${if folded.size == 1 then "account" else "accounts"} with no balance and no link",
+                        onClick --> { _ => shownIdle.update(set => if open then set - conn.id.value else set + conn.id.value) },
+                      ),
+                    ),
+                  )
+                  if open then folded.map(rowOf) :+ toggle else List(toggle)
+                }
+              },
+            ),
+          ),
+        ),
     )
   }
 
@@ -811,19 +847,20 @@ object BankingPage {
     val linkable                              = accounts.filter(a => a.balanceSource != BalanceSource.CardGroup && fits(a.currency, l.target == BankLinkTarget.Account(a.id)))
     val groups                                = cardGroups.filter(g => fits(g.currency, l.target == BankLinkTarget.CardGroupMember(g.id)))
 
-    val balanceCell = (l.lastBalanceCents, l.lastBalanceCurrency) match {
-      case (Some(cents), Some(cur)) => span(cls := "font-monospace", MoneyFormatter.formatSimple(cents, cur))
-      case (Some(cents), None)      => span(cls := "font-monospace", MoneyFormatter.formatSimple(cents, l.currency.getOrElse(Currency.PLN)))
-      case _                        => span(cls := "text-muted", "— not synced —")
+    val balanceCell: Node = (l.lastBalanceCents, l.lastBalanceCurrency.orElse(l.currency)) match {
+      case (Some(cents), cur) => MoneyFormatter.formatSimple(cents, cur.getOrElse(Currency.PLN))
+      case (None, cur)        => span(cls := "text-muted", s"not synced${cur.fold("")(c => s" · ${c.code}")}")
     }
+
+    // The second line of the name: what tells this account from the others of the same owner (the product, the IBAN).
+    val details = List(l.product.filter(p => !l.name.contains(p)), l.iban).flatten
 
     tr(
       td(
-        div(strong(title), l.currency.map(c => span(cls := "badge text-bg-secondary ms-2", c.code)).getOrElse(emptyNode)),
-        l.product.filter(p => !l.name.contains(p)).map(p => small(cls := "text-muted d-block", p)).getOrElse(emptyNode),
-        l.iban.map(v => small(cls := "text-muted d-block font-monospace", v)).getOrElse(emptyNode),
+        title,
+        if details.isEmpty then emptyNode else span(cls := "ledger-sub font-monospace", details.mkString(" · ")),
       ),
-      td(cls := "text-end", balanceCell),
+      td(cls := "ledger-num", balanceCell),
       td(
         div(
           cls := "d-flex gap-2 align-items-center",

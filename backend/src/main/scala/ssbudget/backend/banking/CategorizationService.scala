@@ -4,6 +4,7 @@ import cats.data.EitherT
 import cats.effect.IO
 import cats.implicits.*
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.service.AppClock
 import ssbudget.backend.db.repository.RuleWrite
 import ssbudget.shared.model.*
 import ssbudget.shared.rules.RuleMatcher
@@ -57,7 +58,7 @@ final case class RuleImpact(
   * REST routes and the MCP tools both call this service, so they obey the same validation and the same "apply all rules again after a rule change"
   * contract. (Rule import, rule reorder and category delete are still in `Routes`.)
   */
-class CategorizationService(repos: Repositories, ruleEngine: RuleEngineService) {
+class CategorizationService(repos: Repositories, ruleEngine: RuleEngineService, clock: AppClock = AppClock.system) {
 
   import CategorizationService.*
 
@@ -117,7 +118,7 @@ class CategorizationService(repos: Repositories, ruleEngine: RuleEngineService) 
     for {
       rules      <- repos.classificationRules.findAll
       categories <- repos.categories.findAll.map(_.map(_.id).toSet)
-      now        <- IO.realTimeInstant
+      now        <- clock.now
     } yield resolved(rules, categories, change, ClassificationRuleId(UUID.randomUUID().toString), now)
 }
 

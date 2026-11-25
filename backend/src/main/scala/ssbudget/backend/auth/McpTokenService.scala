@@ -2,6 +2,7 @@ package ssbudget.backend.auth
 
 import cats.effect.IO
 import ssbudget.backend.db.repository.{McpTokenRepository, McpTokenRow}
+import ssbudget.backend.service.AppClock
 import ssbudget.shared.api.{CreatedMcpToken, McpTokenInfo}
 
 import java.nio.charset.StandardCharsets.UTF_8
@@ -20,7 +21,7 @@ import java.util.UUID
   * person chose, and these have full entropy. A token is found by its digest, so the comparison does not depend on how much of a wrong token is
   * right.
   */
-final class McpTokenService(repo: McpTokenRepository) {
+final class McpTokenService(repo: McpTokenRepository, clock: AppClock = AppClock.system) {
 
   import McpTokenService.*
 
@@ -34,7 +35,7 @@ final class McpTokenService(repo: McpTokenRepository) {
         else
           for {
             token <- SecureToken.generate(TokenBytes).map(TokenPrefix + _)
-            now   <- IO.realTimeInstant
+            now   <- clock.now
             row    = McpTokenRow(UUID.randomUUID().toString, if label.isEmpty then DefaultName else label, digest(token), now, None)
             _     <- repo.create(row)
           } yield Right(CreatedMcpToken(info(row), token))
@@ -57,7 +58,7 @@ final class McpTokenService(repo: McpTokenRepository) {
       repo.findByHash(digest(token)).flatMap {
         case None      => IO.pure(None)
         case Some(row) =>
-          IO.realTimeInstant.flatMap { now =>
+          clock.now.flatMap { now =>
             val stale = row.lastUsedAt.forall(_.plusSeconds(60).isBefore(now))
             IO.whenA(stale)(repo.updateLastUsed(row.id, now)).as(Some(info(row)))
           }

@@ -4,6 +4,7 @@ import cats.effect.{IO, Ref}
 import cats.effect.std.Supervisor
 import cats.implicits.*
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.service.AppClock
 import ssbudget.shared.api.{AccountImportResult, ImportTransactionsRequest}
 import ssbudget.shared.model.*
 
@@ -25,6 +26,7 @@ class ImportJobService(
     importService: TransactionImportService,
     // Fetches fresh exchange rates. A sync runs it first, so that the balances it brings are converted at the rates of the same day.
     refreshRates: IO[Either[String, Unit]] = IO.pure(Right(())),
+    clock: AppClock = AppClock.system,
 ) {
 
   /** Accumulates per-account items + connection warnings for one job, persisting on every change so the polling UI sees items/counts fill in. */
@@ -104,7 +106,7 @@ class ImportJobService(
       case existing :: _ if existing.status == ImportJobStatus.Running => IO.pure(existing)
       case _                                                           =>
         for {
-          now <- IO.realTimeInstant
+          now <- clock.now
           job  = ImportJob(
                    ImportJobId(UUID.randomUUID().toString),
                    kind,
@@ -126,7 +128,7 @@ class ImportJobService(
                      errors   <- Ref.of[IO, List[String]](Nil)
                      progress <- Ref.of[IO, Option[String]](Some("starting…"))
                      outcome  <- work(new Reporter(job.id, items, errors, progress)).attempt
-                     fin      <- IO.realTimeInstant
+                     fin      <- clock.now
                      _        <- outcome match {
                                    case Right(_) => repos.importJobs.finish(job.id, ImportJobStatus.Succeeded, None, fin)
                                    case Left(e)  =>
@@ -153,7 +155,7 @@ class ImportJobService(
   private def runSyncAll(reporter: Reporter): IO[Unit] =
     for {
       conns           <- repos.bankConnections.findAll
-      now             <- IO.realTimeInstant
+      now             <- clock.now
       // Skip connections still pending authorization. A lapsed consent fails every call: say once what to do instead of an error per account.
       (lapsed, usable) = conns.filter(_.sessionId.isDefined).partition(_.health(now) == ConnectionHealth.NeedsRenewal)
       // Rates that fail to load must not stop the sync: the figures then stay at the rates of the last good fetch.

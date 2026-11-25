@@ -1,6 +1,8 @@
 package ssbudget.backend.auth
 
 import cats.effect.IO
+import cats.syntax.all.*
+import ssbudget.backend.service.AppClock
 import ssbudget.backend.db.repository.{Session, SessionRepository}
 
 import java.nio.charset.StandardCharsets.UTF_8
@@ -41,17 +43,21 @@ object SessionService {
     */
   val ConfirmationWindow: Duration = Duration.ofMinutes(10)
 
-  def apply(sessionRepository: SessionRepository): SessionService =
-    new SessionServiceImpl(sessionRepository)
+  /** @param clock
+    *   what time it is. Every rule of a session is a rule about time (30 days of life, 10 minutes of a proof of identity), so a test gives a clock
+    *   that it can move.
+    */
+  def apply(sessionRepository: SessionRepository, clock: AppClock = AppClock.system): SessionService =
+    new SessionServiceImpl(sessionRepository, clock)
 
   private[auth] def digest(token: String): String =
     MessageDigest.getInstance("SHA-256").digest(token.getBytes(UTF_8)).map("%02x".format(_)).mkString
 
-  private class SessionServiceImpl(sessionRepository: SessionRepository) extends SessionService {
+  private class SessionServiceImpl(sessionRepository: SessionRepository, clock: AppClock) extends SessionService {
     override def createSession(): IO[String] = {
       for {
         token  <- SecureToken.generate(TokenLength)
-        now     = Instant.now()
+        now    <- clock.now
         expires = now.plus(SessionDuration)
         _      <- sessionRepository.create(Session(digest(token), now, expires, now, confirmedAt = Some(now)))
       } yield token
@@ -60,7 +66,7 @@ object SessionService {
     override def validateSession(token: String): IO[Option[Session]] = {
       for {
         sessionOpt  <- sessionRepository.findByToken(digest(token))
-        now          = Instant.now()
+        now         <- clock.now
         validSession = sessionOpt.filter(s => s.expiresAt.isAfter(now))
         // "Last used" is written one time in a minute at most: with a write on every request, each page load would queue behind the one
         // database connection for nothing.
@@ -75,14 +81,16 @@ object SessionService {
     }
 
     override def cleanupExpiredSessions(): IO[Int] = {
-      sessionRepository.deleteExpired(Instant.now())
+      clock.now.flatMap(sessionRepository.deleteExpired)
     }
 
     override def invalidateOthers(keep: Option[String]): IO[Unit] = sessionRepository.deleteAllExcept(keep.map(digest)).void
 
-    override def confirm(token: String): IO[Unit] = sessionRepository.setConfirmed(digest(token), Instant.now())
+    override def confirm(token: String): IO[Unit] = clock.now.flatMap(sessionRepository.setConfirmed(digest(token), _))
 
     override def recentlyConfirmed(token: String): IO[Boolean] =
-      validateSession(token).map(_.flatMap(_.confirmedAt).exists(at => Duration.between(at, Instant.now()).compareTo(ConfirmationWindow) < 0))
+      (validateSession(token), clock.now).mapN { (session, now) =>
+        session.flatMap(_.confirmedAt).exists(at => Duration.between(at, now).compareTo(ConfirmationWindow) < 0)
+      }
   }
 }

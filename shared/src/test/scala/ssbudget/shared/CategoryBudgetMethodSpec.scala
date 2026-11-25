@@ -1,4 +1,4 @@
-package ssbudget.backend
+package ssbudget.shared
 
 import java.time.LocalDate
 import org.scalatest.freespec.AnyFreeSpec
