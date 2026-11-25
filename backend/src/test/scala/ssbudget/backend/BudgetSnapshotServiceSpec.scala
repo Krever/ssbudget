@@ -495,9 +495,69 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
     def plan(xa: Transactor[IO], cents: Long): IO[Unit] =
       sql"UPDATE periods SET planned_saving_cents = $cents WHERE id = 'per1'".update.run.transact(xa).void
 
-    // Day 6: 700 PLN goes to savings. On day 2 savings paid a 400 PLN budgeted bill, so the net amount saved by day 6 is 300 PLN.
+    // A savings account in EUR with 1,000 EUR when the period opened. The bank account 'uid2' of the fixture is its ledger: on day 2 it paid the
+    // budgeted bill of 100 EUR (400 PLN). On day 6, 700 PLN goes from the spending account to it and arrives as 175 EUR. The balance is thus
+    // 900 EUR from day 2 and 1,075 EUR from day 6: saved by day 6 is 75 EUR, which is 300 PLN.
     def moveToSavings(xa: Transactor[IO]): IO[Unit] =
-      tx("sv1", "uid1", -70000, "PLN", periodStart.plusDays(6), internal = true, None).transact(xa).void
+      (for {
+        _ <- sql"""INSERT INTO accounts (id, name, currency, role, balance_cents, balance_source, balance_updated_at)
+                   VALUES ('sav1', 'Savings', 'EUR', 'savings', 107500, 'bank', ${at(today)})""".update.run
+        _ <- sql"""INSERT INTO balance_snapshots (id, account_id, amount, currency, recorded_at)
+                   VALUES ('snap-s', 'sav1', 100000, 'EUR', ${at(periodStart, 9)})""".update.run
+        _ <- sql"""INSERT INTO bank_account_links (id, connection_id, eb_account_uid, link_target_kind, link_target_id)
+                   VALUES ('link-s', 'conn1', 'uid2', 'account', 'sav1')""".update.run
+        _ <- tx("sv1", "uid1", -70000, "PLN", periodStart.plusDays(6), internal = true, None)
+        _ <- tx("sv2", "uid2", 17500, "EUR", periodStart.plusDays(6), internal = true, None)
+      } yield ()).transact(xa)
+
+    "is counted down the same way in the stored record, also in a pass that writes no new day" in {
+      withFixture { (service, repos, xa) =>
+        for {
+          _      <- moveToSavings(xa)
+          _      <- plan(xa, 50000)
+          // The first pass writes every day. The second has no new day to write: it only computes the open period again.
+          _      <- service.ensureUpToDate
+          _      <- service.ensureUpToDate
+          stored <- repos.dailyBudgetSnapshots.findAll
+          day7   <- freeOn(service, periodStart.plusDays(7))
+        } yield {
+          val byDay = stored.map(r => r.onDate -> r.savingReserveCents).toMap
+          // Nothing was saved before day 6 (savings paid a bill), and 300 PLN from day 6: the balance of a past day comes through the ledger.
+          byDay(periodStart.plusDays(5)) shouldBe 50000L
+          byDay(periodStart.plusDays(7)) shouldBe 20000L
+          byDay(today) shouldBe 20000L
+          day7.savingReserveCents shouldBe 20000L
+        }
+      }
+    }
+
+    "counts pay that arrives directly on a savings account, and not what the market did to an investment" in {
+      withFixture { (service, _, xa) =>
+        for {
+          _      <- moveToSavings(xa)
+          _      <- plan(xa, 50000)
+          before <- freeOn(service, periodStart.plusDays(8))
+          // Day 8: 100 EUR (400 PLN) of pay arrives on the savings account and stays there. It never passes a spending account.
+          _      <- tx("pay", "uid2", 10000, "EUR", periodStart.plusDays(8), internal = false, None).transact(xa)
+          after  <- freeOn(service, periodStart.plusDays(8))
+          // An investment account that lost 1,000 PLN of value in the period, with nothing moved in or out.
+          _      <- (sql"""INSERT INTO accounts (id, name, currency, role, balance_cents, balance_source, balance_updated_at)
+                           VALUES ('inv1', 'Broker', 'PLN', 'investment', 400000, 'manual', ${at(today)})""".update.run *>
+                      sql"""INSERT INTO balance_snapshots (id, account_id, amount, currency, recorded_at)
+                            VALUES ('snap-i', 'inv1', 500000, 'PLN', ${at(periodStart, 9)})""".update.run).transact(xa)
+          market <- freeOn(service, periodStart.plusDays(8))
+        } yield {
+          // 300 PLN was saved by day 6, so 200 PLN of the plan was still to save.
+          before.savingReserveCents shouldBe 20000L
+          // The pay made the saving 700 PLN: the plan of 500 is met. The 200 PLN above it waits for the bills still to pay.
+          after.savingReserveCents shouldBe -20000L
+          // The pay did not touch a spending account, so the term of the plan's own line did not move.
+          after.fromSavingsCents shouldBe before.fromSavingsCents
+          // The fall of the investment changes nothing: it is not money that must be saved again.
+          market.savingReserveCents shouldBe after.savingReserveCents
+        }
+      }
+    }
 
     "is reserved until it is moved to savings, and does not move the plan's own line" in {
       withFixture { (service, _, xa) =>

@@ -114,7 +114,11 @@ class BudgetSnapshotService(repos: Repositories, clock: AppClock = AppClock.syst
         val spendFrom   = sorted.findLast(p => !p.startDay.isAfter(from)).fold(from)(_.startDay)
         // Balances are carried through the ledger only for days in the PAST; today reads the account's live balance, so a pass that writes nothing
         // else has no use for it. This is the difference between the steady state scanning the whole transaction table and not touching it.
-        val needsLedger = balancesFor.exists(_ != today)
+        // A planned saving is counted down with the change of the savings balances since the period opened ([[savedCents]]), on each day of
+        // the open period. Those are balances of past days, and the balance at the start of an account that was first recorded later comes
+        // from the ledger too. So the ledger is also read while the open period has a plan.
+        val planNeedsIt = sorted.exists(p => p.endDate.isEmpty && p.plannedSavingCents > 0)
+        val needsLedger = balancesFor.exists(_ != today) || planNeedsIt
         for {
           accounts   <- repos.accounts.findAll
           cats       <- repos.categories.findAll
@@ -133,9 +137,10 @@ class BudgetSnapshotService(repos: Repositories, clock: AppClock = AppClock.syst
           // From the start of the earliest period in play: the outside-money terms are cumulative within a period.
           movements  <- repos.bankTransactions.dailyNetByAccountAndCategory(startOf(spendFrom), endOfDay(today))
         } yield {
-          val spending  = accounts.filter(_.role == AccountRole.Spending).map(_.id).toSet
-          val holding   = accounts.filter(_.role == AccountRole.Holding).map(_.id).toSet
-          val rateTable = RateTable(primaryOpt.map(_.code).getOrElse(Currency.PLN), rates)
+          val spending   = accounts.filter(_.role == AccountRole.Spending).map(_.id).toSet
+          val holding    = accounts.filter(_.role == AccountRole.Holding).map(_.id).toSet
+          val investment = accounts.filter(_.role == AccountRole.Investment).map(_.id).toSet
+          val rateTable  = RateTable(primaryOpt.map(_.code).getOrElse(Currency.PLN), rates)
           Some(
             World(
               today = today,
@@ -166,6 +171,7 @@ class BudgetSnapshotService(repos: Repositories, clock: AppClock = AppClock.syst
                   day,
                   onSpendingAccount = account.exists(spending),
                   onHoldingAccount = account.exists(holding),
+                  onInvestmentAccount = account.exists(investment),
                   m.category,
                   m.internal,
                   m.withHolding,
@@ -215,10 +221,37 @@ class BudgetSnapshotService(repos: Repositories, clock: AppClock = AppClock.syst
     val budgets                       = period.toList.flatMap(p => budgetRemainings(w, p, day).map(_._2))
     val (ledger, fromSavings, income) = outsideMoney(w, period, day)
     val (toSpend, toArrive)           = (budgets.filter(_ > 0).sum, -budgets.filter(_ < 0).sum)
-    // What went to savings is the opposite of what came from them. It is counted as the line counts it: net of the budgeted bills that were paid
-    // from a savings account, so that money moved there only to pay such a bill is not taken for saving.
-    val savingReserve                 = period.fold(0L)(_.savingReserveCents(savedCents = -fromSavings, stillToPayCents = toSpend))
+    val savingReserve                 = period.fold(0L)(p => p.savingReserveCents(savedCents = savedCents(w, p, day), stillToPayCents = toSpend))
     DerivedTerms(day, toSpend, toArrive, ledger, fromSavings, income, savingReserve)
+  }
+
+  /** What was saved in `period` by the end of `day`: the amount that the planned saving is counted down with.
+    *
+    * It is the "Saved" figure of the Accounts card (`PeriodService`, and `DataService.savedThisPeriod` on the page), by the same rule: the change of
+    * the balances of the savings accounts since the period opened, plus what was moved INTO the investment accounts. The change of an investment
+    * balance is not in it: that is mostly the market result, and a fall of the market is not money that must be saved again.
+    *
+    * It is NOT the opposite of the `fromSavings` term, which it was before. That term sees only what left a spending account. Pay that arrives
+    * directly on a savings account and stays there never passes a spending account: the term missed it, and the page said "still to save" while its
+    * own "Saved" figure was above the plan. A balance holds all of it: transfers from both sides, income, spend, and bills paid from the account (so
+    * money that was moved there only to pay a bill is still not taken for saving).
+    */
+  private def savedCents(w: World, period: Period, day: LocalDate): Long = {
+    val history       = BalanceHistory(w.snapshots, w.dailyByAccount)
+    val savingsChange = w.accounts
+      .filter(_.role == AccountRole.Savings)
+      .flatMap { account =>
+        (history.asOf(account.id, period.startDate), balanceOf(w, account, day))
+          .mapN((atStart, now) => w.rates.convert(now - atStart, account.currency, day))
+      }
+      .sum
+    // Moved into the investment accounts: the opposite of the transfer categories as the bank side shows them, plus the entries of an
+    // investment account's own ledger. The entries of the first day count, as in the period reports.
+    val window        = PeriodWindow.of(period)
+    val inPeriod      = w.movements.filter(m => window.holds(m.day) && !m.day.isAfter(day) && !m.internal)
+    val viaCategories = -inPeriod.filter(m => !m.onInvestmentAccount && m.category.exists(w.transferCategories)).map(_.cents).sum
+    val viaOwnLedger  = inPeriod.filter(_.onInvestmentAccount).map(_.cents).sum
+    savingsChange + viaCategories + viaOwnLedger
   }
 
   /** For each day of the open period after its first: the parts of that day's change of the plan's own line, largest first.
@@ -408,6 +441,7 @@ object BudgetSnapshotService {
       day: LocalDate,
       onSpendingAccount: Boolean,
       onHoldingAccount: Boolean, // the account holds money that waits for the next period (see `AccountRole.Holding`)
+      onInvestmentAccount: Boolean,
       category: Option[CategoryId],
       internal: Boolean,
       withHolding: Boolean,      // the other side of the entries is a holding account

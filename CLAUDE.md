@@ -92,9 +92,15 @@ statistic ran over — with the lookback window shaded, so the window can be pic
 - **Planned saving** is one amount per period (`Period.plannedSavingCents`, primary currency), typed in place on the Periods page or on
   the Dashboard (click "plan" in the Free money card), and editable at any time in the period. A new period starts with the amount of
   the period before it. It reaches free money as one signed term, the **saving reserve** (`Period.savingReserveCents`)
-- What was moved is read from the bank ledger, never typed: it is the opposite of the snapshot's `fromSavings` term. It is thus NET of
-  budgeted bills paid from a savings account, and it counts from the day after the period opened. Plan the net amount: money that is
-  moved to a savings account only to pay a budgeted bill from there is not saving
+- The plan is counted down with what was SAVED, and that is the "Saved" figure of the Accounts card: the change of the balances of the
+  savings accounts since the period opened, plus what was moved into the investment accounts (`BudgetSnapshotService.savedCents` for
+  the daily record, `DataService.savedThisPeriod` for the page). It is never typed. The market result is not in it. A balance holds
+  everything: pay that arrives directly on a savings account counts, and a bill paid from a savings account lowers it, so money that is
+  moved there only to pay a bill is not saving
+- It is NOT the opposite of the `fromSavings` term (it was, until November 2026). That term sees only what left a spending account,
+  so it missed pay that stays on a savings account. `fromSavings` is a term of the plan's own line only
+- The balance of a savings account with no bank link changes when the user types it, so a transfer to such an account counts as
+  saved from that moment
 
 **Holding accounts** (`AccountRole.Holding`, "On hold" in the UI) - pay that came early and waits for the next period
 - Not spendable, so not in free money; not savings, so not in "Saved"; part of the net worth. The Accounts card shows them as a group

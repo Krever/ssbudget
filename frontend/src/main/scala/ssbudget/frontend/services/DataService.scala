@@ -212,20 +212,13 @@ trait DataService {
   /** Everything the plan still expects to arrive before the next paycheck: the sum over the income budgets, as a positive amount. */
   final def stillToReceive: Signal[Money] = sumBudgets(_ < 0, -1)
 
-  /** The net amount that went to savings in the current period so far, by the bank ledger: the opposite of the `fromSavings` term of the period's
-    * latest recorded day. It is read from [[freeMoneyHistory]], so the page and the daily record count the planned saving down by one figure.
-    */
-  private def savedCents: Signal[Long] =
-    freeMoneyHistory.combineWith(currentPeriod).map { case (history, period) =>
-      period.flatMap(p => history.get(p.id)).flatMap(_.lastOption).fold(0L)(-_.fromSavingsCents)
-    }
-
   /** What the period's planned saving takes from free money (see [[Period.savingReserveCents]]). Positive: the part of the plan that is not yet moved
     * to savings. Negative: more than the plan was moved, and the excess is counted as money for the bills still to pay. Zero with no plan.
     */
   final def savingReserve: Signal[Money] =
-    currentPeriod.combineWith(savedCents).combineWith(stillToPay).map { case (period, saved, toPay) =>
-      Money(period.fold(0L)(_.savingReserveCents(saved, toPay.amountCents)), toPay.currency)
+    // The plan is counted down with [[savedThisPeriod]], the "Saved" figure that the Accounts card shows: the two cannot say different things.
+    currentPeriod.combineWith(savedThisPeriod).combineWith(stillToPay).map { case (period, saved, toPay) =>
+      Money(period.fold(0L)(_.savingReserveCents(saved.amountCents, toPay.amountCents)), toPay.currency)
     }
 
   /** What's actually free to spend before the next paycheck: the spendable balance, plus what's still expected in, less what's still expected out,
