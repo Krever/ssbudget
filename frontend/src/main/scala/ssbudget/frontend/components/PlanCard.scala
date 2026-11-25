@@ -127,7 +127,7 @@ object PlanCard {
         cls := "d-flex justify-content-between",
         header(line),
         // Magnitudes in the entry's direction: received / expected for an income, spent / budgeted for an expense.
-        span(cls := "font-monospace small text-nowrap ms-2", s"${MoneyFormatter.formatBare(line.actual)} / ${money(line.expected)}"),
+        span(cls := "ledger-num small ms-2", s"${MoneyFormatter.formatBare(line.actual)} / ${money(line.expected)}"),
       ),
       // An entry with a marker has nothing to fill up, so it gets no bar — the marker on its state line says all there is to say.
       if state.marker.isDefined then emptyMod else progressBar(state),
@@ -356,9 +356,8 @@ object PlanCard {
     val remainingText = if line.remaining == 0 then "" else s"$word ${money(line.remaining)}"
 
     span(
-      cls       := "font-monospace text-decoration-underline",
-      styleAttr := "cursor: pointer",
-      title     := "Set the remaining amount by hand for this period",
+      cls   := "ledger-num plan-link",
+      title := "Set the remaining amount by hand for this period",
       onClick --> { _ => editingOverrideId.set(Some(line.summary.category.id)) },
       if remainingText.nonEmpty then remainingText else "set remaining",
     )
@@ -483,14 +482,14 @@ object PlanCard {
     div(
       cls := "card-footer py-2",
       div(
-        cls := "d-flex justify-content-between mb-1",
-        span(cls := "text-muted small", "Still to pay"),
-        span(cls := "font-monospace small", MoneyFormatter.formatChild(dataService.stillToPay)),
+        cls := "calc-row",
+        span(cls := "text-muted", "Still to pay"),
+        span(cls := "ledger-num", MoneyFormatter.formatChild(dataService.stillToPay)),
       ),
       div(
-        cls := "d-flex justify-content-between",
-        span(cls := "text-muted small", "Still to receive"),
-        span(cls := "font-monospace small", MoneyFormatter.formatChild(dataService.stillToReceive)),
+        cls := "calc-row",
+        span(cls := "text-muted", "Still to receive"),
+        span(cls := "ledger-num", MoneyFormatter.formatChild(dataService.stillToReceive)),
       ),
       // With no budgets the list is empty, so say how an entry is made.
       child.maybe <-- dataService.budgetedCategories.map { budgets =>

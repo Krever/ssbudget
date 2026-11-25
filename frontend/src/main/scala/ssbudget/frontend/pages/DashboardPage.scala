@@ -150,7 +150,7 @@ object DashboardPage {
 
   private def figure(label: String, value: Modifier[HtmlElement], valueCls: String): HtmlElement =
     div(
-      div(cls := "text-muted small lh-1", label),
+      div(cls := "headline-label lh-1", label),
       div(cls := s"fs-4 font-monospace lh-sm $valueCls", value),
     )
 
@@ -199,18 +199,18 @@ object DashboardPage {
       cls := "card mb-3",
       div(cls := "card-header py-2", span("Free money")),
       div(
-        cls   := "card-body py-2 font-monospace small",
-        accountingRow("Balance", dataService.bankAccountBalance, positive = true, bold = true),
+        cls   := "card-body py-2",
+        accountingRow("Balance", dataService.bankAccountBalance, Tone.Neutral, total = false, strong = true),
         // The same two figures the Plan card totals, under the same names: whichever kind of entry they came from doesn't change the arithmetic, and
         // splitting them by provenance here only asked the reader to add up four numbers instead of two.
-        accountingRow("+ Still to receive", dataService.stillToReceive, positive = true),
-        accountingRow("- Still to pay", dataService.stillToPay, positive = false),
+        accountingRow("+ Still to receive", dataService.stillToReceive, Tone.Adds),
+        accountingRow("- Still to pay", dataService.stillToPay, Tone.Takes),
         // The planned saving of the period. One row at a time, by the sign of what it takes from free money: no plan yet, a part of the plan
         // not yet moved, or more than the plan moved. The word "plan" in the row is the control: a click on it opens the field.
         child.maybe <-- dataService.currentPeriod.combineWith(dataService.savingReserve).map { case (periodOpt, reserve) =>
           periodOpt.map { period =>
             if period.plannedSavingCents <= 0 then {
-              div(cls := "d-flex justify-content-between text-muted", span("Planned saving: ", plannedSavingControl(period)))
+              div(cls := "calc-row text-muted", span("Planned saving: ", plannedSavingControl(period)))
             } else if reserve.amountCents < 0 then {
               div(
                 dataAttr("saving-reserve") := reserve.amountCents.toString,
@@ -219,7 +219,7 @@ object DashboardPage {
                 accountingRow(
                   span("+ In savings above the ", plannedSavingControl(period)),
                   Val(Money(-reserve.amountCents, reserve.currency)),
-                  positive = true,
+                  Tone.Adds,
                 ),
               )
             } else {
@@ -227,13 +227,13 @@ object DashboardPage {
                 dataAttr("saving-reserve") := reserve.amountCents.toString,
                 title                      := "The part of this period's planned saving that is not yet moved to a savings account. " +
                   "It is still in the spending balance, and it is not free.",
-                accountingRow(span("- Still to save (", plannedSavingControl(period), ")"), Val(reserve), positive = false),
+                accountingRow(span("- Still to save (", plannedSavingControl(period), ")"), Val(reserve), Tone.Takes),
               )
             }
           }
         },
-        hr(cls := "my-1"),
-        accountingRow("= Free money", dataService.freeMoney, positive = true, bold = true),
+        // The result has the colour of its sign: free money below zero must not look like good news.
+        accountingRow("= Free money", dataService.freeMoney, Tone.BySign, total = true),
         // Below the arithmetic, not in it: the rows above are the plan, and this is where the plan goes if it continues to lose at its usual
         // daily rate. Absent until there are two days to draw.
         child.maybe <-- freeMoneyTrend.map {
@@ -242,7 +242,7 @@ object DashboardPage {
               div(
                 projection.map { p =>
                   div(
-                    cls                       := "d-flex justify-content-between text-muted",
+                    cls                       := "calc-row text-muted",
                     dataAttr("projected-end") := p.endCents.toString,
                     title                     := "Free money now, plus the median daily change of this period for each remaining day. " +
                       "Savings transfers and unplanned income are not part of that change.",
@@ -259,7 +259,7 @@ object DashboardPage {
                         )
                       },
                     ),
-                    span(cls := MoneyFormatter.amountCls(p.endCents), MoneyFormatter.formatSimple(p.endCents, currency)),
+                    span(cls := s"ledger-num ${MoneyFormatter.amountCls(p.endCents)}", MoneyFormatter.formatSimple(p.endCents, currency)),
                   )
                 },
                 div(cls := "mt-2", chart),
@@ -319,13 +319,36 @@ object DashboardPage {
       },
     )
 
-  private def accountingRow(label: Modifier[HtmlElement], amount: Signal[Money], positive: Boolean, bold: Boolean = false): HtmlElement = {
-    val textCls = if positive then "text-success" else "text-danger"
-    val fontCls = if bold then "fw-bold" else ""
+  /** What the colour of an amount in the Free money card says. */
+  private enum Tone {
+    case Neutral // a starting figure: no colour
+    case Adds    // it makes free money larger
+    case Takes   // it makes free money smaller
+    case BySign  // a result: green above zero, red below
+  }
+
+  /** One line of the arithmetic of free money: a label in the text face and the amount as a ledger number, as the rows of the Accounts card.
+    *
+    * @param total
+    *   the result line: it gets the rule of a total above it
+    */
+  private def accountingRow(
+      label: Modifier[HtmlElement],
+      amount: Signal[Money],
+      tone: Tone,
+      total: Boolean = false,
+      strong: Boolean = false,
+  ): HtmlElement = {
+    val colour: Signal[String] = tone match {
+      case Tone.Neutral => Val("")
+      case Tone.Adds    => Val("text-success")
+      case Tone.Takes   => Val("text-danger")
+      case Tone.BySign  => amount.map(m => MoneyFormatter.amountCls(m.amountCents))
+    }
     div(
-      cls := s"d-flex justify-content-between $fontCls",
+      cls := s"calc-row${if total then " calc-total" else ""}${if strong then " fw-semibold" else ""}",
       span(label),
-      span(cls := textCls, MoneyFormatter.formatChild(amount)),
+      span(cls := "ledger-num", cls <-- colour, MoneyFormatter.formatChild(amount)),
     )
   }
 

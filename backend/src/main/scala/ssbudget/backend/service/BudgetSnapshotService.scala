@@ -4,7 +4,7 @@ import cats.effect.IO
 import cats.syntax.all.*
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.db.repository.DerivedTerms
-import ssbudget.shared.api.CategorySummary
+import ssbudget.shared.api.{CategorySummary, FreeMoneyHistory}
 import ssbudget.shared.model.*
 
 import java.time.{Instant, LocalDate, ZoneOffset}
@@ -42,6 +42,18 @@ class BudgetSnapshotService(repos: Repositories, clock: AppClock = AppClock.syst
     * The pass that runs off ordinary traffic does not pay for this; only the reader of the charts does.
     */
   def ensureUpToDateWithCauses: IO[List[DayCauses]] = pass.map(_.toList.flatMap(lineCauses))
+
+  /** The recorded days, brought up to date first.
+    *
+    * The usual writer is [[ssbudget.backend.service.BudgetSnapshotTrigger]], which runs AFTER a response and is throttled. Without the pass here, the
+    * first chart of the day would show the days before the quiet time and stop there. A pass that fails must not fail the chart: the rows already
+    * stored are still correct.
+    */
+  def history: IO[FreeMoneyHistory] =
+    for {
+      causes <- BackgroundHealth.track(BackgroundHealth.Task.DailyRecord)(ensureUpToDateWithCauses).handleError(_ => Nil)
+      rows   <- repos.dailyBudgetSnapshots.findAll
+    } yield FreeMoneyHistory(rows, causes)
 
   /** One pass over the table. Gives back what it loaded, so that a caller can read more from it with no second load. */
   private def pass: IO[Option[World]] =

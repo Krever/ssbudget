@@ -8,23 +8,12 @@ import ssbudget.shared.api.TapirSchemas.given
 object AuthEndpoints {
 
   /** Secured endpoint type with optional session cookie. */
-  type Secured[I, O] = Endpoint[Option[String], I, String, O, Any]
+  type Secured[I, O] = Endpoint[Option[String], I, ApiError, O, Any]
 
   /** Public endpoint type (no security input). */
-  type Public[I, O] = Endpoint[Unit, I, String, O, Any]
+  type Public[I, O] = Endpoint[Unit, I, ApiError, O, Any]
 
   val SessionCookieName = "ssbudget_session"
-
-  /** The error text of a request with no valid session. */
-  val Unauthorized = "Unauthorized"
-
-  /** The error of every endpoint: a text for the user. It goes out with status 400, and with 401 when the session is not valid, so the client can
-    * tell "log in again" from "the input was refused".
-    */
-  val apiError: EndpointOutput[String] = oneOf[String](
-    oneOfVariantValueMatcher(sttp.model.StatusCode.Unauthorized, stringBody) { case Unauthorized => true },
-    oneOfDefaultVariant(statusCode(sttp.model.StatusCode.BadRequest).and(stringBody)),
-  )
 
   private val baseEndpoint = endpoint.in("api" / "auth")
 
@@ -40,7 +29,7 @@ object AuthEndpoints {
       .securityIn(sessionCookie)
       .in("status")
       .out(jsonBody[AuthStatus])
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Initial password setup (only works when not configured)
   // Returns session cookie on success (auto-login)
@@ -49,7 +38,7 @@ object AuthEndpoints {
       .in("setup")
       .in(jsonBody[SetupRequest])
       .out(setCookie(SessionCookieName))
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Password login - returns session cookie
   val login: Public[LoginRequest, CookieValueWithMeta] =
@@ -57,7 +46,7 @@ object AuthEndpoints {
       .in("login")
       .in(jsonBody[LoginRequest])
       .out(setCookie(SessionCookieName))
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Logout - clears session cookie (takes current session for invalidation)
   val logout: Secured[Unit, CookieValueWithMeta] =
@@ -65,7 +54,7 @@ object AuthEndpoints {
       .securityIn(sessionCookie)
       .in("logout")
       .out(setCookie(SessionCookieName))
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Challenge for an IdentityProof.Passkey confirming a sensitive action (authenticated; requires user verification)
   val verifyPasskeyStart: Secured[Unit, PasskeyAuthenticationOptions] =
@@ -73,10 +62,7 @@ object AuthEndpoints {
       .securityIn(sessionCookie)
       .in("passkey" / "verify" / "start")
       .out(jsonBody[PasskeyAuthenticationOptions])
-      .errorOut(apiError)
-
-  /** The error text of an action that needs a recent proof of identity, when the session has none. */
-  val NeedsConfirmation = "Confirm your identity first: this action needs the password or a passkey again."
+      .errorOut(ApiError.output)
 
   // Proves the identity of the owner again in this session (authenticated, plus an IdentityProof). The proof is good for a short time, for the
   // actions that need more than the session: database export and import, and adding or deleting a passkey.
@@ -85,7 +71,7 @@ object AuthEndpoints {
       .securityIn(sessionCookie)
       .in("confirm")
       .in(jsonBody[IdentityProof])
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Set or replace the password (authenticated, plus an IdentityProof)
   val changePassword: Secured[ChangePasswordRequest, Unit] =
@@ -93,7 +79,7 @@ object AuthEndpoints {
       .securityIn(sessionCookie)
       .in("password")
       .in(jsonBody[ChangePasswordRequest])
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Passkey endpoints
 
@@ -104,7 +90,7 @@ object AuthEndpoints {
       .in("passkey" / "register" / "start")
       .in(jsonBody[PasskeyRegisterStartRequest])
       .out(jsonBody[PasskeyRegistrationOptions])
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Finish passkey registration (authenticated)
   val registerPasskeyFinish: Secured[PasskeyRegistrationResponse, Unit] =
@@ -112,14 +98,14 @@ object AuthEndpoints {
       .securityIn(sessionCookie)
       .in("passkey" / "register" / "finish")
       .in(jsonBody[PasskeyRegistrationResponse])
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Start passkey authentication (public)
   val loginPasskeyStart: Public[Unit, PasskeyAuthenticationOptions] =
     baseEndpoint.post
       .in("passkey" / "login" / "start")
       .out(jsonBody[PasskeyAuthenticationOptions])
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Finish passkey authentication - returns session cookie
   val loginPasskeyFinish: Public[PasskeyAuthenticationResponse, CookieValueWithMeta] =
@@ -127,7 +113,7 @@ object AuthEndpoints {
       .in("passkey" / "login" / "finish")
       .in(jsonBody[PasskeyAuthenticationResponse])
       .out(setCookie(SessionCookieName))
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // List registered passkeys (authenticated)
   val listPasskeys: Secured[Unit, List[PasskeyInfo]] =
@@ -135,14 +121,14 @@ object AuthEndpoints {
       .securityIn(sessionCookie)
       .in("passkeys")
       .out(jsonBody[List[PasskeyInfo]])
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Delete a passkey (authenticated)
   val deletePasskey: Secured[String, Unit] =
     baseEndpoint.delete
       .securityIn(sessionCookie)
       .in("passkeys" / path[String]("credentialId"))
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // MCP access tokens (for the /mcp endpoint; managed on the Settings page)
 
@@ -151,7 +137,7 @@ object AuthEndpoints {
       .securityIn(sessionCookie)
       .in("mcp-tokens")
       .out(jsonBody[List[McpTokenInfo]])
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   // Authenticated, plus an IdentityProof. The answer is the only place where the token itself appears
   val createMcpToken: Secured[CreateMcpTokenRequest, CreatedMcpToken] =
@@ -160,13 +146,13 @@ object AuthEndpoints {
       .in("mcp-tokens")
       .in(jsonBody[CreateMcpTokenRequest])
       .out(jsonBody[CreatedMcpToken])
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   val revokeMcpToken: Secured[String, Unit] =
     baseEndpoint.delete
       .securityIn(sessionCookie)
       .in("mcp-tokens" / path[String]("id"))
-      .errorOut(apiError)
+      .errorOut(ApiError.output)
 
   val all: List[AnyEndpoint] = List(
     status,
@@ -195,55 +181,55 @@ object AuthEndpoints {
     */
   object client {
     val status: Public[Unit, AuthStatus] =
-      baseEndpoint.get.in("status").out(jsonBody[AuthStatus]).errorOut(apiError)
+      baseEndpoint.get.in("status").out(jsonBody[AuthStatus]).errorOut(ApiError.output)
 
     val setup: Public[SetupRequest, Unit] =
-      baseEndpoint.post.in("setup").in(jsonBody[SetupRequest]).errorOut(apiError)
+      baseEndpoint.post.in("setup").in(jsonBody[SetupRequest]).errorOut(ApiError.output)
 
     val login: Public[LoginRequest, Unit] =
-      baseEndpoint.post.in("login").in(jsonBody[LoginRequest]).errorOut(apiError)
+      baseEndpoint.post.in("login").in(jsonBody[LoginRequest]).errorOut(ApiError.output)
 
     val logout: Public[Unit, Unit] =
-      baseEndpoint.post.in("logout").errorOut(apiError)
+      baseEndpoint.post.in("logout").errorOut(ApiError.output)
 
     val verifyPasskeyStart: Public[Unit, PasskeyAuthenticationOptions] =
-      baseEndpoint.post.in("passkey" / "verify" / "start").out(jsonBody[PasskeyAuthenticationOptions]).errorOut(apiError)
+      baseEndpoint.post.in("passkey" / "verify" / "start").out(jsonBody[PasskeyAuthenticationOptions]).errorOut(ApiError.output)
 
     val confirmIdentity: Public[IdentityProof, Unit] =
-      baseEndpoint.post.in("confirm").in(jsonBody[IdentityProof]).errorOut(apiError)
+      baseEndpoint.post.in("confirm").in(jsonBody[IdentityProof]).errorOut(ApiError.output)
 
     val changePassword: Public[ChangePasswordRequest, Unit] =
-      baseEndpoint.post.in("password").in(jsonBody[ChangePasswordRequest]).errorOut(apiError)
+      baseEndpoint.post.in("password").in(jsonBody[ChangePasswordRequest]).errorOut(ApiError.output)
 
     val loginPasskeyStart: Public[Unit, PasskeyAuthenticationOptions] =
-      baseEndpoint.post.in("passkey" / "login" / "start").out(jsonBody[PasskeyAuthenticationOptions]).errorOut(apiError)
+      baseEndpoint.post.in("passkey" / "login" / "start").out(jsonBody[PasskeyAuthenticationOptions]).errorOut(ApiError.output)
 
     val loginPasskeyFinish: Public[PasskeyAuthenticationResponse, Unit] =
-      baseEndpoint.post.in("passkey" / "login" / "finish").in(jsonBody[PasskeyAuthenticationResponse]).errorOut(apiError)
+      baseEndpoint.post.in("passkey" / "login" / "finish").in(jsonBody[PasskeyAuthenticationResponse]).errorOut(ApiError.output)
 
     val listPasskeys: Public[Unit, List[PasskeyInfo]] =
-      baseEndpoint.get.in("passkeys").out(jsonBody[List[PasskeyInfo]]).errorOut(apiError)
+      baseEndpoint.get.in("passkeys").out(jsonBody[List[PasskeyInfo]]).errorOut(ApiError.output)
 
     val deletePasskey: Public[String, Unit] =
-      baseEndpoint.delete.in("passkeys" / path[String]("credentialId")).errorOut(apiError)
+      baseEndpoint.delete.in("passkeys" / path[String]("credentialId")).errorOut(ApiError.output)
 
     val listMcpTokens: Public[Unit, List[McpTokenInfo]] =
-      baseEndpoint.get.in("mcp-tokens").out(jsonBody[List[McpTokenInfo]]).errorOut(apiError)
+      baseEndpoint.get.in("mcp-tokens").out(jsonBody[List[McpTokenInfo]]).errorOut(ApiError.output)
 
     val createMcpToken: Public[CreateMcpTokenRequest, CreatedMcpToken] =
-      baseEndpoint.post.in("mcp-tokens").in(jsonBody[CreateMcpTokenRequest]).out(jsonBody[CreatedMcpToken]).errorOut(apiError)
+      baseEndpoint.post.in("mcp-tokens").in(jsonBody[CreateMcpTokenRequest]).out(jsonBody[CreatedMcpToken]).errorOut(ApiError.output)
 
     val revokeMcpToken: Public[String, Unit] =
-      baseEndpoint.delete.in("mcp-tokens" / path[String]("id")).errorOut(apiError)
+      baseEndpoint.delete.in("mcp-tokens" / path[String]("id")).errorOut(ApiError.output)
 
     val registerPasskeyStart: Public[PasskeyRegisterStartRequest, PasskeyRegistrationOptions] =
       baseEndpoint.post
         .in("passkey" / "register" / "start")
         .in(jsonBody[PasskeyRegisterStartRequest])
         .out(jsonBody[PasskeyRegistrationOptions])
-        .errorOut(apiError)
+        .errorOut(ApiError.output)
 
     val registerPasskeyFinish: Public[PasskeyRegistrationResponse, Unit] =
-      baseEndpoint.post.in("passkey" / "register" / "finish").in(jsonBody[PasskeyRegistrationResponse]).errorOut(apiError)
+      baseEndpoint.post.in("passkey" / "register" / "finish").in(jsonBody[PasskeyRegistrationResponse]).errorOut(ApiError.output)
   }
 }

@@ -131,4 +131,11 @@ class CurrencyService(repos: Repositories, sttpBackend: SttpBackend[IO, Any]) {
       }
     }
   }
+
+  /** The newest rate of each currency to the primary currency. */
+  def latestRates: IO[List[ExchangeRate]] =
+    for {
+      primaryOpt <- repos.currencySettings.findPrimary
+      rates      <- repos.exchangeRates.findLatestTo(primaryOpt.map(_.code).getOrElse(Currency.PLN))
+    } yield rates
 }

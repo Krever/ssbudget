@@ -313,7 +313,7 @@ deploy needs no analytics config.
 - `CategorizationService` holds the manual-category write and the rule create / update / delete, and their preview. One `RuleChange`
   value describes a rule change for both `previewChange` and `applyChange`, so a preview shows what the write does. The REST routes
   and the MCP tools both call it. `RuleEngineService.winner` is the one decision "which rule sets the category"; the engine and the
-  preview both read it. (Rule import, rule reorder and category delete are still in `Routes`.)
+  preview both read it. Rule import, export, reorder and the live preview are in this service too.
 
 ## Authentication
 
@@ -346,6 +346,16 @@ minute. A failed read stays with the page. And the warnings of
 `GET /api/warnings` (`DataHealth`): faults that make a figure wrong (a currency in use with no exchange rate counts 1 to 1), and a
 background task that failed (`BackgroundHealth`: the daily record), until it succeeds again.
 
+**Errors of the API** - an error is an `ApiError(kind, message)` (shared): on the wire the HTTP status is the kind and the body is
+the message. The kinds are invalid (400), unauthorized (401), needs confirmation (403), not found (404) and failed (500). A handler
+refuses with a text (that is "invalid") or with an `ApiError` that names its kind; an exception in a handler becomes "failed" with
+a text, and the cause goes to the log. The client acts on the kind, never on the words.
+
+**Routes and services** - `Routes.scala` only connects an endpoint to a service method (`route` for a handler that can refuse,
+`read` for one that cannot, `confirmedRoute` for one that needs a recent proof of identity). The rules are in the services:
+`AccountService`, `CategoryService`, `CategorizationService` (rules: write, order, import, export, preview), `TransactionQueryService`,
+`BackupService`, `PeriodService`, `BudgetSnapshotService`, `CurrencyService`. A new rule of the app goes into a service, with a test.
+
 A write of more than one step is ONE transaction, in one repository method (`deleteWithDependents`, `importAll`, `rollover`): a
 service does not chain repository writes that must all happen or not at all.
 
@@ -366,7 +376,7 @@ text. Nothing is sent by the app itself: the backend has no scheduler, and the m
 ssbudget/
 ├── build.sbt, project/          # multi-module sbt build
 ├── shared/                      # cross-compiled (JVM + JS): tapir endpoints (api/), domain models (model/), rules
-├── backend/                     # http4s server: Routes, auth/, banking/, mcp/, analytics/, service/, db/ (repositories)
+├── backend/                     # http4s server: Routes (wiring only), auth/, banking/, mcp/, analytics/, service/, db/ (repositories)
 │   └── src/main/resources/db/migration/   # Flyway: V<n>__*.sql (never edit one that is released), R__analytics_views.sql
 ├── frontend/                    # Scala.js + Laminar SPA: pages/, components/, services/, styles/app.css
 ├── e2e/                         # Selenium browser tests

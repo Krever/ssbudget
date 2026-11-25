@@ -11,7 +11,7 @@ import ssbudget.backend.AuthRoutes
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.db.repository.RepositorySpec
 import ssbudget.backend.service.AppClock
-import ssbudget.shared.api.AuthEndpoints
+import ssbudget.shared.api.{ApiError, AuthEndpoints}
 
 import java.time.Instant
 
@@ -95,13 +95,14 @@ class SessionRoutesSpec extends RepositorySpec {
       nearEnd.status shouldBe Status.Ok
       freshStatus.hcursor.get[Boolean]("recentlyConfirmed") shouldBe Right(true)
       // The session is still good for all the rest; it only cannot do this.
-      stale.status shouldBe Status.BadRequest
-      staleBody shouldBe AuthEndpoints.NeedsConfirmation
+      // Its own status, so that the page can tell it from a refused input.
+      stale.status shouldBe Status.Forbidden
+      staleBody shouldBe ApiError.needsConfirmation.message
       staleStatus.hcursor.get[Boolean]("recentlyConfirmed") shouldBe Right(false)
       staleStatus.hcursor.get[Boolean]("loggedIn") shouldBe Right(true)
       stillIn.status shouldBe Status.Ok
       wrongProof.status shouldBe Status.BadRequest
-      afterWrong.status shouldBe Status.BadRequest
+      afterWrong.status shouldBe Status.Forbidden
       goodProof.status shouldBe Status.Ok
       afterGood.status shouldBe Status.Ok
     }

@@ -578,7 +578,7 @@ object BankingPage {
             table(
               cls                  := "table table-sm align-middle mb-3",
               thead(
-                tr(th("Group"), th(cls := "text-end", "Limit"), th(cls := "text-end", "Remaining"), th("Cards"), th("Mirror account"), th()),
+                tr(th("Group"), th(cls := "text-end", "Limit"), th(cls := "text-end", "Remaining"), th("Counts as"), th()),
               ),
               tbody(gs.map(g => cardGroupRow(g, conns, accs, deleteGroup, linkGroup, setGroupLimit, createAndLinkGroup))),
             )
@@ -632,13 +632,14 @@ object BankingPage {
     // A group can mirror onto any spending account that isn't already driven by a different group.
     val linkable   = accounts.filter(a => a.role == AccountRole.Spending && (a.balanceSource != BalanceSource.CardGroup || g.accountId.contains(a.id)))
     tr(
-      td(strong(g.name)),
+      // The number of cards is a second line under the name, not a column: the card sits in the narrow column of the page.
+      td(cls := "text-nowrap", g.name, span(cls := "ledger-sub", s"${members.size} ${if members.size == 1 then "card" else "cards"}")),
       td(
         cls  := "text-end",
         // Edit in place: the bank does not report the limit, so a change at the bank must be typed here. Saves on blur or Enter.
         div(
           cls       := "d-inline-block",
-          styleAttr := "width: 8rem",
+          styleAttr := "width: 6.5rem",
           InlineEdit
             .moneyInput(Some(g.limitCents), placeholderText = "Limit")
             .amend(
@@ -654,8 +655,7 @@ object BankingPage {
             ),
         ),
       ),
-      td(cls := "text-end font-monospace", remaining.map(r => MoneyFormatter.formatSimple(r, g.currency)).getOrElse("— sync —")),
-      td(s"${members.size}"),
+      td(cls := "ledger-num", remaining.map(r => MoneyFormatter.formatSimple(r, g.currency)).getOrElse("— sync —")),
       td(
         div(
           cls := "d-flex gap-2 align-items-center",

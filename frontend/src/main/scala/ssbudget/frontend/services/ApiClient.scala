@@ -2,7 +2,7 @@ package ssbudget.frontend.services
 
 import org.scalajs.dom
 import sttp.client3.*
-import sttp.model.{Method, StatusCode, Uri}
+import sttp.model.{Method, Uri}
 import sttp.tapir.DecodeResult
 import sttp.tapir.client.sttp.SttpClientInterpreter
 import ssbudget.shared.api.*
@@ -430,24 +430,25 @@ class ApiClient(implicit ec: ExecutionContext) {
       Future.failed(ApiException(message))
     }
 
-  private def handleResponse[T](response: Response[DecodeResult[Either[String, T]]]): T = {
-    val (method, uri)                     = (response.request.method, response.request.uri)
-    def refused(message: String): Nothing = {
+  private def handleResponse[T](response: Response[DecodeResult[Either[ApiError, T]]]): T = {
+    val (method, uri)                                      = (response.request.method, response.request.uri)
+    def refused(message: String, kind: ErrorKind): Nothing = {
       // Every failed write is shown (see [[Notices]]). A failed read is left to the page, which shows it in place.
       if reported(method, uri) then Notices.failed(message)
-      throw ApiException(message)
+      throw ApiException(message, kind)
     }
-    if response.code == StatusCode.Unauthorized && !uri.path.startsWith(List("api", "auth")) then {
-      ApiClient.onSessionEnded()
-      throw ApiException("The session ended. Log in again.")
-    } else
-      response.body match {
-        case DecodeResult.Value(Right(value)) =>
-          if reported(method, uri) then ApiClient.dataChanged()
-          value
-        case DecodeResult.Value(Left(error))  => refused(error)
-        case failure: DecodeResult.Failure    => refused(s"The answer of the server could not be read: $failure")
-      }
+    response.body match {
+      case DecodeResult.Value(Right(value))                                                                                     =>
+        if reported(method, uri) then ApiClient.dataChanged()
+        value
+      // The kind of the error says what to do, not its words. A dead session brings the login back; on the auth endpoints "unauthorized" is
+      // the answer to a form (a wrong password), which shows it itself.
+      case DecodeResult.Value(Left(error)) if error.kind == ErrorKind.Unauthorized && !uri.path.startsWith(List("api", "auth")) =>
+        ApiClient.onSessionEnded()
+        throw ApiException("The session ended. Log in again.", ErrorKind.Unauthorized)
+      case DecodeResult.Value(Left(error))                                                                                      => refused(error.message, error.kind)
+      case failure: DecodeResult.Failure                                                                                        => refused(s"The answer of the server could not be read: $failure", ErrorKind.Failed)
+    }
   }
 }
 
@@ -467,4 +468,5 @@ object ApiClient {
   private var changeCount = 0
 }
 
-case class ApiException(message: String) extends Exception(message)
+/** A request that did not succeed. `kind` says why, as the server named it (see [[ErrorKind]]); a request that got no answer at all is "failed". */
+case class ApiException(message: String, kind: ErrorKind = ErrorKind.Failed) extends Exception(message)

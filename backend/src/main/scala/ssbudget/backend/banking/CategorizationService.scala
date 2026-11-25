@@ -6,6 +6,7 @@ import cats.implicits.*
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.service.AppClock
 import ssbudget.backend.db.repository.RuleWrite
+import ssbudget.shared.api.{ImportRulesRequest, ImportRulesResult, RuleExport, RulePreviewRequest, RulePreviewResponse, RulesExport}
 import ssbudget.shared.model.*
 import ssbudget.shared.rules.RuleMatcher
 
@@ -112,6 +113,65 @@ class CategorizationService(repos: Repositories, ruleEngine: RuleEngineService, 
       val position = resolved.rulesAfter.indexWhere(_.id == rule.id)
       RuleWritten(if resolved.moved then rule.copy(priority = position) else rule, position)
     }).value
+
+  /** The rule that a create or an update wrote: the answer of the REST routes. */
+  def writeRule(change: RuleChange): Result[ClassificationRule] =
+    applyChange(change).map(_.flatMap(_.map(_.rule).toRight("The change gave no rule")))
+
+  /** Writes a new order of the rules and applies all rules again. */
+  def reorder(orderedIds: List[ClassificationRuleId]): IO[List[ClassificationRule]] =
+    for {
+      _     <- repos.classificationRules.reorder(orderedIds)
+      _     <- ruleEngine.applyRules()
+      rules <- repos.classificationRules.findAll
+    } yield rules
+
+  /** Export all rules in portable form (category carried by name, order = priority). */
+  def exportRules: IO[RulesExport] =
+    for {
+      rules <- repos.classificationRules.findAll // ordered by priority
+      cats  <- repos.categories.findAll
+    } yield {
+      val nameById = cats.map(c => c.id -> c.name).toMap
+      RulesExport(version = 1, rules = rules.map(r => RuleExport(r.name, nameById.getOrElse(r.categoryId, ""), r.criteria)))
+    }
+
+  /** Import a rules bundle atomically: (optionally) clear existing rules, create any categories referenced by name, then create the rules in order.
+    */
+  def importRules(req: ImportRulesRequest): IO[ImportRulesResult] =
+    for {
+      existingCats <- repos.categories.findAll
+      now          <- clock.now
+      // Each category that a rule names is found by name (case does not count). One that does not exist yet is made.
+      known         = existingCats.map(c => c.name.toLowerCase -> c.id).toMap
+      newCategories = req.bundle.rules
+                        .map(_.categoryName)
+                        .distinctBy(_.toLowerCase)
+                        .filterNot(name => known.contains(name.toLowerCase))
+                        .map(name => Category(CategoryId(UUID.randomUUID().toString), name, None))
+      catByName     = known ++ newCategories.map(c => c.name.toLowerCase -> c.id)
+      rulesFrom     = (base: Int) =>
+                        req.bundle.rules.zipWithIndex.map { case (r, idx) =>
+                          ClassificationRule(
+                            ClassificationRuleId(UUID.randomUUID().toString),
+                            r.name,
+                            catByName(r.categoryName.toLowerCase),
+                            base + idx,
+                            r.criteria,
+                            now,
+                          )
+                        }
+      // One transaction: a failure leaves the rules and the categories as they were (with `replace`, not an empty rule list).
+      _            <- repos.classificationRules.importAll(req.replace, newCategories, rulesFrom)
+      _            <- ruleEngine.applyRules()
+    } yield ImportRulesResult(req.bundle.rules.size, newCategories.size)
+
+  /** Live rule preview: run the shared matcher over all stored transactions server-side (the browser no longer holds them). */
+  def previewRule(req: RulePreviewRequest): IO[RulePreviewResponse] =
+    repos.bankTransactions.list(None, None, None).map { all =>
+      val matched = if req.criteria.isEmpty then Nil else all.filter(RuleMatcher.compile(req.criteria))
+      RulePreviewResponse(matched.size, all.size, matched.take(200))
+    }
 
   /** Checks a change against the stored rules and categories, and gives the rule list as it is after the change. */
   private def resolve(change: RuleChange): Result[Resolved] =

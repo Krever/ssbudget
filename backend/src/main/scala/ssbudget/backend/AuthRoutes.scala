@@ -88,7 +88,7 @@ object AuthRoutes {
             confirmIdentity(authConfigRepo, passwordService, webAuthnService, req.proof).flatMap {
               case Left(err) => IO.pure(Left(err))
               case Right(_)  => mcpTokens.create(req.name)
-            },
+            }.refusal,
         ),
     )
 
@@ -101,32 +101,32 @@ object AuthRoutes {
     // Status endpoint - uses optional session cookie to check login state
     val statusRoute = interpreter.toRoutes(
       AuthEndpoints.status
-        .serverSecurityLogic(tokenOpt => checkLoginStatus(sessionService, tokenOpt, testMode))
-        .serverLogic(loggedIn => _ => getAuthStatus(authConfigRepo, passkeyRepo, loggedIn, testMode)),
+        .serverSecurityLogic(tokenOpt => checkLoginStatus(sessionService, tokenOpt, testMode).refusal)
+        .serverLogic(loggedIn => _ => getAuthStatus(authConfigRepo, passkeyRepo, loggedIn, testMode).refusal),
     )
 
     // Setup endpoint - creates password and returns session cookie
     val setupRoute = interpreter.toRoutes(
-      AuthEndpoints.setup.serverLogic(req => setupPassword(authConfigRepo, passkeyRepo, passwordService, sessionService, req)),
+      AuthEndpoints.setup.serverLogic(req => setupPassword(authConfigRepo, passkeyRepo, passwordService, sessionService, req).refusal),
     )
 
     // Login endpoint - validates password and returns session cookie
     val loginRoute = interpreter.toRoutes(
-      AuthEndpoints.login.serverLogic(req => login(authConfigRepo, passwordService, sessionService, req)),
+      AuthEndpoints.login.serverLogic(req => login(authConfigRepo, passwordService, sessionService, req).refusal),
     )
 
     // Logout endpoint - invalidates session and clears cookie
     val logoutRoute = interpreter.toRoutes(
       AuthEndpoints.logout
         .serverSecurityLogic(tokenOpt => IO.pure(Right(tokenOpt)))
-        .serverLogic(tokenOpt => _ => logout(sessionService, tokenOpt)),
+        .serverLogic(tokenOpt => _ => logout(sessionService, tokenOpt).refusal),
     )
 
     // Passkey challenge for an IdentityProof (authenticated)
     val verifyPasskeyStartRoute = interpreter.toRoutes(
       AuthEndpoints.verifyPasskeyStart
         .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
-        .serverLogic(_ => _ => errorsAsLeft(webAuthnService.startVerification())),
+        .serverLogic(_ => _ => errorsAsLeft(webAuthnService.startVerification()).refusal),
     )
 
     // A new proof of identity for this session (authenticated, plus an IdentityProof)
@@ -138,7 +138,7 @@ object AuthRoutes {
             confirmIdentity(authConfigRepo, passwordService, webAuthnService, proof).flatMap {
               case Left(err) => IO.pure(Left(err))
               case Right(_)  => token.fold(IO.unit)(sessionService.confirm).as(Right(()))
-            },
+            }.refusal,
         ),
     )
 
@@ -147,45 +147,45 @@ object AuthRoutes {
       AuthEndpoints.changePassword
         // The logic gets the token of this session: a password change ends every other session, and keeps this one.
         .serverSecurityLogic(token => validateSession(sessionService, token, testMode).map(_.map(_ => token)))
-        .serverLogic(token => req => changePassword(authConfigRepo, passwordService, webAuthnService, sessionService, token, req)),
+        .serverLogic(token => req => changePassword(authConfigRepo, passwordService, webAuthnService, sessionService, token, req).refusal),
     )
 
     // Passkey registration start (authenticated)
     val registerPasskeyStartRoute = interpreter.toRoutes(
       AuthEndpoints.registerPasskeyStart
         .serverSecurityLogic(token => validateConfirmed(sessionService, token, testMode))
-        .serverLogic(_ => req => startPasskeyRegistration(webAuthnService, req)),
+        .serverLogic(_ => req => startPasskeyRegistration(webAuthnService, req).refusal),
     )
 
     // Passkey registration finish (authenticated)
     val registerPasskeyFinishRoute = interpreter.toRoutes(
       AuthEndpoints.registerPasskeyFinish
         .serverSecurityLogic(token => validateConfirmed(sessionService, token, testMode))
-        .serverLogic(_ => req => finishPasskeyRegistration(webAuthnService, req)),
+        .serverLogic(_ => req => finishPasskeyRegistration(webAuthnService, req).refusal),
     )
 
     // Passkey login start (public)
     val loginPasskeyStartRoute = interpreter.toRoutes(
-      AuthEndpoints.loginPasskeyStart.serverLogic(_ => startPasskeyLogin(webAuthnService)),
+      AuthEndpoints.loginPasskeyStart.serverLogic(_ => startPasskeyLogin(webAuthnService).refusal),
     )
 
     // Passkey login finish - validates and returns session cookie
     val loginPasskeyFinishRoute = interpreter.toRoutes(
-      AuthEndpoints.loginPasskeyFinish.serverLogic(req => finishPasskeyLogin(webAuthnService, sessionService, req)),
+      AuthEndpoints.loginPasskeyFinish.serverLogic(req => finishPasskeyLogin(webAuthnService, sessionService, req).refusal),
     )
 
     // List passkeys (authenticated)
     val listPasskeysRoute = interpreter.toRoutes(
       AuthEndpoints.listPasskeys
         .serverSecurityLogic(token => validateSession(sessionService, token, testMode))
-        .serverLogic(_ => _ => listPasskeys(passkeyRepo)),
+        .serverLogic(_ => _ => listPasskeys(passkeyRepo).refusal),
     )
 
     // Delete passkey (authenticated)
     val deletePasskeyRoute = interpreter.toRoutes(
       AuthEndpoints.deletePasskey
         .serverSecurityLogic(token => validateConfirmed(sessionService, token, testMode))
-        .serverLogic(_ => credId => deletePasskey(passkeyRepo, credId)),
+        .serverLogic(_ => credId => deletePasskey(passkeyRepo, credId).refusal),
     )
 
     statusRoute <+>
@@ -206,11 +206,18 @@ object AuthRoutes {
       revokeMcpTokenRoute
   }
 
+  /** The handlers of this file say in words why they refuse. At the route such a refusal becomes an error of the kind "invalid" (status 400). The two
+    * session checks below give their own kinds: "unauthorized" and "needs confirmation".
+    */
+  extension [A](result: IO[Either[String, A]]) {
+    private def refusal: IO[Either[ApiError, A]] = result.map(_.left.map(ApiError.invalid))
+  }
+
   /** Validates a session token and returns Unit if valid. Used by protected endpoints.
     *
     * In testMode, bypasses authentication entirely. Otherwise, requires a valid session token.
     */
-  def validateSession(sessionService: SessionService, tokenOpt: Option[String], testMode: Boolean): IO[Either[String, Unit]] = {
+  def validateSession(sessionService: SessionService, tokenOpt: Option[String], testMode: Boolean): IO[Either[ApiError, Unit]] = {
     if testMode then {
       IO.pure(Right(()))
     } else {
@@ -218,9 +225,9 @@ object AuthRoutes {
         case Some(token) =>
           sessionService.validateSession(token).map {
             case Some(_) => Right(())
-            case None    => Left(AuthEndpoints.Unauthorized)
+            case None    => Left(ApiError.unauthorized)
           }
-        case None        => IO.pure(Left(AuthEndpoints.Unauthorized))
+        case None        => IO.pure(Left(ApiError.unauthorized))
       }
     }
   }
@@ -230,12 +237,12 @@ object AuthRoutes {
     * For the actions with a lasting effect that a found-open session must not be able to do: to take all the data (export), to replace it (import),
     * and to add or remove a way in (passkeys). Test mode has no session and no login, so it has nothing to confirm.
     */
-  def validateConfirmed(sessionService: SessionService, tokenOpt: Option[String], testMode: Boolean): IO[Either[String, Unit]] =
+  def validateConfirmed(sessionService: SessionService, tokenOpt: Option[String], testMode: Boolean): IO[Either[ApiError, Unit]] =
     validateSession(sessionService, tokenOpt, testMode).flatMap {
       case Left(error)           => IO.pure(Left(error))
       case Right(()) if testMode => IO.pure(Right(()))
       case Right(())             =>
-        tokenOpt.fold(IO.pure(false))(sessionService.recentlyConfirmed).map(Either.cond(_, (), AuthEndpoints.NeedsConfirmation))
+        tokenOpt.fold(IO.pure(false))(sessionService.recentlyConfirmed).map(Either.cond(_, (), ApiError.needsConfirmation))
     }
 
   /** Checks if session token is valid, returns boolean for status endpoint.
