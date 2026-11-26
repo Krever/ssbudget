@@ -136,7 +136,9 @@ class BudgetSnapshotService(repos: Repositories, clock: AppClock = AppClock.syst
           cats       <- repos.categories.findAll
           rates      <- repos.exchangeRates.findAll
           primaryOpt <- repos.currencySettings.findPrimary
-          snaps      <- accounts.traverse(a => repos.balanceSnapshots.findByAccount(a.id).map(a.id -> _)).map(_.toMap)
+          // The balances of the days in play: the records from the day before the earliest period in play, and for each account the one
+          // record that was in force then. Before, each pass read the full history of each account, with one query for each account.
+          snaps      <- repos.balanceSnapshots.findFrom(startOf(spendFrom.minusDays(1))).map(_.groupBy(_.accountId))
           overrides  <- repos.categoryBudgetOverrides.findAllStamped
           // Category history reaches as far back as the bank data goes, not just to the first period: the monthly statistic behind every budget is
           // drawn from all of it.

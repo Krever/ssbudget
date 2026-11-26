@@ -89,6 +89,9 @@ expects, for spend and for income. Two independent settings per category:
 - **Type** (`CategoryBudgetType`) spreads that figure over the period: Steady / Bill / Subscription, with a per-period manual
   override of what's remaining.
 
+Transactions have no tags, and none are planned (decided 2026-11-26): the note of a transaction and the search on the Transactions
+page do that work. An old migration (V18) says that tags will come; that line is history.
+
 A one-off item (an exceptional bill, a bonus) is a category with a `Fixed` budget. The override closes it when no matching
 transaction arrives: the "Paid" / "Received" button of the Plan card sets the remaining amount to zero for the period.
 
@@ -324,7 +327,9 @@ One owner, no user accounts.
 - **Password**: set once at setup (`/api/auth/setup`), stored as an Argon2id hash. The password login is throttled
   (`LoginThrottle`: 5 free failures, then a lock that doubles).
 - **Passkeys (WebAuthn)**: registered in Settings after the first login, as a second way in. Library:
-  [Yubico java-webauthn-server](https://github.com/Yubico/java-webauthn-server).
+  [Yubico java-webauthn-server](https://github.com/Yubico/java-webauthn-server). A passkey request that waits for its answer is kept
+  under its own challenge (`PendingChallenges`: good for 5 minutes, taken one time), so a second "start" from anybody does not make
+  a login that is in progress fail.
 - **Session**: a random token in an HttpOnly cookie, 30 days, `SameSite=Lax`, `Secure` when the configured origins are https. The
   `sessions` table holds only the SHA-256 digest of the token (`SessionService`), so a copy of the database holds no working login.
   A request with no valid session gets status 401 (every other error is 400, with a text); the client then goes back to the login.

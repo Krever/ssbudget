@@ -226,7 +226,7 @@ final class CategorizationTools(repos: Repositories, categorization: Categorizat
                   case c: RuleChange.Create if c.name.trim.isEmpty => c.copy(name = "(new rule)")
                   case other                                       => other
                 })
-      impact <- EitherT[IO, String, RuleImpact](categorization.previewChange(change))
+      impact <- EitherT[IO, String, RuleImpact](categorization.previewChange(change).map(_.left.map(_.message)))
       names  <- EitherT.liftF(categoryNames)
     } yield impactJson(impact, names)).value
 
@@ -239,7 +239,7 @@ final class CategorizationTools(repos: Repositories, categorization: Categorizat
                      if expectsRuleId then "`ruleId` is required" else "A new rule has no `ruleId`",
                    )
       change    <- EitherT.fromEither[IO](ruleChange(args, delete))
-      written   <- EitherT[IO, String, Option[RuleWritten]](categorization.applyChange(change))
+      written   <- EitherT[IO, String, Option[RuleWritten]](categorization.applyChange(change).map(_.left.map(_.message)))
       names     <- EitherT.liftF(categoryNames)
       remaining <- EitherT.liftF(uncategorizedCount)
     } yield written match {
@@ -252,8 +252,9 @@ final class CategorizationTools(repos: Repositories, categorization: Categorizat
       assignments <- EitherT.fromEither[IO](arg[List[Assignment]](args, "assignments"))
       _           <- EitherT.cond[IO](assignments.nonEmpty, (), "`assignments` is empty")
       _           <- EitherT.cond[IO](assignments.size <= MaxBatch, (), s"Not more than $MaxBatch assignments in one call")
-      updated     <- EitherT[IO, String, Int](categorization.setCategories(assignments.map(a => a.transactionId -> a.categoryId)))
-                       .leftMap(_ + ". Nothing was written.")
+      updated     <-
+        EitherT[IO, String, Int](categorization.setCategories(assignments.map(a => a.transactionId -> a.categoryId)).map(_.left.map(_.message)))
+          .leftMap(_ + ". Nothing was written.")
       remaining   <- EitherT.liftF(uncategorizedCount)
     } yield Json.obj("updated" := updated, "uncategorizedRemaining" := remaining)).value
 

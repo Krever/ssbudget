@@ -46,7 +46,8 @@ object BalanceHistory {
   /** All recorded balances and the full ledger of `accounts`. */
   def load(repos: Repositories, accounts: List[Account], clock: AppClock = AppClock.system): IO[BalanceHistory] =
     for {
-      snaps    <- accounts.traverse(a => repos.balanceSnapshots.findByAccount(a.id).map(a.id -> _)).map(_.toMap)
+      // One read for all accounts. The reports go back to the first period, so they need the full history.
+      snaps    <- repos.balanceSnapshots.findAll.map(_.filter(s => accounts.exists(_.id == s.accountId)).groupBy(_.accountId))
       now      <- clock.now
       daily    <- repos.bankTransactions.dailyNetByAccount(Instant.EPOCH, now)
       uidIndex <- accountUidIndex(repos)

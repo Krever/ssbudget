@@ -1,6 +1,7 @@
 package ssbudget.backend.db.repository
 
 import cats.effect.IO
+import cats.syntax.all.*
 import ssbudget.shared.model.*
 
 import java.time.Instant
@@ -67,4 +68,31 @@ class BalanceSnapshotRepositorySpec extends RepositorySpec {
     } yield found shouldBe None
   }
 
+  "findFrom gives the records from a moment on, and for each account the one record that was in force at that moment" in {
+    val accountRepo                                                = new AccountRepositoryImpl(xa)
+    val snapshotRepo                                               = new BalanceSnapshotRepositoryImpl(xa)
+    def snap(id: String, account: String, cents: Long, at: String) =
+      BalanceSnapshot(BalanceSnapshotId(id), AccountId(account), cents, Currency.PLN, Instant.parse(at))
+    for {
+      _    <- accountRepo.create(spendingAccount("acc-1", "Main", Currency.PLN))
+      _    <- accountRepo.create(spendingAccount("acc-2", "Old", Currency.PLN))
+      _    <- accountRepo.create(spendingAccount("acc-3", "New", Currency.PLN))
+      // acc-1: two old records and two new ones. acc-2: only old records. acc-3: only a record after the moment.
+      _    <- List(
+                snap("a1", "acc-1", 100, "2026-01-05T10:00:00.000Z"),
+                snap("a2", "acc-1", 200, "2026-02-20T10:00:00.000Z"),
+                snap("a3", "acc-1", 300, "2026-03-01T00:00:00.000Z"),
+                snap("a4", "acc-1", 400, "2026-03-10T10:00:00.000Z"),
+                snap("b1", "acc-2", 10, "2026-01-01T10:00:00.000Z"),
+                snap("b2", "acc-2", 20, "2026-02-01T10:00:00.000Z"),
+                snap("c1", "acc-3", 5, "2026-03-05T10:00:00.000Z"),
+              ).traverse_(snapshotRepo.create)
+      from <- snapshotRepo.findFrom(Instant.parse("2026-03-01T00:00:00.000Z"))
+      all  <- snapshotRepo.findAll
+    } yield {
+      // Oldest first. Of the records before the moment only the last of each account: a2 and b2, never a1 or b1.
+      from.map(_.id.value) shouldBe List("b2", "a2", "a3", "c1", "a4")
+      all.map(_.id.value) shouldBe List("b1", "a1", "b2", "a2", "a3", "c1", "a4")
+    }
+  }
 }

@@ -1,6 +1,7 @@
 package ssbudget.backend.auth
 
-import cats.effect.{IO, Ref}
+import cats.effect.IO
+import cats.syntax.all.*
 import com.yubico.webauthn.*
 import com.yubico.webauthn.data.*
 import ssbudget.backend.db.repository.{PasskeyCredential, PasskeyCredentialRepository}
@@ -18,7 +19,7 @@ trait WebAuthnService {
   def finishAuthentication(response: PasskeyAuthenticationResponse): IO[Unit]
 
   /** Re-confirms the already signed-in user before a sensitive action. Unlike login it demands user verification (biometric/PIN), so an unlocked
-    * browser alone is not enough, and it keeps its own pending challenge so a login attempt can't consume or replace it.
+    * browser alone is not enough, and it keeps its own pending challenges so a login attempt can't consume one.
     */
   def startVerification(): IO[PasskeyAuthenticationOptions]
   def finishVerification(response: PasskeyAuthenticationResponse): IO[Unit]
@@ -36,10 +37,12 @@ object WebAuthnService {
       rpOrigins: Set[String],
   ): IO[WebAuthnService] = {
     for {
-      pendingRegRef  <- Ref.of[IO, Option[(PublicKeyCredentialCreationOptions, Option[String])]](None)
-      pendingAuthRef <- Ref.of[IO, Option[AssertionRequest]](None)
-      pendingVerRef  <- Ref.of[IO, Option[AssertionRequest]](None)
-    } yield new WebAuthnServiceImpl(credentialRepo, rpId, rpName, rpOrigins, pendingRegRef, pendingAuthRef, pendingVerRef)
+      // One store for each kind of request: an answer to a login challenge must not be taken for a confirmation of identity, which asks for
+      // more (user verification), and the other way round.
+      pendingReg  <- PendingChallenges[(PublicKeyCredentialCreationOptions, Option[String])]()
+      pendingAuth <- PendingChallenges[AssertionRequest]()
+      pendingVer  <- PendingChallenges[AssertionRequest]()
+    } yield new WebAuthnServiceImpl(credentialRepo, rpId, rpName, rpOrigins, pendingReg, pendingAuth, pendingVer)
   }
 
   private class WebAuthnServiceImpl(
@@ -47,9 +50,9 @@ object WebAuthnService {
       rpId: String,
       rpName: String,
       rpOrigins: Set[String],
-      pendingRegistration: Ref[IO, Option[(PublicKeyCredentialCreationOptions, Option[String])]],
-      pendingAuthentication: Ref[IO, Option[AssertionRequest]],
-      pendingVerification: Ref[IO, Option[AssertionRequest]],
+      pendingRegistration: PendingChallenges[(PublicKeyCredentialCreationOptions, Option[String])],
+      pendingAuthentication: PendingChallenges[AssertionRequest],
+      pendingVerification: PendingChallenges[AssertionRequest],
   ) extends WebAuthnService {
 
     private val rp = RelyingPartyIdentity
@@ -133,7 +136,7 @@ object WebAuthnService {
             .build(),
         )
 
-        pendingRegistration.set(Some((options, displayName))).as {
+        pendingRegistration.put(options.getChallenge.getBase64Url, (options, displayName)).as {
           PasskeyRegistrationOptions(
             challenge = options.getChallenge.getBase64Url,
             rpId = rpId,
@@ -161,7 +164,7 @@ object WebAuthnService {
     }
 
     override def finishRegistration(response: PasskeyRegistrationResponse): IO[Unit] = {
-      pendingRegistration.getAndSet(None).flatMap {
+      PendingChallenges.challengeOf(response.response.clientDataJSON).flatTraverse(pendingRegistration.take).flatMap {
         case Some((options, displayName)) =>
           createRelyingParty().flatMap { relyingParty =>
             val clientResponse = PublicKeyCredential.parseRegistrationResponseJson(toRegistrationJson(response))
@@ -204,7 +207,7 @@ object WebAuthnService {
       finishAssertion(pendingVerification, response, "verification")
 
     private def startAssertion(
-        pending: Ref[IO, Option[AssertionRequest]],
+        pending: PendingChallenges[AssertionRequest],
         userVerification: UserVerificationRequirement,
     ): IO[PasskeyAuthenticationOptions] = {
       createRelyingParty().flatMap { relyingParty =>
@@ -213,7 +216,7 @@ object WebAuthnService {
             StartAssertionOptions.builder().userVerification(userVerification).build(),
           )
 
-          pending.set(Some(request)).as {
+          pending.put(request.getPublicKeyCredentialRequestOptions.getChallenge.getBase64Url, request).as {
             PasskeyAuthenticationOptions(
               challenge = request.getPublicKeyCredentialRequestOptions.getChallenge.getBase64Url,
               rpId = rpId,
@@ -233,11 +236,11 @@ object WebAuthnService {
     }
 
     private def finishAssertion(
-        pending: Ref[IO, Option[AssertionRequest]],
+        pending: PendingChallenges[AssertionRequest],
         response: PasskeyAuthenticationResponse,
         what: String,
     ): IO[Unit] = {
-      pending.getAndSet(None).flatMap {
+      PendingChallenges.challengeOf(response.response.clientDataJSON).flatTraverse(pending.take).flatMap {
         case Some(request) =>
           createRelyingParty().flatMap { relyingParty =>
             val clientResponse = PublicKeyCredential.parseAssertionResponseJson(toAssertionJson(response))

@@ -6,7 +6,7 @@ import cats.implicits.*
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.service.AppClock
 import ssbudget.backend.db.repository.RuleWrite
-import ssbudget.shared.api.{ImportRulesRequest, ImportRulesResult, RuleExport, RulePreviewRequest, RulePreviewResponse, RulesExport}
+import ssbudget.shared.api.{ApiError, ImportRulesRequest, ImportRulesResult, RuleExport, RulePreviewRequest, RulePreviewResponse, RulesExport}
 import ssbudget.shared.model.*
 import ssbudget.shared.rules.RuleMatcher
 
@@ -74,7 +74,8 @@ class CategorizationService(repos: Repositories, ruleEngine: RuleEngineService, 
                    if !found(tx) then Some(s"Transaction not found: ${tx.value}")
                    else category.filterNot(known).map(c => s"Category not found: ${c.value}")
                  }.distinct
-      result  <- if problems.nonEmpty then IO.pure(Left(problems.take(10).mkString("; ")))
+      // Each problem is a transaction or a category that does not exist.
+      result  <- if problems.nonEmpty then IO.pure(Left(ApiError.notFound(problems.take(10).mkString("; "))))
                  else
                    repos.bankTransactions
                      .applyCategoryUpdates(assignments.map { case (tx, category) => (tx, category, category.map(_ => CategorySource.Manual)) })
@@ -84,21 +85,21 @@ class CategorizationService(repos: Repositories, ruleEngine: RuleEngineService, 
   /** The one-transaction form of [[setCategories]]; returns the transaction as it is after the write. */
   def setCategory(id: BankTransactionId, categoryId: Option[CategoryId]): Result[BankTransaction] =
     (for {
-      _  <- EitherT[IO, String, Int](setCategories(List(id -> categoryId)))
-      tx <- EitherT.fromOptionF(repos.bankTransactions.findById(id), s"Transaction not found: ${id.value}")
+      _  <- EitherT[IO, ApiError, Int](setCategories(List(id -> categoryId)))
+      tx <- EitherT.fromOptionF(repos.bankTransactions.findById(id), ApiError.notFound(s"Transaction not found: ${id.value}"))
     } yield tx).value
 
   /** Calculates what a rule change does to the stored transactions. It writes nothing. */
   def previewChange(change: RuleChange): Result[RuleImpact] =
     (for {
-      resolved <- EitherT[IO, String, Resolved](resolve(change))
+      resolved <- EitherT[IO, ApiError, Resolved](resolve(change))
       txs      <- EitherT.liftF(repos.bankTransactions.list(None, None, None))
     } yield impact(resolved.rulesAfter, resolved.rule, txs)).value
 
   /** Writes a rule change and applies all rules again. Returns the rule that was created or updated; `None` for a delete. */
   def applyChange(change: RuleChange): Result[Option[RuleWritten]] =
     (for {
-      resolved <- EitherT[IO, String, Resolved](resolve(change))
+      resolved <- EitherT[IO, ApiError, Resolved](resolve(change))
       // The order is written only when the change asks for a position: without one, the stored priorities already give `rulesAfter`. The rule
       // and the order go in one transaction.
       order     = Option.when(resolved.moved)(resolved.rulesAfter.map(_.id))
@@ -116,7 +117,7 @@ class CategorizationService(repos: Repositories, ruleEngine: RuleEngineService, 
 
   /** The rule that a create or an update wrote: the answer of the REST routes. */
   def writeRule(change: RuleChange): Result[ClassificationRule] =
-    applyChange(change).map(_.flatMap(_.map(_.rule).toRight("The change gave no rule")))
+    applyChange(change).map(_.flatMap(_.map(_.rule).toRight(ApiError.failed("The change gave no rule"))))
 
   /** Writes a new order of the rules and applies all rules again. */
   def reorder(orderedIds: List[ClassificationRuleId]): IO[List[ClassificationRule]] =
@@ -184,7 +185,10 @@ class CategorizationService(repos: Repositories, ruleEngine: RuleEngineService, 
 
 object CategorizationService {
 
-  type Result[T] = IO[Either[String, T]]
+  /** A refusal has a kind: "not found" for a rule, a transaction or a category that does not exist, and "invalid" for a rule that breaks a rule of
+    * rules. The MCP tools give only the message of it to the assistant.
+    */
+  type Result[T] = IO[Either[ApiError, T]]
 
   /** The largest number of criteria in one rule. A rule that needs more is not an "obvious" rule. */
   val maxCriteria = 10
@@ -241,23 +245,23 @@ object CategorizationService {
       change: RuleChange,
       newId: ClassificationRuleId,
       now: Instant,
-  ): Either[String, Resolved] = {
-    def existing(id: ClassificationRuleId) = rules.find(_.id == id).toRight(s"Rule not found: ${id.value}")
+  ): Either[ApiError, Resolved] = {
+    def existing(id: ClassificationRuleId) = rules.find(_.id == id).toRight(ApiError.notFound(s"Rule not found: ${id.value}"))
+    def valid(rule: ClassificationRule)    = validateRule(rule, categories).left.map(ApiError.invalid)
     change match {
       case RuleChange.Create(name, categoryId, criteria, position)     =>
         // One above the last priority, as the stored order has it; a reorder writes the real index.
         val rule = ClassificationRule(newId, name.trim, categoryId, rules.lastOption.fold(0)(_.priority + 1), criteria, now)
-        validateRule(rule, categories).map(r => Resolved(insertAt(rules, r, position.getOrElse(rules.size)), Some(r), position.isDefined))
+        valid(rule).map(r => Resolved(insertAt(rules, r, position.getOrElse(rules.size)), Some(r), position.isDefined))
       case RuleChange.Update(id, name, categoryId, criteria, position) =>
         for {
           old  <- existing(id)
-          rule <- validateRule(
+          rule <- valid(
                     old.copy(
                       name = name.fold(old.name)(_.trim),
                       categoryId = categoryId.getOrElse(old.categoryId),
                       criteria = criteria.getOrElse(old.criteria),
                     ),
-                    categories,
                   )
         } yield Resolved(
           insertAt(rules.filterNot(_.id == id), rule, position.getOrElse(rules.indexWhere(_.id == id))),
