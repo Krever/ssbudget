@@ -400,8 +400,8 @@ ssbudget/
 ./dev.sh                  # the whole stack locally: Vite on https://localhost:3000, backend on :8080, Scala.js watch, Metabase
 ./dev.sh --no-analytics   # the same without Metabase
 
-sbt unitTests             # the fast test loop: the shared logic on the JVM and as JavaScript (Node), then the backend
-sbt backend/test          # the backend only (a plain `sbt test` also starts the browser tests)
+sbt unitTests             # the fast test loop: the shared logic on the JVM and as JavaScript (Node), the page logic (Node), the backend
+sbt backend/test          # the backend only (a plain `sbt test` runs all but the browser tests: `e2e` is not in the root aggregate)
 sbt e2e/test              # browser tests (Chrome)
 sbt scalafmtAll           # format; CI checks it
 sbt dependencyUpdates     # lists newer versions of the libraries (the sbt-updates plugin)
@@ -430,7 +430,7 @@ fly deploy --remote-only  # fly.io builds the image from those artifacts
 
 **MANDATORY: Always use curly braces syntax. Never use indentation-based syntax (Scala 3 braceless style).**
 
-**MANDATORY: Always run `sbt scalafmtAll` before finishing work to format all Scala code.**
+**MANDATORY: Always run `sbt scalafmtAll e2e/scalafmtAll` before finishing work to format all Scala code.**
 
 **Compiler warnings are errors in CI.** `sbt-tpolecat` sets the strictest compiler options. Locally a warning is only shown; with `CI`
 set (GitHub Actions sets it; locally use `SBT_TPOLECAT_CI=1 sbt Test/compile`) a warning fails the build. Keep the build at zero
@@ -438,12 +438,16 @@ warnings: remove an unused import, and write `val _ = expr` when a result is dro
 options that report unused values, because a ScalaTest test is a list of assertions.
 
 **Tests to run for a change:** `sbt unitTests` (about 30 s) and `sbt e2e/test` (about 4 min, Chrome). A test of logic in `shared`
-goes in `shared/src/test`: it then runs on the JVM and, compiled by Scala.js, on Node, which is the form the browser runs. Do not run two sbt commands
+goes in `shared/src/test`: it then runs on the JVM and, compiled by Scala.js, on Node, which is the form the browser runs. A figure
+that the page computes itself (the `final` members of `DataService`) or a format has its test in `frontend/src/test` (Node, no DOM).
+Because `e2e` is not in the root aggregate, name it: `e2e/scalafmtAll`, `e2e/Test/compile`. Do not run two sbt commands
 at once in one checkout.
 
 **Browser tests and data**: each spec starts on the database of a new installation. `E2ESpec.beforeAll` calls
 `TestServers.resetDatabase`, which puts the rows of every table back to a copy that was made after the migrations (some milliseconds;
 the backend stays up). The tests of ONE spec share the database and can build on each other. A spec must make all the data it needs.
+A browser test waits for a state of the page, never for a fixed time; "nothing there" is checked with the lookup wait off, after the
+page that would show it is there.
 
 **Sums from a repository** come back as a named row (`LedgerRows.scala`: `CategoryAmount`, `DailyCategoryNet`, ...), not as a tuple:
 two fields of one type in the wrong order would compile and give a wrong figure.

@@ -54,10 +54,13 @@ val testCodeOptions = Seq(
 // The tests with no browser. The shared logic (money, periods, budgets, the rule matcher, the free-money trend) runs in the browser as
 // JavaScript, so its tests run two times: on the JVM and, compiled by Scala.js, on Node. A fault that shows only in the JavaScript form of
 // that logic (a number that overflows a JS integer, a java.time part that Scala.js does not have) would pass the JVM run.
-addCommandAlias("unitTests", "sharedJVM/test; sharedJS/test; backend/test")
+// The figures that the page computes itself (`DataService`) and its number formats have tests in `frontend`, which run on Node too.
+addCommandAlias("unitTests", "sharedJVM/test; sharedJS/test; frontend/test; backend/test")
 
 lazy val root = (project in file("."))
-  .aggregate(shared.jvm, shared.js, backend, frontend, e2e)
+  // `e2e` is not here on purpose: a plain `sbt test` must not start Chrome. The browser tests run with `sbt e2e/test`, and `Test/compile` in
+  // CI names them (`e2e/Test/compile`).
+  .aggregate(shared.jvm, shared.js, backend, frontend)
   .settings(
     name         := "ssbudget",
     publish      := {},
@@ -160,5 +163,7 @@ lazy val frontend = (project in file("frontend"))
       "com.softwaremill.sttp.client3" %%% "core"              % sttpVersion,
       "io.circe"                      %%% "circe-generic"     % circeVersion,
       "io.circe"                      %%% "circe-parser"      % circeVersion,
+      "org.scalatest"                 %%% "scalatest"         % "3.2.20" % Test,
     ),
+    testCodeOptions,
   )

@@ -59,7 +59,15 @@ class PasskeySpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with 
     driver.findElement(By.id("confirm")).sendKeys("testpassword123")
     driver.findElement(By.xpath("//button[text()='Create Password']")).click()
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h4"), "Dashboard"))
-    Thread.sleep(500)
+  }
+
+  /** Looks for elements that are possibly not there, without the wait that a lookup usually has: "none" is then an answer at once, not after 10
+    * seconds. The caller first waits for the page that would show them.
+    */
+  private def presentNow(by: By): Int = {
+    driver.manage().timeouts().implicitlyWait(Duration.ZERO)
+    try { driver.findElements(by).size() }
+    finally { driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10)) }
   }
 
   /** Add a virtual authenticator to the browser session */
@@ -81,7 +89,8 @@ class PasskeySpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with 
     // Use link text or contains href since absoluteUrlForPage returns full URL
     driver.findElement(By.linkText("Settings")).click()
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h4"), "Settings"))
-    Thread.sleep(300)
+    // The passkey card is there when the page has loaded its list.
+    waitFor.until(ExpectedConditions.elementToBeClickable(By.xpath("//button[text()='Add Passkey']")))
   }
 
   /** Logout the current session */
@@ -90,7 +99,8 @@ class PasskeySpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with 
     waitFor.until(ExpectedConditions.visibilityOfElementLocated(By.className("navbar")))
     driver.findElement(By.xpath("//nav//button[text()='Logout']")).click()
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.tagName("h3"), "SSBudget"))
-    Thread.sleep(300)
+    // The login form. The page makes it in one step, with or without the passkey button.
+    waitFor.until(ExpectedConditions.visibilityOfElementLocated(By.id("password")))
   }
 
   behavior of "Passkey Authentication"
@@ -158,18 +168,14 @@ class PasskeySpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with 
     // Click sign in with passkey
     driver.findElement(By.xpath("//button[contains(text(),'Sign in with Passkey')]")).click()
 
-    // Give time for WebAuthn to complete
-    Thread.sleep(3000)
-
-    // Check for any error message
-    val errors = driver.findElements(By.className("alert-danger"))
-    if errors.size() > 0 then {
-      val errorText = errors.get(0).getText
-      fail(s"Passkey login failed with error: $errorText")
+    // The login ends in one of two states: the navbar (shown only after a login) or an error on the login page. Wait for the first of them,
+    // not for a fixed time.
+    waitFor.until { _ =>
+      presentNow(By.className("navbar")) > 0 || presentNow(By.className("alert-danger")) > 0
     }
-
-    // Verify login success by checking that the navbar is visible (only shown when logged in)
-    // The app doesn't auto-redirect to / after login, so URL may still be /settings
+    if presentNow(By.className("alert-danger")) > 0 then {
+      fail(s"Passkey login failed with error: ${driver.findElement(By.className("alert-danger")).getText}")
+    }
     waitFor.until(ExpectedConditions.visibilityOfElementLocated(By.className("navbar")))
 
     // Verify we can navigate to Dashboard (confirming we're actually logged in)
@@ -186,7 +192,7 @@ class PasskeySpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with 
     driver.findElement(By.xpath("//input[@placeholder='Passkey name (optional)']")).sendKeys("Passkey To Delete")
     driver.findElement(By.xpath("//button[text()='Add Passkey']")).click()
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.className("alert-success"), "Passkey added"))
-    Thread.sleep(300)
+    waitFor.until(ExpectedConditions.visibilityOfElementLocated(By.xpath("//*[contains(text(),'Passkey To Delete')]/ancestor::li")))
 
     // Find and click the Delete button for this passkey
     val passkeyItem = driver.findElement(By.xpath("//*[contains(text(),'Passkey To Delete')]/ancestor::li"))
@@ -207,8 +213,7 @@ class PasskeySpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with 
     logout()
 
     // Should NOT see passkey login button (no passkeys registered)
-    val passkeyButtons = driver.findElements(By.xpath("//button[contains(text(),'Sign in with Passkey')]"))
-    passkeyButtons.size() shouldBe 0
+    presentNow(By.xpath("//button[contains(text(),'Sign in with Passkey')]")) shouldBe 0
   }
 
   it should "register multiple passkeys" in {
@@ -220,11 +225,11 @@ class PasskeySpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with 
     driver.findElement(By.xpath("//input[@placeholder='Passkey name (optional)']")).sendKeys("Passkey 1")
     driver.findElement(By.xpath("//button[text()='Add Passkey']")).click()
     waitFor.until(ExpectedConditions.textToBePresentInElementLocated(By.className("alert-success"), "Passkey added"))
-    Thread.sleep(500)
+    waitFor.until(ExpectedConditions.visibilityOfElementLocated(By.xpath("//*[contains(text(),'Passkey 1')]")))
 
-    // Dismiss success message
+    // Dismiss the success message, so that the second "Passkey added" is a new one.
     driver.findElement(By.xpath("//div[contains(@class,'alert-success')]//button[@class='btn-close']")).click()
-    Thread.sleep(300)
+    waitFor.until(_ => presentNow(By.className("alert-success")) == 0)
 
     // Register second passkey
     val passkeyNameInput = driver.findElement(By.xpath("//input[@placeholder='Passkey name (optional)']"))
