@@ -48,11 +48,13 @@ jobs:
           git rev-parse --short HEAD > docker/VERSION
           docker build --build-arg WITH_ANALYTICS=false -t ssbudget:ci .
 
-  # The browser tests. They are not yet a gate: they were not run in CI before, so the first runs must show if they are stable here.
-  # Remove `continue-on-error` when they are.
+  # The browser tests. They are a gate: a failure fails the run.
+  # They start after `build`, not beside it: `build` then has saved the sbt cache, and two jobs do not download the same files at one
+  # time (a run failed on HTTP 429 from Maven Central that way, with no test run at all).
   e2e:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    needs: build
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -77,6 +79,17 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+
+      # The downloads and the compile, with a second and a third try: a repository that refuses a download must not fail the run.
+      # The tests themselves run one time only, so a test that fails now and then stays visible.
+      - name: Compile the browser tests
+        run: |
+          for attempt in 1 2 3; do
+            sbt e2e/Test/compile && exit 0
+            echo "Attempt $attempt failed; waiting before the next one"
+            sleep 30
+          done
+          exit 1
 
       - name: Browser tests
         run: sbt e2e/test
