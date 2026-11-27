@@ -103,18 +103,18 @@ trait BankTransactionRepository {
     * outflow); `true` sums the NET (`SUM(-amount_cents)`, so inflows/refunds subtract) — the latter powers category budgets so pure-inflow categories
     * (salary, refunds) aren't reported as 0 and refunds reduce a category's spend.
     */
-  def spendByCategoryBetween(from: Instant, to: Option[Instant], includeInflows: Boolean = false): IO[List[(CategoryId, Currency, Long)]]
+  def spendByCategoryBetween(from: Instant, to: Option[Instant], includeInflows: Boolean = false): IO[List[CategoryAmount]]
 
   /** Signed net of the transactions of transfer categories over `[from, to)`, per (the account the category names, currency). The sign is that of the
     * bank side: a withdrawal from the investment account arrives at the bank and is positive. Internal transfers are not counted. A transaction on
     * the ledger of the named account itself is not counted either: it is already a movement of that account (see [[netByAccountBetween]]).
     */
-  def transfersByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(AccountId, Currency, Long)]]
+  def transfersByAccountBetween(from: Instant, to: Option[Instant]): IO[List[AccountAmount]]
 
   /** Signed net of the non-internal transactions over `[from, to)`, per (bank account uid, currency): the money that came into an account from
     * outside, less what left it.
     */
-  def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]]
+  def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[BankAccountAmount]]
 
   /** Each currency that has a bank entry. */
   def currenciesInUse: IO[List[Currency]]
@@ -128,7 +128,7 @@ trait BankTransactionRepository {
   /** Spend per (category, currency, YYYY-MM) over `[from, to)`, categorized + non-internal — a per-month breakdown. `includeInflows` as in
     * [[spendByCategoryBetween]] (false = gross outflow, e.g. for the analytics chart; true = net, for the budget statistic).
     */
-  def monthlySpendByCategory(from: Instant, to: Instant, includeInflows: Boolean = false): IO[List[(CategoryId, Currency, String, Long)]]
+  def monthlySpendByCategory(from: Instant, to: Instant, includeInflows: Boolean = false): IO[List[MonthlyCategoryAmount]]
 
   /** Net spend per (category, currency, day) over `[from, to]` INCLUSIVE, categorized + non-internal, inflows subtracting — the daily grain of
     * [[spendByCategoryBetween]] with `includeInflows = true`. Each row also counts the transactions that went out / came in, for a Bill expecting
@@ -137,12 +137,12 @@ trait BankTransactionRepository {
     * One query instead of one per day: rebuilding a category's period-to-date spend for every day of a backfill otherwise costs hundreds of round
     * trips.
     */
-  def dailyNetSpendByCategory(from: Instant, to: Instant): IO[List[(CategoryId, Currency, String, Long, Int, Int)]]
+  def dailyNetSpendByCategory(from: Instant, to: Instant): IO[List[DailyCategoryNet]]
 
   /** How many transactions went out / came in per category over `[from, to)`, categorized + non-internal: `(category, outflows, inflows)`. The
     * payment count a Bill expecting several payments per period counts off; `to = None` is open-ended, as in [[spendByCategoryBetween]].
     */
-  def paymentCountsByCategoryBetween(from: Instant, to: Option[Instant]): IO[List[(CategoryId, Int, Int)]]
+  def paymentCountsByCategoryBetween(from: Instant, to: Option[Instant]): IO[List[PaymentCounts]]
 
   /** Signed net movement per (bank account uid, currency, day) over `[from, to]` INCLUSIVE of both days — credits positive, debits negative, internal
     * transfers included (a transfer really does move one account's balance).
@@ -150,7 +150,7 @@ trait BankTransactionRepository {
     * This is what carries a balance forward between snapshots: the app only records balances when it syncs, but the ledger is continuous, so a day
     * with no snapshot still has a knowable balance. Days are `YYYY-MM-DD` keys, since `booked_at` is date-granular anyway.
     */
-  def dailyNetByAccount(from: Instant, to: Instant): IO[List[(String, Currency, String, Long)]]
+  def dailyNetByAccount(from: Instant, to: Instant): IO[List[DailyAccountNet]]
 
   /** [[dailyNetByAccount]] split further by category and by whether the movement is an internal transfer:
     * `(bank account uid, currency, day, category, internal, signed net)`. This is what tells money that the plan moved from money that reached it
@@ -289,16 +289,16 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
   override def distinctMonths(): IO[List[String]] =
     sql"SELECT DISTINCT substr(booked_at, 1, 7) AS m FROM bank_transactions ORDER BY m DESC".query[String].to[List].transact(xa)
 
-  override def spendByCategoryBetween(from: Instant, to: Option[Instant], includeInflows: Boolean): IO[List[(CategoryId, Currency, Long)]] = {
+  override def spendByCategoryBetween(from: Instant, to: Option[Instant], includeInflows: Boolean): IO[List[CategoryAmount]] = {
     val upper = to.fold(Fragment.empty)(t => fr"AND booked_at <" ++ fr"$t")
     val debit = if includeInflows then Fragment.empty else fr"AND amount_cents < 0"
     (fr"""SELECT category_id, currency, SUM(-amount_cents)
           FROM bank_transactions
           WHERE category_id IS NOT NULL AND is_internal = 0""" ++ debit ++ fr"AND booked_at >= $from" ++ upper ++
-      fr"GROUP BY category_id, currency").query[(CategoryId, Currency, Long)].to[List].transact(xa)
+      fr"GROUP BY category_id, currency").query[CategoryAmount].to[List].transact(xa)
   }
 
-  override def transfersByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(AccountId, Currency, Long)]] = {
+  override def transfersByAccountBetween(from: Instant, to: Option[Instant]): IO[List[AccountAmount]] = {
     val upper = to.fold(Fragment.empty)(t => fr"AND t.booked_at < $t")
     (fr"""SELECT c.transfer_account_id, t.currency, SUM(t.amount_cents)
           FROM bank_transactions t
@@ -307,7 +307,7 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
             AND t.eb_account_uid NOT IN (SELECT l.eb_account_uid FROM bank_account_links l
                                          WHERE l.link_target_kind = 'account' AND l.link_target_id = c.transfer_account_id)
             AND t.booked_at >= $from""" ++ upper ++
-      fr"GROUP BY c.transfer_account_id, t.currency").query[(AccountId, Currency, Long)].to[List].transact(xa)
+      fr"GROUP BY c.transfer_account_id, t.currency").query[AccountAmount].to[List].transact(xa)
   }
 
   override def currenciesInUse: IO[List[Currency]] =
@@ -325,48 +325,48 @@ class BankTransactionRepositoryImpl(xa: Transactor[IO]) extends BankTransactionR
       .to[List]
       .transact(xa)
 
-  override def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[(String, Currency, Long)]] = {
+  override def netByAccountBetween(from: Instant, to: Option[Instant]): IO[List[BankAccountAmount]] = {
     val upper = to.fold(Fragment.empty)(t => fr"AND booked_at < $t")
     (fr"""SELECT eb_account_uid, currency, SUM(amount_cents)
           FROM bank_transactions
           WHERE is_internal = 0 AND booked_at >= $from""" ++ upper ++
-      fr"GROUP BY eb_account_uid, currency").query[(String, Currency, Long)].to[List].transact(xa)
+      fr"GROUP BY eb_account_uid, currency").query[BankAccountAmount].to[List].transact(xa)
   }
 
-  override def monthlySpendByCategory(from: Instant, to: Instant, includeInflows: Boolean): IO[List[(CategoryId, Currency, String, Long)]] = {
+  override def monthlySpendByCategory(from: Instant, to: Instant, includeInflows: Boolean): IO[List[MonthlyCategoryAmount]] = {
     val debit = if includeInflows then Fragment.empty else fr"AND amount_cents < 0"
     (fr"""SELECT category_id, currency, substr(booked_at, 1, 7) AS ym, SUM(-amount_cents)
           FROM bank_transactions
           WHERE category_id IS NOT NULL AND is_internal = 0""" ++ debit ++ fr"AND booked_at >= $from AND booked_at < $to" ++
-      fr"GROUP BY category_id, currency, ym").query[(CategoryId, Currency, String, Long)].to[List].transact(xa)
+      fr"GROUP BY category_id, currency, ym").query[MonthlyCategoryAmount].to[List].transact(xa)
   }
 
   /** Transactions out / in, as two SELECT columns — shared by the queries that count a Bill's payments. */
   private val paymentCounts = fr"SUM(CASE WHEN amount_cents < 0 THEN 1 ELSE 0 END), SUM(CASE WHEN amount_cents > 0 THEN 1 ELSE 0 END)"
 
-  override def dailyNetSpendByCategory(from: Instant, to: Instant): IO[List[(CategoryId, Currency, String, Long, Int, Int)]] =
+  override def dailyNetSpendByCategory(from: Instant, to: Instant): IO[List[DailyCategoryNet]] =
     (fr"SELECT category_id, currency, substr(booked_at, 1, 10) AS d, SUM(-amount_cents)," ++ paymentCounts ++
       fr"""FROM bank_transactions
           WHERE category_id IS NOT NULL AND is_internal = 0 AND booked_at >= $from AND booked_at <= $to
           GROUP BY category_id, currency, d""")
-      .query[(CategoryId, Currency, String, Long, Int, Int)]
+      .query[DailyCategoryNet]
       .to[List]
       .transact(xa)
 
-  override def paymentCountsByCategoryBetween(from: Instant, to: Option[Instant]): IO[List[(CategoryId, Int, Int)]] = {
+  override def paymentCountsByCategoryBetween(from: Instant, to: Option[Instant]): IO[List[PaymentCounts]] = {
     val upper = to.fold(Fragment.empty)(t => fr"AND booked_at < $t")
     (fr"SELECT category_id," ++ paymentCounts ++
       fr"FROM bank_transactions WHERE category_id IS NOT NULL AND is_internal = 0 AND booked_at >= $from" ++ upper ++
-      fr"GROUP BY category_id").query[(CategoryId, Int, Int)].to[List].transact(xa)
+      fr"GROUP BY category_id").query[PaymentCounts].to[List].transact(xa)
   }
 
-  override def dailyNetByAccount(from: Instant, to: Instant): IO[List[(String, Currency, String, Long)]] =
+  override def dailyNetByAccount(from: Instant, to: Instant): IO[List[DailyAccountNet]] =
     // `<= to` rather than `< to`: the caller names the last day it wants, and booked_at is midnight of that day.
     sql"""SELECT eb_account_uid, currency, substr(booked_at, 1, 10) AS d, SUM(amount_cents)
           FROM bank_transactions
           WHERE booked_at >= $from AND booked_at <= $to
           GROUP BY eb_account_uid, currency, d"""
-      .query[(String, Currency, String, Long)]
+      .query[DailyAccountNet]
       .to[List]
       .transact(xa)
 

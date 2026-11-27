@@ -3,6 +3,7 @@ package ssbudget.backend.service
 import cats.effect.IO
 import cats.syntax.all.*
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.db.repository.DailyAccountNet
 import ssbudget.shared.model.*
 
 import java.time.{Instant, LocalDate, ZoneOffset}
@@ -78,9 +79,9 @@ object BalanceHistory {
   /** The rows of `dailyNetByAccount`, keyed by the app account that each bank account moves. The cards of a card group are several bank accounts that
     * feed one app account, so their movements add up. The amounts stay in the account's currency.
     */
-  def ledgerByAccount(daily: List[(String, Currency, String, Long)], uidIndex: Map[String, AccountId]): Map[AccountId, Map[LocalDate, Long]] =
+  def ledgerByAccount(daily: List[DailyAccountNet], uidIndex: Map[String, AccountId]): Map[AccountId, Map[LocalDate, Long]] =
     daily
-      .flatMap { case (uid, _, d, c) => uidIndex.get(uid).map((_, LocalDate.parse(d), c)) }
+      .flatMap(row => uidIndex.get(row.accountUid).map((_, LocalDate.parse(row.day), row.cents)))
       .groupBy(_._1)
       .view
       .mapValues(_.groupMapReduce(_._2)(_._3)(_ + _))

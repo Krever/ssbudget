@@ -20,6 +20,7 @@ object TestServers {
   @volatile private var _frontendPort: Int                                 = 0
   @volatile private var dbPath: Option[Path]                               = None
   @volatile private var _repos: Option[Repositories]                       = None
+  @volatile private var templatePath: Option[Path]                         = None
 
   def backendPort: Int    = _backendPort
   def frontendPort: Int   = _frontendPort
@@ -59,7 +60,59 @@ object TestServers {
     waitForServer(s"http://127.0.0.1:$_backendPort/api/health", "Backend")
     waitForServer(s"http://127.0.0.1:$_frontendPort", "Frontend")
 
+    saveTemplate()
+
     println("[E2E] All servers ready")
+  }
+
+  /** A copy of the database as the migrations leave it, before any spec writes to it. [[resetDatabase]] puts the database back to this state. */
+  private def saveTemplate(): Unit = {
+    val template = Files.createTempFile("ssbudget-e2e-template-", ".db")
+    // `VACUUM INTO` makes the file itself, and refuses a file that exists.
+    Files.delete(template)
+    withConnection { connection =>
+      val statement = connection.createStatement()
+      try { val _ = statement.execute(s"VACUUM INTO '${template.toAbsolutePath}'") }
+      finally { statement.close() }
+    }
+    templatePath = Some(template)
+  }
+
+  /** Puts the database back to the state of a new installation: each spec thus starts with no data of the specs before it, and passes or fails the
+    * same way alone and in a full run.
+    *
+    * The backend stays up and keeps its connections: the rows of each table are replaced by those of the template, in one transaction. That costs
+    * some milliseconds. A new backend with a new database for each spec would cost a migration and a start (seconds) for each of them.
+    */
+  def resetDatabase(): Unit = {
+    val template = templatePath.getOrElse(throw new IllegalStateException("TestServers.startAll() must run before resetDatabase()"))
+    withConnection { connection =>
+      val statement = connection.createStatement()
+      try {
+        // This connection is not from the pool of the app: foreign keys are off on it, so the order of the tables does not matter.
+        val _      = statement.execute("PRAGMA busy_timeout = 10000")
+        val _      = statement.execute(s"ATTACH DATABASE '${template.toAbsolutePath}' AS template")
+        val result = statement.executeQuery("SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        val tables = Iterator.continually(result).takeWhile(_.next()).map(_.getString(1)).toList
+        result.close()
+        val _      = statement.execute("BEGIN IMMEDIATE")
+        val counts = tables.map { table =>
+          val removed  = statement.executeUpdate(s"""DELETE FROM main."$table"""")
+          val restored = statement.executeUpdate(s"""INSERT INTO main."$table" SELECT * FROM template."$table"""")
+          (removed, restored)
+        }
+        val _      = statement.execute("COMMIT")
+        val _      = statement.execute("DETACH DATABASE template")
+        println(s"[E2E] Database reset: ${counts.map(_._1).sum} rows removed, ${counts.map(_._2).sum} rows of a new installation put back")
+      } finally { statement.close() }
+    }
+  }
+
+  private def withConnection[A](use: java.sql.Connection => A): A = {
+    val path       = dbPath.getOrElse(throw new IllegalStateException("The e2e database is not there"))
+    val connection = java.sql.DriverManager.getConnection(s"jdbc:sqlite:${path.toAbsolutePath}")
+    try { use(connection) }
+    finally { connection.close() }
   }
 
   private def startBackend(): Unit = {
@@ -181,6 +234,8 @@ object TestServers {
       Try(Files.deleteIfExists(path))
     }
     dbPath = None
+    templatePath.foreach(path => Try(Files.deleteIfExists(path)))
+    templatePath = None
 
     _backendPort = 0
     _frontendPort = 0

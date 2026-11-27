@@ -61,6 +61,10 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
     // and once nested.
     if sys.env.get("E2E_BASE_URL").isEmpty then {
       TestServers.startAll()
+      // Each spec starts on the database of a new installation (see `TestServers.resetDatabase`). The page is left too, so that the first test of
+      // the spec loads the app again and shows nothing that the page still held of the spec before.
+      TestServers.resetDatabase()
+      SharedDriver.instance.get("about:blank")
     }
   }
 
@@ -71,8 +75,8 @@ trait E2ESpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with Befo
 
   override def afterEach(): Unit = () // the shared driver outlives the spec; a shutdown hook quits it
 
-  /** Undo anything a previous test left in the browser. The database is deliberately NOT reset — these specs have always shared it — but persisted UI
-    * preferences would otherwise leak between tests.
+  /** Undo anything a previous test left in the browser. The database is reset once for each spec (in `beforeAll`), not for each test: the tests of
+    * one spec build on each other. Persisted UI preferences would otherwise leak between tests.
     */
   private def resetBrowserState(): Unit = {
     // localStorage is per-origin, so we must be on the app before we can clear it. After the first test we already are.

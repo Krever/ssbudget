@@ -3,6 +3,7 @@ package ssbudget.backend.service
 import cats.effect.IO
 import cats.syntax.all.*
 import ssbudget.backend.db.Repositories
+import ssbudget.backend.db.repository.CategoryAmount
 import ssbudget.shared.api.CategorySummary
 import ssbudget.shared.model.*
 
@@ -79,7 +80,7 @@ class CategorySummaryService(repos: Repositories, clock: AppClock = AppClock.sys
                          val window     = PeriodWindow.of(p)
                          val (from, to) = (window.from, window.until)
                          repos.bankTransactions.spendByCategoryBetween(from, to, includeInflows = true)
-                       case None    => IO.pure(List.empty[(CategoryId, Currency, Long)])
+                       case None    => IO.pure(List.empty[CategoryAmount])
                      }
       // Manual remaining-amount overrides apply to the current period only.
       overrides   <- currentOpt.traverse(p => repos.categoryBudgetOverrides.findByPeriod(p.id)).map(_.getOrElse(Map.empty))
@@ -89,16 +90,16 @@ class CategorySummaryService(repos: Repositories, clock: AppClock = AppClock.sys
       val (primary, toPrimary) = converter
 
       // category -> (YYYY-MM -> primary-currency net spend, summed across currencies); only months that had activity are present.
-      val byCatMonth                                                                = histRows
-        .groupBy(_._1)
+      val byCatMonth                                                  = histRows
+        .groupBy(_.category)
         .view
-        .mapValues(rows => rows.groupBy(_._3).view.mapValues(_.map { case (_, cur, _, cents) => toPrimary(cents, cur) }.sum).toMap)
+        .mapValues(rows => rows.groupBy(_.month).view.mapValues(_.map(r => toPrimary(r.cents, r.currency)).sum).toMap)
         .toMap
-      def sumByCat(rows: List[(CategoryId, Currency, Long)]): Map[CategoryId, Long] =
-        rows.groupBy(_._1).view.mapValues(_.map { case (_, cur, cents) => toPrimary(cents, cur) }.sum).toMap
-      val curByCat                                                                  = sumByCat(curRows)
-      val prevByCat                                                                 = sumByCat(prevRows)
-      val countsByCat                                                               = curCounts.map { case (id, out, in) => id -> (out, in) }.toMap
+      def sumByCat(rows: List[CategoryAmount]): Map[CategoryId, Long] =
+        rows.groupBy(_.category).view.mapValues(_.map(r => toPrimary(r.cents, r.currency)).sum).toMap
+      val curByCat                                                    = sumByCat(curRows)
+      val prevByCat                                                   = sumByCat(prevRows)
+      val countsByCat                                                 = curCounts.map(c => c.category -> c).toMap
       cats.map { cat =>
         val monthMap = byCatMonth.getOrElse(cat.id, Map.empty[String, Long])
         CategorySummary(
@@ -110,8 +111,8 @@ class CategorySummaryService(repos: Repositories, clock: AppClock = AppClock.sys
           overrideRemainingCents = overrides.get(cat.id),
           // The same months the statistic ran over, each already flagged with whether its window counted it.
           monthlyHistory = cat.budget.chartSeries(monthMap, lastCompleteMonth),
-          currentPeriodOutflowCount = countsByCat.get(cat.id).fold(0)(_._1),
-          currentPeriodInflowCount = countsByCat.get(cat.id).fold(0)(_._2),
+          currentPeriodOutflowCount = countsByCat.get(cat.id).fold(0)(_.outflows),
+          currentPeriodInflowCount = countsByCat.get(cat.id).fold(0)(_.inflows),
         )
       }
     }

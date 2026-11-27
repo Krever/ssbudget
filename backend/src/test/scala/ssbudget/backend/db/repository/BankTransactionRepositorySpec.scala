@@ -386,8 +386,8 @@ class BankTransactionRepositorySpec extends RepositorySpec {
       daily     <- repo.dailyFlowsSince(from)
     } yield {
       // The sign of the bank side: a net 300 arrived from the broker. The row on the broker's own ledger is not in it.
-      transfers shouldBe List((broker.id, Currency.PLN, 30000L))
-      own.toSet shouldBe Set(("uid-1", Currency.PLN, 110000L), ("uid-b", Currency.PLN, -5500L))
+      transfers shouldBe List(AccountAmount(broker.id, Currency.PLN, 30000L))
+      own.toSet shouldBe Set(BankAccountAmount("uid-1", Currency.PLN, 110000L), BankAccountAmount("uid-b", Currency.PLN, -5500L))
       // The daily flows give every entry that is not internal, with its category: the reader decides what a transfer category means.
       daily.filter(_.category.contains(CategoryId("cat-1"))).map(_.outflow).sum shouldBe 10000L
       daily.filter(_.category.isEmpty).map(f => (f.accountUid, f.inflow, f.outflow)).toSet shouldBe Set(("uid-1", 90000L, 0L), ("uid-b", 0L, 4000L))
@@ -410,9 +410,13 @@ class BankTransactionRepositorySpec extends RepositorySpec {
       netAll   <- repo.spendByCategoryBetween(Instant.parse("2026-01-01T00:00:00Z"), Some(Instant.parse("2026-03-01T00:00:00Z")), includeInflows = true)
       janOnly  <- repo.spendByCategoryBetween(Instant.parse("2026-01-01T00:00:00Z"), Some(Instant.parse("2026-02-01T00:00:00Z")))
     } yield {
-      grossAll shouldBe List((CategoryId("cat-1"), Currency.PLN, 3000L)) // default: outflow only (1000 + 2000); inflow + uncategorized dropped
-      netAll shouldBe List((CategoryId("cat-1"), Currency.PLN, -2000L))  // includeInflows: 1000 + 2000 − 5000 (net); uncategorized still dropped
-      janOnly shouldBe List((CategoryId("cat-1"), Currency.PLN, 1000L))  // upper bound is exclusive
+      grossAll shouldBe List(
+        CategoryAmount(CategoryId("cat-1"), Currency.PLN, 3000L),
+      )                                                                               // default: outflow only (1000 + 2000); inflow + uncategorized dropped
+      netAll shouldBe List(
+        CategoryAmount(CategoryId("cat-1"), Currency.PLN, -2000L),
+      )                                                                               // includeInflows: 1000 + 2000 − 5000 (net); uncategorized still dropped
+      janOnly shouldBe List(CategoryAmount(CategoryId("cat-1"), Currency.PLN, 1000L)) // upper bound is exclusive
     }
   }
 
@@ -436,7 +440,7 @@ class BankTransactionRepositorySpec extends RepositorySpec {
               )
       rows <- repo.monthlySpendByCategory(Instant.parse("2026-04-01T00:00:00Z"), Instant.parse("2026-07-01T00:00:00Z"))
     } yield {
-      rows.map(r => (r._3, r._4)).sortBy(_._1) shouldBe List(("2026-04", 1500L), ("2026-05", 3000L), ("2026-06", 1500L))
+      rows.map(r => (r.month, r.cents)).sortBy(_._1) shouldBe List(("2026-04", 1500L), ("2026-05", 3000L), ("2026-06", 1500L))
       // Two May payments collapse into one bucket (3000); the mean over the Apr–Jun active span is (1500+3000+1500)/3 = 2000.
     }
   }

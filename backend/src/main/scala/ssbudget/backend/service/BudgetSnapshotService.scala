@@ -164,15 +164,15 @@ class BudgetSnapshotService(repos: Repositories, clock: AppClock = AppClock.syst
               categories = cats,
               rates = rateTable,
               snapshots = snaps.view.mapValues(_.sortBy(_.recordedAt.toEpochMilli)).toMap,
-              overrides = overrides.map { case (p, c, cents, at) => (p, c) -> (cents, at) }.toMap,
-              monthlyByCat = byBucket(monthly, rateTable)(ym => LocalDate.parse(ym + "-01")),
-              dailyByCat = byDay(dailyCat.map { case (cat, cur, d, cents, _, _) => (cat, cur, d, cents) }, rateTable),
+              overrides = overrides.map(o => (o.period, o.category) -> (o.remainingCents, o.updatedAt)).toMap,
+              monthlyByCat = byBucket(monthly.map(r => (r.category, r.currency, r.month, r.cents)), rateTable)(ym => LocalDate.parse(ym + "-01")),
+              dailyByCat = byDay(dailyCat.map(r => (r.category, r.currency, r.day, r.netCents)), rateTable),
               // Counts need no conversion, so the currency rows of a day simply add up.
               dailyCountsByCat = dailyCat
-                .groupBy(_._1)
+                .groupBy(_.category)
                 .view
                 .mapValues {
-                  _.groupMapReduce(r => LocalDate.parse(r._3))(r => (r._5, r._6)) { case ((o1, i1), (o2, i2)) => (o1 + o2, i1 + i2) }
+                  _.groupMapReduce(r => LocalDate.parse(r.day))(r => (r.outflows, r.inflows)) { case ((o1, i1), (o2, i2)) => (o1 + o2, i1 + i2) }
                 }
                 .toMap,
               // In the ACCOUNT's currency, unconverted: these movements are added to a balance that is itself in that currency, and the total is

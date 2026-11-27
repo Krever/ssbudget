@@ -441,6 +441,13 @@ options that report unused values, because a ScalaTest test is a list of asserti
 goes in `shared/src/test`: it then runs on the JVM and, compiled by Scala.js, on Node, which is the form the browser runs. Do not run two sbt commands
 at once in one checkout.
 
+**Browser tests and data**: each spec starts on the database of a new installation. `E2ESpec.beforeAll` calls
+`TestServers.resetDatabase`, which puts the rows of every table back to a copy that was made after the migrations (some milliseconds;
+the backend stays up). The tests of ONE spec share the database and can build on each other. A spec must make all the data it needs.
+
+**Sums from a repository** come back as a named row (`LedgerRows.scala`: `CategoryAmount`, `DailyCategoryNet`, ...), not as a tuple:
+two fields of one type in the wrong order would compile and give a wrong figure.
+
 **Time**: a service reads the time from an `AppClock` that it is given, never from the system: the money logic (period rules, the
 daily record, category figures, reports), the sessions, the bank services and the MCP tokens. A test gives it `AppClock.fixed(...)`,
 or a clock that it moves (`AppClock(ref.get)`), and builds its data on a fixed date. Still on the system time: the signing of the

@@ -17,7 +17,7 @@ trait CategoryBudgetOverrideRepository {
   /** Every override ever set, with the instant it was set. The daily snapshot needs the timestamp: an override applies to the days from when the user
     * typed it, not to the whole period retrospectively.
     */
-  def findAllStamped: IO[List[(PeriodId, CategoryId, Long, Instant)]]
+  def findAllStamped: IO[List[StampedOverride]]
   def upsert(periodId: PeriodId, categoryId: CategoryId, remainingCents: Long, updatedAt: Instant): IO[Unit]
   def delete(periodId: PeriodId, categoryId: CategoryId): IO[Unit]
 }
@@ -31,9 +31,9 @@ class CategoryBudgetOverrideRepositoryImpl(xa: Transactor[IO]) extends CategoryB
       .transact(xa)
       .map(_.toMap)
 
-  override def findAllStamped: IO[List[(PeriodId, CategoryId, Long, Instant)]] =
+  override def findAllStamped: IO[List[StampedOverride]] =
     sql"SELECT period_id, category_id, remaining_cents, updated_at FROM category_budget_overrides"
-      .query[(PeriodId, CategoryId, Long, Instant)]
+      .query[StampedOverride]
       .to[List]
       .transact(xa)
 

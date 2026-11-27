@@ -110,8 +110,8 @@ class PeriodService(repos: Repositories, clock: AppClock = AppClock.system) {
       ownLedger <- repos.bankTransactions.netByAccountBetween(from, to)
       uidIndex  <- BalanceHistory.accountUidIndex(repos)
     } yield {
-      val viaCategories = transfers.map { case (account, currency, cents) => account -> -toPrimary(cents, currency) }
-      val viaLedger     = ownLedger.flatMap { case (uid, currency, cents) => uidIndex.get(uid).map(_ -> toPrimary(cents, currency)) }
+      val viaCategories = transfers.map(t => t.account -> -toPrimary(t.cents, t.currency))
+      val viaLedger     = ownLedger.flatMap(l => uidIndex.get(l.accountUid).map(_ -> toPrimary(l.cents, l.currency)))
       (viaCategories ++ viaLedger).groupMapReduce(_._1)(_._2)(_ + _)
     }
 
