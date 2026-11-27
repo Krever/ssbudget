@@ -135,6 +135,10 @@ statistic ran over — with the lookback window shaded, so the window can be pic
 - Not spendable, and NOT part of the savings figures: the balance change of such an account is mostly what the market did
 - The change of a period has two parts. **Moved** is deposits less withdrawals; it is saving, and it joins the savings figures
   ("Saved" = change of the savings accounts + moved). **Market result** is the rest, and it is shown apart
+- The **market result also holds what the exchange rate did** to the savings and investment accounts in another currency: the balance at
+  the start of the period × (rate at the end − rate at the start) (`PeriodService.HeldChange`, `DataService.savingsCurrencyEffect`). The
+  change of a savings account in "Saved" is valued at the rate of the end, so it has no part of that. "Saved" + market result = the change
+  of value of the savings and investment accounts. On the Dashboard a foreign savings account shows that part as "rate ±x" under its change
 - Such an account usually has no bank ledger in the app, so "moved" is read from the other side: a category can be made the
   **transfer category** of one investment account (`Category.transferAccount`, the "Transfer ↔ account" entry of the Type dropdown
   in the category settings strip). Its transactions are then transfers: not income, not spend, never a budget. Nothing in the code
@@ -148,12 +152,28 @@ statistic ran over — with the lookback window shaded, so the window can be pic
   yet imported) lands in the market result
 - The `savings` term of the daily snapshots holds savings accounts only
 
-`savingsPeriodChange` (current balance − balance at period start) is reported on the Dashboard as information only; it is not part
-of the free-money calculation. The Periods page shows the same change for each period. Both read the balance at a period boundary
+`savingsPeriodChange` (current balance − balance at period start, at the rate of now) is reported on the Dashboard as information only;
+it is not part of the free-money calculation. The Periods page shows the same change for each period. Both read the balance at a period boundary
 from `BalanceHistory`: the recorded balance (snapshot) at or before that instant, and, before an account's first record, that first
 record carried back through the bank ledger. A bank entry has a date and no time, so the ledger answer is the balance at the end of the
 day BEFORE the boundary: what moves on the day a period opens is of the new period. A manual account has no ledger, so its first
 record stands for all the time before it.
+
+### Exchange rates
+
+A rate is the rate of one day (`exchange_rates.on_date`, one row for each pair and day): the reference rate of the European Central
+Bank for a business day, from Frankfurter. A day with no rate (a weekend, a holiday) takes the rate of the last day before it
+(`RateTable`, backend service). Every figure of a past day uses it: a balance at a period boundary at the rate of the day that it is of
+(the day before the boundary, see `PeriodWindow`), an entry of the ledger at the rate of its own day. So the figures of a closed period
+do not move when the rates change. Figures of now (free money, the budgets) use the latest rate.
+
+- `CurrencyService.fillHistory` keeps the history complete for each currency in use (accounts and bank entries), from a week before
+  the first record (period, balance or bank entry) to the last business day before today. It gets all missing days in one request. It
+  runs before each pass of the daily record (there is no scheduler) and after a refresh; a failed or empty attempt waits an hour.
+  A failure is a warning (`BackgroundHealth.Task.ExchangeRates`)
+- The Refresh button and each bank sync get the newest rates of the enabled currencies and of the currencies in use, then fill the history
+- The currency effect of the open period is computed on the server (`AccountPeriodBaseline.currencyEffectCents`, by `HeldChange`); the
+  page only adds it up
 
 ### Key Calculation
 ```
@@ -257,7 +277,7 @@ Category / CategoryBudgetOverride:
   - override: (periodId, categoryId) -> remainingCents   -- per-period manual remaining
 
 ExchangeRate:
-  - fromCurrency, toCurrency, rate, fetchedAt
+  - fromCurrency, toCurrency, rate (× 10000), onDate (the day the rate is for), fetchedAt
 
 PasskeyCredential:
   - credentialId, publicKey, signCount, createdAt
@@ -453,9 +473,9 @@ page that would show it is there.
 two fields of one type in the wrong order would compile and give a wrong figure.
 
 **Time**: a service reads the time from an `AppClock` that it is given, never from the system: the money logic (period rules, the
-daily record, category figures, reports), the sessions, the bank services and the MCP tokens. A test gives it `AppClock.fixed(...)`,
+daily record, category figures, reports), the sessions, the bank services, the exchange rates and the MCP tokens. A test gives it `AppClock.fixed(...)`,
 or a clock that it moves (`AppClock(ref.get)`), and builds its data on a fixed date. Still on the system time: the signing of the
-bank API token, the passkey records and the currency service.
+bank API token and the passkey records.
 
 **circe codecs**: Use `derives Codec.AsObject` for case classes. Only use manual `Encoder`/`Decoder` for:
 - AnyVal wrapper types (encode as the underlying type)

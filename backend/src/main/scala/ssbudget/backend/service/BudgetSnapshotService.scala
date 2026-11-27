@@ -132,29 +132,27 @@ class BudgetSnapshotService(repos: Repositories, clock: AppClock = AppClock.syst
         val planNeedsIt = sorted.exists(p => p.endDate.isEmpty && p.plannedSavingCents > 0)
         val needsLedger = balancesFor.exists(_ != today) || planNeedsIt
         for {
-          accounts   <- repos.accounts.findAll
-          cats       <- repos.categories.findAll
-          rates      <- repos.exchangeRates.findAll
-          primaryOpt <- repos.currencySettings.findPrimary
+          accounts  <- repos.accounts.findAll
+          cats      <- repos.categories.findAll
+          rateTable <- RateTable.load(repos)
           // The balances of the days in play: the records from the day before the earliest period in play, and for each account the one
           // record that was in force then. Before, each pass read the full history of each account, with one query for each account.
-          snaps      <- repos.balanceSnapshots.findFrom(startOf(spendFrom.minusDays(1))).map(_.groupBy(_.accountId))
-          overrides  <- repos.categoryBudgetOverrides.findAllStamped
+          snaps     <- repos.balanceSnapshots.findFrom(startOf(spendFrom.minusDays(1))).map(_.groupBy(_.accountId))
+          overrides <- repos.categoryBudgetOverrides.findAllStamped
           // Category history reaches as far back as the bank data goes, not just to the first period: the monthly statistic behind every budget is
           // drawn from all of it.
-          monthly    <- repos.bankTransactions.monthlySpendByCategory(Instant.EPOCH, endOfDay(today), includeInflows = true)
-          dailyCat   <- repos.bankTransactions.dailyNetSpendByCategory(startOf(spendFrom), endOfDay(today))
+          monthly   <- repos.bankTransactions.monthlySpendByCategory(Instant.EPOCH, endOfDay(today), includeInflows = true)
+          dailyCat  <- repos.bankTransactions.dailyNetSpendByCategory(startOf(spendFrom), endOfDay(today))
           // Unbounded below on purpose: a day is carried from the nearest snapshot at or before it, and that snapshot can predate any bound derived
           // from the days being written.
-          dailyAcc   <- if needsLedger then repos.bankTransactions.dailyNetByAccount(Instant.EPOCH, endOfDay(today)) else IO.pure(Nil)
-          uidIndex   <- BalanceHistory.accountUidIndex(repos)
+          dailyAcc  <- if needsLedger then repos.bankTransactions.dailyNetByAccount(Instant.EPOCH, endOfDay(today)) else IO.pure(Nil)
+          uidIndex  <- BalanceHistory.accountUidIndex(repos)
           // From the start of the earliest period in play: the outside-money terms are cumulative within a period.
-          movements  <- repos.bankTransactions.dailyNetByAccountAndCategory(startOf(spendFrom), endOfDay(today))
+          movements <- repos.bankTransactions.dailyNetByAccountAndCategory(startOf(spendFrom), endOfDay(today))
         } yield {
           val spending   = accounts.filter(_.role == AccountRole.Spending).map(_.id).toSet
           val holding    = accounts.filter(_.role == AccountRole.Holding).map(_.id).toSet
           val investment = accounts.filter(_.role == AccountRole.Investment).map(_.id).toSet
-          val rateTable  = RateTable(primaryOpt.map(_.code).getOrElse(Currency.PLN), rates)
           Some(
             World(
               today = today,
@@ -427,28 +425,6 @@ object BudgetSnapshotService {
 
   private def byDay[K](rows: List[(K, Currency, String, Long)], rates: RateTable): Map[K, Map[LocalDate, Long]] =
     byBucket(rows, rates)(LocalDate.parse).view.mapValues(_.map { case (day, cents) => LocalDate.parse(day) -> cents }).toMap
-
-  /** Conversion into the primary currency at the rate in force on a given day.
-    *
-    * Rates are fetched a handful of times a year, so a historical day takes the most recent one at or before it, falling back to the earliest on
-    * record for anything older still. The spending accounts are overwhelmingly in the primary currency, so what this smooths over is small.
-    */
-  final class RateTable(val primary: Currency, toPrimary: Map[Currency, List[ExchangeRate]]) {
-
-    def convert(cents: Long, currency: Currency, day: LocalDate): Long =
-      if currency == primary then cents
-      else
-        toPrimary
-          .get(currency)
-          .flatMap(rs => rs.findLast(!_.fetchedAt.isAfter(endOfDay(day))).orElse(rs.headOption))
-          .map(_.convert(Money(cents, currency)).amountCents)
-          .getOrElse(cents)
-  }
-
-  object RateTable {
-    def apply(primary: Currency, rates: List[ExchangeRate]): RateTable =
-      new RateTable(primary, rates.filter(_.toCurrency == primary).groupBy(_.fromCurrency).view.mapValues(_.sortBy(_.fetchedAt.toEpochMilli)).toMap)
-  }
 
   /** One day's net movement on one bank account, in one category, in the primary currency. */
   final private case class Movement(

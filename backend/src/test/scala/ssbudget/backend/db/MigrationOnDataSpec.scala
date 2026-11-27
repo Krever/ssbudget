@@ -41,6 +41,9 @@ class MigrationOnDataSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
                'a note')""",
     // A rate for a currency that is not in currency_settings: the application stores such rates, and V33 makes the schema allow them.
     "INSERT INTO exchange_rates (from_currency, to_currency, rate, fetched_at) VALUES ('ISK', 'PLN', 290, '2026-01-29T23:05:39.628299477Z')",
+    // An older fetch of the same day: V36 keeps one rate for each pair and day, the newest.
+    "INSERT INTO exchange_rates (from_currency, to_currency, rate, fetched_at) VALUES ('ISK', 'PLN', 280, '2026-01-29T10:00:00Z')",
+    "INSERT INTO exchange_rates (from_currency, to_currency, rate, fetched_at) VALUES ('ISK', 'PLN', 300, '2026-02-17T10:00:00Z')",
     "INSERT INTO periods (id, started_at, expected_end, ended_at, planned_saving_cents) VALUES ('p1', '2026-02-25T08:54:10Z', '2026-03-25', NULL, 0)",
   )
 
@@ -66,7 +69,9 @@ class MigrationOnDataSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
           snapshots  <- sql"SELECT id, amount, recorded_at FROM balance_snapshots ORDER BY recorded_at".query[(String, Long, String)].to[List]
           tx         <- sql"""SELECT connection_id, amount_cents, booked_at, imported_at, category_id, raw_json, note
                               FROM bank_transactions""".query[(String, Long, String, String, Option[String], String, Option[String])].to[List]
-          rates      <- sql"SELECT from_currency, rate, fetched_at FROM exchange_rates".query[(String, Long, String)].to[List]
+          rates      <- sql"SELECT from_currency, on_date, rate, fetched_at FROM exchange_rates ORDER BY on_date"
+                          .query[(String, String, Long, String)]
+                          .to[List]
           period     <- sql"SELECT started_at, expected_end FROM periods".query[(String, String)].unique
           viewRows   <- sql"SELECT COUNT(*) FROM v_transactions".query[Int].unique
           keysOn     <- sql"PRAGMA foreign_keys".query[Int].unique
@@ -82,7 +87,8 @@ class MigrationOnDataSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
           period shouldBe (("2026-02-25T08:54:10.000Z", "2026-03-25"))
           // V33 made two tables again: every value of the rows is as it was, but for the form of the instants.
           tx shouldBe List(("conn", -1234L, "2026-03-02T00:00:00.000Z", "2026-07-10T20:46:09.174Z", Some("food"), """{"a":1}""", Some("a note")))
-          rates shouldBe List(("ISK", 290L, "2026-01-29T23:05:39.628Z"))
+          // V36: the day of each rate is the day it was fetched on, one rate for each pair and day.
+          rates shouldBe List(("ISK", "2026-01-29", 290L, "2026-01-29T23:05:39.628Z"), ("ISK", "2026-02-17", 300L, "2026-02-17T10:00:00.000Z"))
           // V33 dropped the reporting views. Flyway did not make them again here: the seed step already ran the views script in its present
           // text, so for Flyway nothing changed. `Database.restoreMissingViews` made them.
           viewRows shouldBe 1

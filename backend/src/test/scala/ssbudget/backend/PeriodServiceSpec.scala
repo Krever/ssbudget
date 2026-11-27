@@ -9,7 +9,7 @@ import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 import ssbudget.backend.db.DoobieMeta.given
 import ssbudget.backend.db.{Database, Repositories}
-import ssbudget.backend.service.{AppClock, PeriodService}
+import ssbudget.backend.service.{AppClock, PeriodService, RateTable}
 import ssbudget.shared.model.*
 
 import java.nio.file.Files
@@ -111,7 +111,7 @@ class PeriodServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
           march.investmentChangeCents shouldBe -100000L
           // 300 arrived at the bank from the broker: that much was taken out of the investment.
           march.investmentMovedCents shouldBe -30000L
-          march.investmentMarketCents shouldBe -70000L
+          march.marketResultCents shouldBe -70000L
           march.investmentEndCents shouldBe Some(900000L)
           // Saved: the savings accounts grew by 600, and 300 was taken out of the investment.
           march.savedCents shouldBe 30000L
@@ -133,7 +133,7 @@ class PeriodServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
           // The investment went from 9,000 to 9,500, and 400 of that was a deposit.
           april.investmentChangeCents shouldBe 50000L
           april.investmentMovedCents shouldBe 40000L
-          april.investmentMarketCents shouldBe 10000L
+          april.marketResultCents shouldBe 10000L
         }
       }
     }
@@ -143,12 +143,89 @@ class PeriodServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matchers {
     "give the balance at its start for savings and investment accounts, and what was moved for an investment only" in {
       withDatabase(reportSeed) { (service, _, _) =>
         service.baselines.asserting { baselines =>
-          baselines.map(b => (b.accountId.value, b.baseline.amountCents, b.movedCents)).toSet shouldBe Set(
-            ("sav", 560000L, 0L),
-            ("inv", 900000L, 40000L),
+          baselines.map(b => (b.accountId.value, b.baseline.amountCents, b.currencyEffectCents, b.movedCents)).toSet shouldBe Set(
+            ("sav", 560000L, 0L, 0L),
+            ("inv", 900000L, 0L, 40000L),
           )
         }
       }
+    }
+  }
+
+  /** The report seed, and a savings account in EUR. It held 1,000 EUR when March opened and 1,050 EUR when it closed, and holds 1,100 EUR now.
+    *
+    * The rates: 4.00 on Friday 27 February (the balance at the start of March is that of the end of Saturday 28 February, a day with no rate), 4.20
+    * on 31 March, and 4.50 on 12 June, the last rate before today. A rate before and one between them must not be taken.
+    */
+  private val foreignSeed: ConnectionIO[Unit] = {
+    def rate(day: String, rate: Long) =
+      sql"""INSERT INTO exchange_rates (from_currency, to_currency, on_date, rate, fetched_at)
+            VALUES ('EUR', 'PLN', $day, $rate, ${instant("2026-06-15T10:00:00Z")})""".update.run
+    for {
+      _ <- reportSeed
+      _ <- sql"""INSERT INTO accounts (id, name, currency, role, balance_cents, balance_source, balance_updated_at)
+                 VALUES ('eur', 'eur', 'EUR', 'savings', 110000, 'manual', ${instant("2026-06-10T10:00:00Z")})""".update.run
+      _ <- sql"""INSERT INTO balance_snapshots (id, account_id, amount, currency, recorded_at)
+                 VALUES ('e1', 'eur', 100000, 'EUR', ${instant("2026-03-01T07:00:00Z")})""".update.run
+      _ <- sql"""INSERT INTO balance_snapshots (id, account_id, amount, currency, recorded_at)
+                 VALUES ('e2', 'eur', 105000, 'EUR', ${instant("2026-03-31T12:00:00Z")})""".update.run
+      _ <- rate("2026-01-15", 39000)
+      _ <- rate("2026-02-27", 40000)
+      _ <- rate("2026-03-31", 42000)
+      _ <- rate("2026-04-15", 43000)
+      _ <- rate("2026-06-12", 45000)
+    } yield ()
+  }
+
+  "A foreign account" - {
+    "is valued at the rate of each boundary, and what the rate did is market result, not saving" in {
+      withDatabase(foreignSeed) { (service, _, _) =>
+        service.summaries(None).asserting { all =>
+          val march = all.find(_.period.id == PeriodId("march")).get
+          // The flow: 50 EUR at the end rate of 4.20. The currency effect: the 1,000 EUR of the start, at 4.20 and not at 4.00.
+          march.savingsChangeCents shouldBe 60000L + 21000L
+          march.savingsCurrencyEffectCents shouldBe 20000L
+          march.savingsEndCents shouldBe Some(560000L + 441000L)
+          march.savedCents shouldBe 30000L + 21000L
+          march.marketResultCents shouldBe -70000L + 20000L
+          // The open period: from 1,050 EUR at 4.20 to 1,100 EUR at 4.50, the rate of the last day with one.
+          val april = all.find(_.period.id == PeriodId("april")).get
+          april.savingsChangeCents shouldBe 20000L + 22500L
+          april.savingsCurrencyEffectCents shouldBe 31500L
+          april.savingsEndCents shouldBe Some(580000L + 495000L)
+          april.marketResultCents shouldBe 10000L + 31500L
+        }
+      }
+    }
+
+    "has with its baseline what the rate did to it since the period's start" in {
+      withDatabase(foreignSeed) { (service, _, _) =>
+        service.baselines.asserting { baselines =>
+          // 1,050 EUR at 4.50 now, against 4.20 at the start.
+          baselines.find(_.accountId == AccountId("eur")).map(b => (b.baseline, b.currencyEffectCents)) shouldBe
+            Some((Money(105000L, Currency.EUR), 31500L))
+        }
+      }
+    }
+  }
+
+  "The change of one account" - {
+    "is the flow at the end rate and the effect of the rate on the start balance, and the two add up to the change of value" in {
+      val rates  = RateTable(
+        Currency.PLN,
+        List(
+          ExchangeRate(Currency.EUR, Currency.PLN, 40000L, LocalDate.parse("2026-03-01"), instant("2026-03-01T17:00:00Z")),
+          ExchangeRate(Currency.EUR, Currency.PLN, 42000L, LocalDate.parse("2026-04-01"), instant("2026-04-01T17:00:00Z")),
+        ),
+      )
+      val change =
+        PeriodService.HeldChange.of(100000L, 90000L, Currency.EUR, LocalDate.parse("2026-03-01"), LocalDate.parse("2026-04-01"), rates)
+      change.flowCents shouldBe -42000L
+      change.currencyEffectCents shouldBe 20000L
+      change.totalCents shouldBe 378000L - 400000L
+      // An account in the primary currency has no currency effect.
+      PeriodService.HeldChange.of(100L, 150L, Currency.PLN, LocalDate.parse("2026-03-01"), LocalDate.parse("2026-04-01"), rates) shouldBe
+        PeriodService.HeldChange(50L, 50L)
     }
   }
 

@@ -105,10 +105,11 @@ object ServerBuilder {
       // Any job left Running by a previous process was interrupted by the restart — mark it Failed so the UI doesn't show a phantom in-progress run.
       _               <- Resource.eval(IO.realTimeInstant.flatMap(now => repos.importJobs.failRunning(now, "Interrupted by a server restart")))
       // Records the day's free-money components off ordinary traffic, and fills in whatever the suspended days missed.
-      snapshotting    <- Resource.eval(BudgetSnapshotTrigger.wrap(new BudgetSnapshotService(repos), supervisor))
+      currencyService  = new CurrencyService(repos, sttpBackend)
+      pass             = BudgetSnapshotTrigger.pass(currencyService.fillHistory(force = false).void, new BudgetSnapshotService(repos))
+      snapshotting    <- Resource.eval(BudgetSnapshotTrigger.wrap(pass, supervisor))
       server          <- {
         val passwordService  = PasswordService()
-        val currencyService  = new CurrencyService(repos, sttpBackend)
         val bankingService   = new BankingService(repos, ebClientOpt)
         val importService    = new TransactionImportService(repos, ebClientOpt, ruleEngine)
         val importJobService =

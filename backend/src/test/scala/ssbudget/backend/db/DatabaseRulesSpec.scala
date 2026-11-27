@@ -23,7 +23,8 @@ class DatabaseRulesSpec extends RepositorySpec {
 
   "a rate can be stored for a currency that is not enabled, and a transaction can outlive its connection" in {
     for {
-      _ <- sql"""INSERT INTO exchange_rates (from_currency, to_currency, rate, fetched_at) VALUES ('ISK', 'PLN', 300, ${Instant.now()})""".update.run
+      _ <- sql"""INSERT INTO exchange_rates (from_currency, to_currency, on_date, rate, fetched_at)
+                 VALUES ('ISK', 'PLN', '2026-11-27', 300, ${Instant.now()})""".update.run
              .transact(xa)
       _ <- sql"""INSERT INTO bank_transactions
                    (id, connection_id, eb_account_uid, dedup_key, amount_cents, currency, status, booked_at, raw_json, imported_at)

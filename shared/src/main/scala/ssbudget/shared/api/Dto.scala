@@ -22,8 +22,12 @@ final case class UpdateAccountBalance(newBalanceCents: Long) derives Codec.AsObj
   *
   * `movedCents` is for an investment account: the net amount moved INTO it in the current period (negative = withdrawn), in the PRIMARY currency,
   * read from the bank transactions of its transfer categories (see `Category.transferAccount`). The rest of the balance change is market result.
+  *
+  * `currencyEffectCents` is what the exchange rate did to the baseline since the period started, in the PRIMARY currency: the baseline at the rate of
+  * now, less the same at the rate of the period's start (`PeriodService.HeldChange`). Zero for an account in the primary currency. The market result
+  * holds it; the change in the account's own currency at the rate of now does not.
   */
-final case class AccountPeriodBaseline(accountId: AccountId, baseline: Money, movedCents: Long = 0) derives Codec.AsObject
+final case class AccountPeriodBaseline(accountId: AccountId, baseline: Money, currencyEffectCents: Long, movedCents: Long = 0) derives Codec.AsObject
 
 // Response DTOs
 final case class IdResponse(id: String) derives Codec.AsObject

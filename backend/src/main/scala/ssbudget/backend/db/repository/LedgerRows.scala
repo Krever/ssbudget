@@ -1,6 +1,6 @@
 package ssbudget.backend.db.repository
 
-import ssbudget.shared.model.{AccountId, CategoryId, Currency, PeriodId}
+import ssbudget.shared.model.{CategoryId, Currency, PeriodId}
 
 import java.time.Instant
 
@@ -10,12 +10,6 @@ import java.time.Instant
 
 /** An amount of one category in one currency. What the amount is (gross spend, or net) is in the method that gives it. */
 final case class CategoryAmount(category: CategoryId, currency: Currency, cents: Long)
-
-/** An amount of one app account in one currency. */
-final case class AccountAmount(account: AccountId, currency: Currency, cents: Long)
-
-/** An amount of one bank account (by its uid at the bank) in one currency. */
-final case class BankAccountAmount(accountUid: String, currency: Currency, cents: Long)
 
 /** The spend of one category in one month. `month` is 'YYYY-MM'. */
 final case class MonthlyCategoryAmount(category: CategoryId, currency: Currency, month: String, cents: Long)

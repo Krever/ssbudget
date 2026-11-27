@@ -52,8 +52,8 @@ class BudgetSnapshotServiceSpec extends AsyncFreeSpec with AsyncIOSpec with Matc
                  VALUES ('acc1', 'Main', 'PLN', 'spending', 85000, 'bank', ${at(today)})""".update.run
       _ <- sql"""INSERT INTO periods (id, started_at, expected_end, ended_at) VALUES ('per1', ${at(periodStart, 9)}, $periodEnd, NULL)""".update.run
       // 4 PLN/EUR on the books: 100 EUR of spend must count as 400 PLN, not as 100.
-      _ <- sql"""INSERT INTO exchange_rates (from_currency, to_currency, rate, fetched_at)
-                 VALUES ('EUR', 'PLN', 40000, ${at(periodStart, 1)})""".update.run
+      _ <- sql"""INSERT INTO exchange_rates (from_currency, to_currency, on_date, rate, fetched_at)
+                 VALUES ('EUR', 'PLN', $periodStart, 40000, ${at(periodStart, 1)})""".update.run
       // The only balance ever recorded: 1,000 PLN on the day the period opened.
       _ <- sql"""INSERT INTO balance_snapshots (id, account_id, amount, currency, recorded_at)
                  VALUES ('snap1', 'acc1', 100000, 'PLN', ${at(periodStart, 9)})""".update.run

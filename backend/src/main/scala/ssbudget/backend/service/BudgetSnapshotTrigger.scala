@@ -27,13 +27,23 @@ object BudgetSnapshotTrigger {
     */
   private val minInterval = 5.minutes
 
-  def wrap(service: BudgetSnapshotService, supervisor: Supervisor[IO]): IO[HttpRoutes[IO] => HttpRoutes[IO]] =
+  /** @param pass
+    *   one pass of the background work. It must not fail: it reports its own failures (see [[BackgroundHealth]]).
+    */
+  def wrap(pass: IO[Unit], supervisor: Supervisor[IO]): IO[HttpRoutes[IO] => HttpRoutes[IO]] =
     Ref.of[IO, Option[Instant]](None).map { lastRun => routes =>
-      HttpRoutes[IO](request => routes(request) <* OptionT.liftF(maybeRun(service, supervisor, lastRun)))
+      HttpRoutes[IO](request => routes(request) <* OptionT.liftF(maybeRun(pass, supervisor, lastRun)))
     }
 
+  /** The pass of the app: the history of the exchange rates first, so that the daily record converts with the rates of its days (see
+    * `CurrencyService.fillHistory`), then the daily record. A failure of the first does not stop the second.
+    */
+  def pass(fillRates: IO[Unit], service: BudgetSnapshotService): IO[Unit] =
+    BackgroundHealth.track(BackgroundHealth.Task.ExchangeRates)(fillRates).attempt.void *>
+      BackgroundHealth.track(BackgroundHealth.Task.DailyRecord)(service.ensureUpToDate).attempt.void
+
   /** Starts a pass unless one ran recently. The check and the stamp happen in a single `modify`, so concurrent requests cannot both win it. */
-  private def maybeRun(service: BudgetSnapshotService, supervisor: Supervisor[IO], lastRun: Ref[IO, Option[Instant]]): IO[Unit] =
+  private def maybeRun(pass: IO[Unit], supervisor: Supervisor[IO], lastRun: Ref[IO, Option[Instant]]): IO[Unit] =
     for {
       now <- IO.realTimeInstant
       due <- lastRun.modify {
@@ -41,12 +51,7 @@ object BudgetSnapshotTrigger {
                case _                                                                          => (Some(now), true)
              }
       _   <- IO.whenA(due) {
-               supervisor
-                 .supervise(
-                   // The failure is logged and kept by `BackgroundHealth`; here it only must not end the fiber with an error.
-                   BackgroundHealth.track(BackgroundHealth.Task.DailyRecord)(service.ensureUpToDate).attempt.void,
-                 )
-                 .void
+               supervisor.supervise(pass).void
              }
     } yield ()
 }

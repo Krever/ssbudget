@@ -22,6 +22,9 @@ trait BalanceSnapshotRepository {
     * period: it must not read the years before.
     */
   def findFrom(from: Instant): IO[List[BalanceSnapshot]]
+
+  /** When the oldest balance was recorded; None with no record. */
+  def firstRecordedAt: IO[Option[Instant]]
 }
 
 class BalanceSnapshotRepositoryImpl(xa: Transactor[IO]) extends BalanceSnapshotRepository {
@@ -71,4 +74,7 @@ class BalanceSnapshotRepositoryImpl(xa: Transactor[IO]) extends BalanceSnapshotR
       )
       ORDER BY recorded_at
     """.query[BalanceSnapshot].to[List].transact(xa)
+
+  override def firstRecordedAt: IO[Option[Instant]] =
+    sql"SELECT MIN(recorded_at) FROM balance_snapshots".query[Option[Instant]].unique.transact(xa)
 }

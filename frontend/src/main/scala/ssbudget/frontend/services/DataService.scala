@@ -1,7 +1,7 @@
 package ssbudget.frontend.services
 
 import com.raquo.laminar.api.L.*
-import ssbudget.shared.api.{CategorySummary, TransactionListResponse}
+import ssbudget.shared.api.{CategorySummary, PeriodSummary, TransactionListResponse}
 import ssbudget.shared.model.*
 
 import java.time.{LocalDate, ZoneOffset}
@@ -81,6 +81,10 @@ trait DataService {
   // Net amount moved into each investment account in the current period, in primary-currency cents (see AccountPeriodBaseline.movedCents).
   def investmentMoved: Signal[Map[AccountId, Long]]
 
+  // What the exchange rate did this period to the balance at period start of each savings and investment account, in primary-currency cents (see
+  // AccountPeriodBaseline.currencyEffectCents). Zero for an account in the primary currency.
+  def currencyEffects: Signal[Map[AccountId, Long]]
+
   // Derived signals
   def currentPeriod: Signal[Option[Period]]
 
@@ -131,6 +135,7 @@ trait DataService {
 
   /** Per savings-account balance change this period, in the account's own currency: current balance − [[savingsBaselines]]. Derived from the live
     * accounts signal, so it stays fresh as balances are edited or synced. No baseline → no entry (the change is unknowable, not zero). Informational.
+    * Valued at the rate of now, it is what came in and went out; what the rate did to the start balance is [[savingsCurrencyEffect]].
     */
   final def savingsPeriodDeltas: Signal[Map[AccountId, Money]] =
     savingsAccounts
@@ -154,20 +159,28 @@ trait DataService {
       .combineWith(primaryCurrency)
       .map { case (accounts, rates, primary) => DataService.sumInPrimary(accounts.map(_.balance), rates, primary) }
 
-  /** Per investment account, its balance change this period in its own currency. As [[savingsPeriodDeltas]]. */
-  final def investmentPeriodDeltas: Signal[Map[AccountId, Money]] =
+  /** The change of value of the investment accounts this period, in the primary currency: the change of the balance at the rate of now, plus what the
+    * rate did to the balance at the start ([[currencyEffects]]). It is what was moved plus what the market did.
+    */
+  final def investmentPeriodChange: Signal[Money] =
     investmentAccounts
       .combineWith(savingsBaselines)
-      .map { case (accounts, baselines) =>
-        accounts.flatMap(acc => baselines.get(acc.id).map(b => acc.id -> Money(acc.balanceCents - b.amountCents, acc.currency))).toMap
-      }
-
-  /** Balance change of the investment accounts this period, in the primary currency: what was moved plus what the market did. */
-  final def investmentPeriodChange: Signal[Money] =
-    investmentPeriodDeltas
+      .combineWith(currencyEffects)
       .combineWith(exchangeRates)
       .combineWith(primaryCurrency)
-      .map { case (deltas, rates, primary) => DataService.sumInPrimary(deltas.values.toSeq, rates, primary) }
+      .map { case (accounts, baselines, effects, rates, primary) =>
+        val withBaseline = accounts.flatMap(a => baselines.get(a.id).map(b => a -> b))
+        val flow         = DataService.sumInPrimary(withBaseline.map { case (a, b) => Money(a.balanceCents - b.amountCents, a.currency) }, rates, primary)
+        Money(flow.amountCents + withBaseline.map { case (a, _) => effects.getOrElse(a.id, 0L) }.sum, primary)
+      }
+
+  /** What the exchange rate did this period to the balances that the savings accounts had at its start, in the primary currency. It is not saving
+    * ([[savingsPeriodChange]] is valued at the rate of now, so it does not have it): it is a part of [[marketResult]].
+    */
+  final def savingsCurrencyEffect: Signal[Money] =
+    savingsAccounts.combineWith(currencyEffects).combineWith(primaryCurrency).map { case (accounts, effects, primary) =>
+      Money(accounts.flatMap(a => effects.get(a.id)).sum, primary)
+    }
 
   /** Net amount moved into the investment accounts this period (negative = withdrawn), in the primary currency. This part is saving. */
   final def investmentMovedTotal: Signal[Money] =
@@ -176,16 +189,19 @@ trait DataService {
       .combineWith(primaryCurrency)
       .map { case (accounts, moved, primary) => Money(accounts.map(a => moved.getOrElse(a.id, 0L)).sum, primary) }
 
-  /** What the market did to the investment accounts this period: their balance change less what was moved. Not saving. */
-  final def investmentMarketResult: Signal[Money] =
-    investmentPeriodChange.combineWith(investmentMovedTotal).map { case (change, moved) =>
-      Money(change.amountCents - moved.amountCents, change.currency)
+  /** The change of value this period that is not money moved: what the market did to the investment accounts (their change less what was moved), and
+    * what the rate did to the foreign savings accounts ([[savingsCurrencyEffect]]). Not saving. With [[savedThisPeriod]] it makes the change of value
+    * of the savings and investment accounts.
+    */
+  final def marketResult: Signal[Money] =
+    investmentPeriodChange.combineWith(investmentMovedTotal).combineWith(savingsCurrencyEffect).map { case (change, moved, currency) =>
+      Money(PeriodSummary.marketResult(change.amountCents, moved.amountCents, currency.amountCents), change.currency)
     }
 
   /** What was saved this period: the change of the savings accounts plus what was moved into the investment accounts. */
   final def savedThisPeriod: Signal[Money] =
     savingsPeriodChange.combineWith(investmentMovedTotal).map { case (change, moved) =>
-      Money(change.amountCents + moved.amountCents, change.currency)
+      Money(PeriodSummary.saved(change.amountCents, moved.amountCents), change.currency)
     }
 
   /** Signed remaining per category budget, in the primary currency: positive is still to be spent, negative is still expected to arrive (see

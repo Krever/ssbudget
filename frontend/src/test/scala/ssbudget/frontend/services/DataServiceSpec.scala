@@ -51,6 +51,8 @@ class DataServiceSpec extends AnyFreeSpec with Matchers {
       Val(Map(AccountId("s-pln") -> Money(250000L, PLN), AccountId("s-eur") -> Money(90000L, EUR), AccountId("inv") -> Money(700000L, PLN)))
     // Of the 1000.00 that the investment grew, 600.00 was a deposit.
     val investmentMoved: Signal[Map[AccountId, Long]]   = Val(Map(AccountId("inv") -> 60000L))
+    // The EUR was 3.80 when the period started, and is 4 now: the 900.00 EUR of the start gained 180.00. The server gives this figure.
+    val currencyEffects: Signal[Map[AccountId, Long]]   = Val(Map(AccountId("s-pln") -> 0L, AccountId("s-eur") -> 18000L, AccountId("inv") -> 0L))
 
     val exchangeRates: Signal[Map[Currency, Double]] = Val(Map(EUR -> 4.0))
     val primaryCurrency: Signal[Currency]            = Val(PLN)
@@ -108,10 +110,14 @@ class DataServiceSpec extends AnyFreeSpec with Matchers {
       now(data.savingsBalance) shouldBe Money(700000L, PLN)
     }
 
-    "the change of an investment is split into what was moved and the market result" in {
+    "the currency effect of the savings accounts is the sum of what the server gives for each" in {
+      now(data.savingsCurrencyEffect) shouldBe Money(18000L, PLN)
+    }
+
+    "the market result is the change of an investment less what was moved, plus the currency effect" in {
       now(data.investmentPeriodChange) shouldBe Money(100000L, PLN)
       now(data.investmentMovedTotal) shouldBe Money(60000L, PLN)
-      now(data.investmentMarketResult) shouldBe Money(40000L, PLN)
+      now(data.marketResult) shouldBe Money(40000L + 18000L, PLN)
     }
 
     "saved is the change of the savings accounts plus what was moved into investments, with no market result" in {

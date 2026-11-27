@@ -4,7 +4,6 @@ import cats.effect.IO
 import cats.implicits.*
 import ssbudget.backend.db.Repositories
 import ssbudget.backend.db.repository.DailyFlow
-import ssbudget.backend.service.BudgetQueries.*
 import ssbudget.shared.api.*
 import ssbudget.shared.model.*
 
@@ -71,79 +70,68 @@ class PeriodService(repos: Repositories, clock: AppClock = AppClock.system) {
       accounts  <- repos.accounts.findAll
       periodOpt <- repos.periods.findCurrent
       baselines <- periodOpt.toList.flatTraverse { p =>
-                     val savings = accounts.filter(a => AccountRole.held(a.role))
+                     val held   = accounts.filter(a => AccountRole.held(a.role))
                      // The balance at the period's start. An account whose first balance was recorded after that start (bank balances are
                      // recorded on sync, so this is usual for a new link) gets it from the ledger: see [[BalanceHistory]].
-                     val window  = PeriodWindow.of(p)
+                     val window = PeriodWindow.of(p)
                      for {
-                       history   <- BalanceHistory.load(repos, savings, clock)
-                       converter <- primaryConverter(repos)
-                       moved     <- movedToInvestments(converter._2)(window.from, window.until)
-                     } yield savings.flatMap { acc =>
-                       history
-                         .asOf(acc.id, p.startDate)
-                         .map(b =>
-                           AccountPeriodBaseline(
-                             acc.id,
-                             Money(b, acc.currency),
-                             // "Moved" is a figure of investment accounts only.
-                             if acc.role == AccountRole.Investment then moved.getOrElse(acc.id, 0L) else 0L,
-                           ),
-                         )
+                       history  <- BalanceHistory.load(repos, held, clock)
+                       today    <- clock.today
+                       rates    <- RateTable.load(repos)
+                       cats     <- repos.categories.findAll
+                       flows    <- repos.bankTransactions.dailyFlowsSince(window.from)
+                       uidIndex <- BalanceHistory.accountUidIndex(repos)
+                     } yield {
+                       val moved = movedInto(flows.filter(f => window.holds(f.day)), transferAccounts(cats), uidIndex, rates)
+                       held.flatMap { acc =>
+                         history
+                           .asOf(acc.id, p.startDate)
+                           .map(b =>
+                             AccountPeriodBaseline(
+                               acc.id,
+                               Money(b, acc.currency),
+                               // The rate of now against the rate of the day that the baseline is of. It does not depend on the live balance.
+                               currencyEffectCents = HeldChange
+                                 .of(b, acc.balanceCents, acc.currency, PeriodWindow.lastLedgerDayBefore(p.startDate), today, rates)
+                                 .currencyEffectCents,
+                               // "Moved" is a figure of investment accounts only.
+                               movedCents = if acc.role == AccountRole.Investment then moved.getOrElse(acc.id, 0L) else 0L,
+                             ),
+                           )
+                       }
                      }
                    }
     } yield baselines
 
-  /** The net amount moved INTO each investment account over `[from, to)`, in the primary currency. Negative = taken out. It has two sources:
-    *   - the transfer categories of the account: the opposite of what the bank side shows (a withdrawal arrives at the bank);
-    *   - the account's own ledger, when it has one (for example card payments imported from a statement of the broker): its non-internal net, with
-    *     its own sign. A payment from the account is money taken out of the investment, and it is spend as on any other account.
-    *
-    * The map has an entry for other accounts with a ledger too. Callers read only the investment accounts.
-    */
-  private def movedToInvestments(toPrimary: (Long, Currency) => Long)(
-      from: Instant,
-      to: Option[Instant],
-  ): IO[Map[AccountId, Long]] =
-    for {
-      transfers <- repos.bankTransactions.transfersByAccountBetween(from, to)
-      ownLedger <- repos.bankTransactions.netByAccountBetween(from, to)
-      uidIndex  <- BalanceHistory.accountUidIndex(repos)
-    } yield {
-      val viaCategories = transfers.map(t => t.account -> -toPrimary(t.cents, t.currency))
-      val viaLedger     = ownLedger.flatMap(l => uidIndex.get(l.accountUid).map(_ -> toPrimary(l.cents, l.currency)))
-      (viaCategories ++ viaLedger).groupMapReduce(_._1)(_._2)(_ + _)
-    }
-
   /** Per-period retrospective, newest first. See [[PeriodSummary]] for what each figure means and where it comes from. */
   def summaries(limitOpt: Option[Int]): IO[List[PeriodSummary]] =
     for {
-      all       <- repos.periods.findAll
-      periods    = all.sortBy(_.startDate.toEpochMilli).reverse.take(limitOpt.filter(_ > 0).getOrElse(periodSummaryDefaultCount).min(60))
-      accounts  <- repos.accounts.findAll
-      cats      <- repos.categories.findAll
-      converter <- primaryConverter(repos)
+      all      <- repos.periods.findAll
+      periods   = all.sortBy(_.startDate.toEpochMilli).reverse.take(limitOpt.filter(_ > 0).getOrElse(periodSummaryDefaultCount).min(60))
+      accounts <- repos.accounts.findAll
+      cats     <- repos.categories.findAll
+      rates    <- RateTable.load(repos)
       // Every period needs each account's balance at two instants. The history of each account is read ONCE here, and the boundaries are resolved
       // in memory.
-      history   <- BalanceHistory.load(repos, accounts, clock)
-      now       <- clock.now
+      history  <- BalanceHistory.load(repos, accounts, clock)
+      now      <- clock.now
+      today    <- clock.today
       // The entries of all listed periods are read ONCE too, and each period sums the rows of its own days. With a set of queries for each
       // period, a page of 16 periods ran about 200 statements on the one database connection.
-      flows     <- periods.map(PeriodWindow.of(_).from).minOption.fold(IO.pure(List.empty[DailyFlow]))(repos.bankTransactions.dailyFlowsSince)
-      uidIndex  <- BalanceHistory.accountUidIndex(repos)
-    } yield periods.map(periodSummary(converter, accounts, cats, history, now, flows, uidIndex))
+      flows    <- periods.map(PeriodWindow.of(_).from).minOption.fold(IO.pure(List.empty[DailyFlow]))(repos.bankTransactions.dailyFlowsSince)
+      uidIndex <- BalanceHistory.accountUidIndex(repos)
+    } yield periods.map(periodSummary(rates, accounts, cats, history, now, today, flows, uidIndex))
 
   private def periodSummary(
-      converter: (Currency, (Long, Currency) => Long),
+      rates: RateTable,
       accounts: List[Account],
       cats: List[Category],
       history: BalanceHistory,
       now: Instant,
+      today: LocalDate,
       allFlows: List[DailyFlow],
       uidIndex: Map[String, AccountId],
   )(p: Period): PeriodSummary = {
-    val (primary, toPrimary) = converter
-
     val spending   = accounts.filter(_.role == AccountRole.Spending)
     val savings    = accounts.filter(_.role == AccountRole.Savings)
     val investment = accounts.filter(_.role == AccountRole.Investment)
@@ -154,52 +142,45 @@ class PeriodService(repos: Repositories, clock: AppClock = AppClock.system) {
     // ledger says the accounts did, and not zero. A running period has no end: its "balance at the end" is the live balance.
     def balanceAt(acc: Account, at: Option[Instant]): Option[Long] =
       at.fold(Option(acc.balanceCents))(history.asOf(acc.id, _))
-    // The change across the period and the balance at its end, for the accounts of one role. At today's rates, as every other figure of the
-    // summary. Thus the change of a foreign account is only what moved, not what the rate did.
-    def changeAndEnd(group: List[Account]): (Long, Option[Long])   = {
-      val change = group.map { acc =>
-        // None only for an account with no recorded balance at all.
-        (balanceAt(acc, Some(p.startDate)), balanceAt(acc, p.endDate)).mapN((start, end) => toPrimary(end - start, acc.currency)).getOrElse(0L)
-      }.sum
-      val ends   = group.flatMap(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
-      (change, Option.when(ends.nonEmpty)(ends.sum))
+    // Each balance is valued at the rate of the day that it is of: the start at the rate of the period's start, the end at the rate of its end
+    // (today, for the running period). So the net worth of a closed period stays what it was, and the change of a foreign account holds what
+    // the rate did (see [[HeldChange]]).
+    val startDay                                                   = PeriodWindow.lastLedgerDayBefore(p.startDate)
+    val endDay                                                     = p.endDate.fold(today)(PeriodWindow.lastLedgerDayBefore)
+    def endValue(acc: Account): Option[Long]                       = balanceAt(acc, p.endDate).map(rates.convert(_, acc.currency, endDay))
+    def changeOf(group: List[Account]): HeldChange                 =
+      group
+        .flatMap { acc =>
+          // None only for an account with no recorded balance at all.
+          (balanceAt(acc, Some(p.startDate)), balanceAt(acc, p.endDate))
+            .mapN((start, end) => HeldChange.of(start, end, acc.currency, startDay, endDay, rates))
+        }
+        .foldLeft(HeldChange.zero)(_ + _)
+    def endOf(group: List[Account]): Option[Long]                  = {
+      val ends = group.flatMap(endValue)
+      Option.when(ends.nonEmpty)(ends.sum)
     }
-    val (savingsDelta, savingsEnd)                                 = changeAndEnd(savings)
-    val (investmentDelta, investmentEnd)                           = changeAndEnd(investment)
-    val endBalances                                                = spending.map(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
-    val holdingEnds                                                = holding.flatMap(acc => balanceAt(acc, p.endDate).map(toPrimary(_, acc.currency)))
+    val savingsChange                                              = changeOf(savings)
+    val investmentChange                                           = changeOf(investment)
+    val endBalances                                                = spending.map(endValue)
+    val holdingEnds                                                = holding.flatMap(endValue)
 
     // The entries of this period: those of its days (see [[PeriodWindow]]).
     val rows = allFlows.filter(f => PeriodWindow.of(p).holds(f.day))
 
     // A transfer category stands for the transfers to and from one investment account: neither income nor spend.
-    val transferAccount                                                                                 = cats.flatMap(c => c.transferAccount.map(c.id -> _)).toMap
-    def isTransfer(f: DailyFlow): Boolean                                                               = f.category.exists(transferAccount.contains)
-    // Each sum is made in the currency of the entries first and converted one time, as a query with GROUP BY currency does.
-    def inPrimary[K](of: List[DailyFlow])(key: DailyFlow => K)(amount: DailyFlow => Long): Map[K, Long] =
-      of.groupMapReduce(f => (key(f), f.currency))(amount)(_ + _)
-        .toList
-        .groupMapReduce(_._1._1) { case ((_, currency), cents) =>
-          toPrimary(cents, currency)
-        }(_ + _)
+    val transferAccount                   = transferAccounts(cats)
+    def isTransfer(f: DailyFlow): Boolean = f.category.exists(transferAccount.contains)
 
     val cash         = rows.filterNot(isTransfer)
-    val inflowCents  = inPrimary(cash)(_ => ())(_.inflow).getOrElse((), 0L)
-    val outflowCents = inPrimary(cash)(_ => ())(_.outflow).getOrElse((), 0L)
+    val inflowCents  = inPrimary(cash, rates)(_ => ())(_.inflow).getOrElse((), 0L)
+    val outflowCents = inPrimary(cash, rates)(_ => ())(_.outflow).getOrElse((), 0L)
 
-    // What was moved INTO each investment account (see [[movedToInvestments]], which answers the same for one window with queries): the
-    // opposite of what the bank side shows in its transfer categories, plus the net of its own ledger.
-    val viaCategories = inPrimary(
-      rows.filter(f => isTransfer(f) && !f.category.flatMap(transferAccount.get).exists(uidIndex.get(f.accountUid).contains)),
-    )(f => transferAccount(f.category.get))(_.net).view.mapValues(-_).toMap
-    val viaLedger     = inPrimary(rows.filter(f => uidIndex.contains(f.accountUid)))(_.accountUid)(_.net).toList.groupMapReduce { case (uid, _) =>
-      uidIndex(uid)
-    }(_._2)(_ + _)
-    val moved         = (viaCategories.toList ++ viaLedger.toList).groupMapReduce(_._1)(_._2)(_ + _)
+    val moved = movedInto(rows, transferAccount, uidIndex, rates)
 
     // Spend by category: what went out, refunds not taken off. A deposit to an investment account is not spend, so a transfer category has
     // no place in the breakdown.
-    val spentByCategory = inPrimary(rows.filter(f => f.category.isDefined && !isTransfer(f)))(_.category.get)(_.outflow)
+    val spentByCategory = inPrimary(rows.filter(f => f.category.isDefined && !isTransfer(f)), rates)(_.category.get)(_.outflow)
 
     {
       val catIndex      = cats.map(c => c.id -> c).toMap
@@ -212,14 +193,15 @@ class PeriodService(repos: Repositories, clock: AppClock = AppClock.system) {
       PeriodSummary(
         period = p,
         days = periodDays(p, now),
-        currency = primary,
+        currency = rates.primary,
         inflowCents = inflowCents,
         outflowCents = outflowCents,
-        savingsChangeCents = savingsDelta,
-        savingsEndCents = savingsEnd,
-        investmentChangeCents = investmentDelta,
+        savingsChangeCents = savingsChange.flowCents,
+        savingsCurrencyEffectCents = savingsChange.currencyEffectCents,
+        savingsEndCents = endOf(savings),
+        investmentChangeCents = investmentChange.totalCents,
         investmentMovedCents = investment.map(acc => moved.getOrElse(acc.id, 0L)).sum,
-        investmentEndCents = investmentEnd,
+        investmentEndCents = endOf(investment),
         // Partial by design: accounts without a snapshot that early are left out rather than sinking the whole figure to None.
         endBalanceCents = Option.when(endBalances.exists(_.isDefined))(endBalances.flatten.sum),
         holdingEndCents = Option.when(holdingEnds.nonEmpty)(holdingEnds.sum),
@@ -230,6 +212,57 @@ class PeriodService(repos: Repositories, clock: AppClock = AppClock.system) {
 }
 
 object PeriodService {
+
+  /** The change of the primary-currency value of an account (or of a group) across a period, in two parts:
+    *
+    * `value at end − value at start = (end − start) × end rate + start × (end rate − start rate)`
+    *
+    * The first part, [[flowCents]], is what came in and went out, valued at the rate of the end. The second, [[currencyEffectCents]], is what the
+    * rate did to the balance that the account had at the start. For an account in the primary currency it is zero. "Saved" counts the flow of the
+    * savings accounts; the currency effect is part of the market result.
+    */
+  final case class HeldChange(flowCents: Long, totalCents: Long) {
+    def currencyEffectCents: Long        = totalCents - flowCents
+    def +(other: HeldChange): HeldChange = HeldChange(flowCents + other.flowCents, totalCents + other.totalCents)
+  }
+
+  object HeldChange {
+    val zero: HeldChange = HeldChange(0L, 0L)
+
+    /** `startCents` and `endCents` are in `currency`; `startDay` and `endDay` are the days that the two balances are of. */
+    def of(startCents: Long, endCents: Long, currency: Currency, startDay: LocalDate, endDay: LocalDate, rates: RateTable): HeldChange =
+      HeldChange(
+        flowCents = rates.convert(endCents - startCents, currency, endDay),
+        totalCents = rates.convert(endCents, currency, endDay) - rates.convert(startCents, currency, startDay),
+      )
+  }
+
+  /** transfer category -> the investment account whose deposits and withdrawals it holds. */
+  private def transferAccounts(cats: List[Category]): Map[CategoryId, AccountId] = cats.flatMap(c => c.transferAccount.map(c.id -> _)).toMap
+
+  /** Sums of `rows` in the primary currency, by `key`. Each amount is converted at the rate of its own day. */
+  private def inPrimary[K](rows: List[DailyFlow], rates: RateTable)(key: DailyFlow => K)(amount: DailyFlow => Long): Map[K, Long] =
+    rows.groupMapReduce(key)(f => rates.convert(amount(f), f.currency, f.day))(_ + _)
+
+  /** The net amount moved INTO each investment account by the entries `rows`, in the primary currency. Negative = taken out. It has two sources:
+    *   - the transfer categories of the account: the opposite of what the bank side shows (a withdrawal arrives at the bank). An entry on the
+    *     account's own ledger is not counted here: it is a movement of that account, and the second source has it;
+    *   - the account's own ledger, when it has one (for example card payments imported from a statement of the broker): its non-internal net, with
+    *     its own sign. A payment from the account is money taken out of the investment, and it is spend as on any other account.
+    *
+    * The map has an entry for other accounts with a ledger too. Callers read only the investment accounts.
+    */
+  private def movedInto(
+      rows: List[DailyFlow],
+      transferAccount: Map[CategoryId, AccountId],
+      uidIndex: Map[String, AccountId],
+      rates: RateTable,
+  ): Map[AccountId, Long] = {
+    val target        = (f: DailyFlow) => f.category.flatMap(transferAccount.get)
+    val viaCategories = inPrimary(rows.filter(f => target(f).exists(acc => !uidIndex.get(f.accountUid).contains(acc))), rates)(target(_).get)(-_.net)
+    val viaLedger     = inPrimary(rows.filter(f => uidIndex.contains(f.accountUid)), rates)(f => uidIndex(f.accountUid))(_.net)
+    (viaCategories.toList ++ viaLedger.toList).groupMapReduce(_._1)(_._2)(_ + _)
+  }
 
   /** How many periods the retrospective summarizes when the client doesn't ask for a number. Each period costs a handful of aggregate queries, so
     * this is capped rather than unbounded.

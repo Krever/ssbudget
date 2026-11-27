@@ -442,16 +442,17 @@ object DashboardPage {
     dataService.accounts
       .combineWith(dataService.savingsBaselines)
       .combineWith(dataService.investmentMoved)
+      .combineWith(dataService.currencyEffects)
       .combineWith(dataService.exchangeRates)
       .combineWith(dataService.primaryCurrency)
       .combineWith(isEditingBalances.signal)
       .combineWith(showSmallAccounts.signal)
-      .map { case (accounts, baselines, moved, rates, primary, isEditing, showSmall) =>
+      .map { case (accounts, baselines, moved, effects, rates, primary, isEditing, showSmall) =>
         // While the balances are edited, the rows stay as they are. A refresh of the data (it arrives a moment after each page load, and after a
         // sync) would make new input fields, and what was typed would be lost. Only a change of the list of accounts makes new rows.
         val editKey = Option.when(isEditing)(accounts.map(_.id))
         editRows.filter(_ => editKey.nonEmpty && editRowsKey == editKey).getOrElse {
-          val rows = ledgerRowsOf(accounts, baselines, moved, rates, primary, isEditing, showSmall)
+          val rows = ledgerRowsOf(accounts, baselines, moved, effects, rates, primary, isEditing, showSmall)
           editRowsKey = editKey
           editRows = Option.when(isEditing)(rows)
           rows
@@ -466,6 +467,7 @@ object DashboardPage {
       accounts: List[Account],
       baselines: Map[AccountId, Money],
       moved: Map[AccountId, Long],
+      effects: Map[AccountId, Long],
       rates: Map[Currency, Double],
       primary: Currency,
       isEditing: Boolean,
@@ -474,8 +476,12 @@ object DashboardPage {
     def inPrimary(cents: Long, currency: Currency): Long =
       MoneyFormatter.convertToPrimary(Money(cents, currency), primary, rates).amountCents
     def balance(a: Account): Long                        = inPrimary(a.balanceCents, a.currency)
-    // The change of the period, in the primary currency. No recorded balance at the period's start: no figure, which is not zero.
+    // The change of the period, in the primary currency, at the rate of now: what came in and went out. No recorded balance at the period's
+    // start: no figure, which is not zero.
     def change(a: Account): Option[Long]                 = baselines.get(a.id).map(b => inPrimary(a.balanceCents - b.amountCents, a.currency))
+    // The change of value: that change, and what the rate did to the balance at the start (zero in the primary currency). The second part is in
+    // the market result, not in "saved".
+    def valueChange(a: Account): Option[Long]            = change(a).map(_ + effects.getOrElse(a.id, 0L))
     def of(role: AccountRole): List[Account]             = accounts.filter(_.role == role)
 
     def groupRow(key: String, label: String, group: List[Account], groupChange: Option[Long]): HtmlElement =
@@ -518,7 +524,21 @@ object DashboardPage {
     def accountRow(a: Account, changeCell: HtmlElement): HtmlElement =
       tr(cls := (if isEditing && a.isManual then "table-info" else ""), nameCell(a), changeCell, balanceCell(a))
 
-    def changeCell(a: Account): HtmlElement = td(cls := "ledger-num", change(a).filter(_ != 0).map(signedSpan))
+    // A foreign savings account also shows what the rate did, under the change: that part is in the market result.
+    def changeCell(a: Account): HtmlElement = td(
+      cls := "ledger-num",
+      change(a).filter(_ != 0).map(signedSpan),
+      effects
+        .get(a.id)
+        .filter(_ != 0)
+        .map(fx =>
+          span(
+            cls   := "ledger-sub",
+            title := "What the exchange rate did to the balance at the start of the period",
+            s"rate ${MoneyFormatter.formatSigned(fx)}",
+          ),
+        ),
+    )
 
     // Spending: no change figure. The balance change of a spending account is only the paycheck less the spend. Small balances fold into one line.
     val spending                                                                = of(AccountRole.Spending)
@@ -554,9 +574,9 @@ object DashboardPage {
     val investmentRows =
       if investments.isEmpty then Nil
       else {
-        groupRow("investments", "Investments", investments, Some(investments.flatMap(change).sum)) ::
+        groupRow("investments", "Investments", investments, Some(investments.flatMap(valueChange).sum)) ::
           investments.map { a =>
-            val cell = change(a) match {
+            val cell = valueChange(a) match {
               case None    => td()
               case Some(c) =>
                 val movedIn = moved.getOrElse(a.id, 0L)
@@ -570,7 +590,8 @@ object DashboardPage {
                   ),
                   span(
                     cls   := "ledger-sub",
-                    title := "The change of value that is not a deposit, a withdrawal or a payment",
+                    title := "The change of value that is not a deposit, a withdrawal or a payment (for an account in another currency, with what the " +
+                      "exchange rate did)",
                     s"market ${MoneyFormatter.formatSigned(c - movedIn)}",
                   ),
                 )
@@ -595,9 +616,16 @@ object DashboardPage {
         div(cls := "ledger-note", child.text <-- note),
       )
     val hasInvestments                                                                                              = dataService.investmentAccounts.map(_.nonEmpty).distinct
+    // The market result says something when there is an investment, or a savings account in another currency (the rate moves its value).
+    val hasMarket                                                                                                   = hasInvestments
+      .combineWith(dataService.savingsAccounts)
+      .combineWith(dataService.primaryCurrency)
+      .map { case (has, savings, primary) => has || savings.exists(_.currency != primary) }
+      .distinct
     val saved                                                                                                       = cell(
       "Saved this period",
-      "The change of the savings accounts plus what was moved into the investment accounts. The market result is not in it.",
+      "The change of the savings accounts plus what was moved into the investment accounts, at the rate of now. The market result and what the " +
+        "exchange rate did are not in it.",
       dataService.savedThisPeriod,
       signed = true,
       dataService.savingsPeriodChange.combineWith(dataService.investmentMovedTotal).combineWith(hasInvestments).map { case (change, moved, has) =>
@@ -607,8 +635,9 @@ object DashboardPage {
     )
     val market                                                                                                      = cell(
       "Market result",
-      "The change of value of the investment accounts that is not a deposit, a withdrawal or a payment",
-      dataService.investmentMarketResult,
+      "The change of value that is not money moved: of the investment accounts, what is not a deposit, a withdrawal or a payment; and what the " +
+        "exchange rate did to the accounts in other currencies",
+      dataService.marketResult,
       signed = true,
       Val("not counted as saving"),
     )
@@ -619,7 +648,7 @@ object DashboardPage {
       signed = false,
       Val("all accounts"),
     )
-    div(cls := "ledger-summary", children <-- hasInvestments.map(has => if has then List(saved, market, netWorth) else List(saved, netWorth)))
+    div(cls := "ledger-summary", children <-- hasMarket.map(has => if has then List(saved, market, netWorth) else List(saved, netWorth)))
   }
 
   private def startEditingBalances(): Unit = {

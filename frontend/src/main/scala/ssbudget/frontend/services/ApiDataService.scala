@@ -11,14 +11,14 @@ import scala.concurrent.{ExecutionContext, Future}
 class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends DataService {
 
   // Mutable state for all entities
-  private val accountsVar: Var[List[Account]]                     = Var(List.empty)
-  private val periodsVar: Var[List[Period]]                       = Var(List.empty)
-  private val exchangeRatesVar: Var[Map[Currency, Double]]        = Var(Map.empty)
-  private val currencySettingsVar: Var[List[CurrencySetting]]     = Var(List.empty)
-  private val availableCurrenciesVar: Var[List[(String, String)]] = Var(List.empty)
-  private val categorySummariesVar: Var[List[CategorySummary]]    = Var(List.empty)
-  private val investmentMovedVar: Var[Map[AccountId, Long]]       = Var(Map.empty) // net moved into each investment account, primary cents
-  private val savingsBaselinesVar: Var[Map[AccountId, Money]]     = Var(Map.empty) // per savings-account balance at period start, in account currency
+  private val accountsVar: Var[List[Account]]                          = Var(List.empty)
+  private val periodsVar: Var[List[Period]]                            = Var(List.empty)
+  private val exchangeRatesVar: Var[Map[Currency, Double]]             = Var(Map.empty)
+  private val currencySettingsVar: Var[List[CurrencySetting]]          = Var(List.empty)
+  private val availableCurrenciesVar: Var[List[(String, String)]]      = Var(List.empty)
+  private val categorySummariesVar: Var[List[CategorySummary]]         = Var(List.empty)
+  // Per savings and investment account: its balance at period start, what the rate did to it, and what was moved (see AccountPeriodBaseline).
+  private val baselinesVar: Var[Map[AccountId, AccountPeriodBaseline]] = Var(Map.empty)
 
   private val freeMoneyHistoryVar: Var[Map[PeriodId, List[FreeMoneyPoint]]]  = Var(Map.empty)
   override def freeMoneyHistory: Signal[Map[PeriodId, List[FreeMoneyPoint]]] = freeMoneyHistoryVar.signal
@@ -88,8 +88,7 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
       currencySettingsVar.set(currencySettings.currencies)
       availableCurrenciesVar.set(currencySettings.availableCurrencies.map(c => (c.code, c.name)))
       categorySummariesVar.set(categorySumms)
-      savingsBaselinesVar.set(baselines.map(b => b.accountId -> b.baseline).toMap)
-      investmentMovedVar.set(baselines.map(b => b.accountId -> b.movedCents).toMap)
+      baselinesVar.set(baselines.map(b => b.accountId -> b).toMap)
     }
   }
 
@@ -173,8 +172,9 @@ class ApiDataService(client: ApiClient)(implicit ec: ExecutionContext) extends D
         .flatMap(_ => client.categories.summaries().map(categorySummariesVar.set)),
     )
 
-  override def savingsBaselines: Signal[Map[AccountId, Money]] = savingsBaselinesVar.signal
-  override def investmentMoved: Signal[Map[AccountId, Long]]   = investmentMovedVar.signal
+  override def savingsBaselines: Signal[Map[AccountId, Money]] = baselinesVar.signal.map(_.view.mapValues(_.baseline).toMap)
+  override def investmentMoved: Signal[Map[AccountId, Long]]   = baselinesVar.signal.map(_.view.mapValues(_.movedCents).toMap)
+  override def currencyEffects: Signal[Map[AccountId, Long]]   = baselinesVar.signal.map(_.view.mapValues(_.currencyEffectCents).toMap)
 
   // Mutation methods
   private def upsertAccount(account: Account): Unit =

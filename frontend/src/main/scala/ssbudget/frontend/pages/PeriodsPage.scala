@@ -208,7 +208,8 @@ object PeriodsPage {
               th(
                 cls   := "text-end",
                 title := "What the market did to the investment accounts in the period (their change less what was moved; spend and income inside the " +
-                  "investment account are in it), and their value at its end",
+                  "investment account are in it) and what the exchange rate did to the accounts in other currencies, and the value of the investments " +
+                  "at its end",
                 "Market",
               ),
               th(cls  := "text-end", "End balance"),
@@ -275,10 +276,13 @@ object PeriodsPage {
         ),
         td(
           cls  := "text-end font-monospace text-nowrap",
-          // No investment account with a record: the column has nothing to say.
-          s.investmentEndCents.fold[Node](span(cls := "text-muted", "—")) { cents =>
-            span(span(cls := s"small ${amountCls(s.investmentMarketCents)}", signed(s.investmentMarketCents)), span(cls := "ms-2", money(cents)))
-          },
+          // No investment account with a record and no effect of a rate: the column has nothing to say.
+          if s.investmentEndCents.isEmpty && s.marketResultCents == 0 then span(cls := "text-muted", "—")
+          else
+            span(
+              span(cls := s"small ${amountCls(s.marketResultCents)}", signed(s.marketResultCents)),
+              s.investmentEndCents.fold(emptyNode)(cents => span(cls := "ms-2", money(cents))),
+            ),
         ),
         td(cls := "text-end font-monospace", s.endBalanceCents.fold("—")(money)),
         td(
